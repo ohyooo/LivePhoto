@@ -1,0 +1,10 @@
+upstream
+.gradle/
+.kotlin/
+**/build/
+.validation/
+.DS_Store
+# User-supplied local media; redistribution permission has not been recorded.
+/reference/video.mp4
+/reference/video.jpg
+/reference/livephoto.jpg
