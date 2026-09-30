@@ -14,6 +14,15 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
     val scopedProtocol = selectedBindings.flatMap { it.issues }.filter { it.layer == Layer.Protocol }
     val issues = session.inspection.issues.filter { it.layer != Layer.Protocol } + scopedProtocol
     val checks = mutableListOf<CheckResult>()
+    val auxiliaryRanges = session.inspection.layout.resources.filter { it.kind == ResourceKind.GainMap }.flatMap { it.extents }.map { it.range }.toSet()
+    val verifiedAuxiliary = session.gainMaps.map { it.range }.toSet()
+    val auxiliaryIssues = issues.filter { it.layer == Layer.Media && it.location?.range in auxiliaryRanges }
+    if (auxiliaryRanges.isNotEmpty() && (Layer.Structure in layers || Layer.Media in layers)) {
+        val complete = auxiliaryRanges.all { it in verifiedAuxiliary }
+        checks += CheckResult("auxiliary.jpeg", if (Layer.Structure in layers) Layer.Structure else Layer.Media,
+            if (auxiliaryIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (!complete || auxiliaryIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
+            if (complete) Coverage.Complete else if (verifiedAuxiliary.isNotEmpty()) Coverage.Partial else Coverage.NotRun, auxiliaryIssues)
+    }
     if (Layer.Structure in layers) {
         checks += CheckResult("jpeg.markers", Layer.Structure, if (session.jpeg == null) Verdict.Warning else Verdict.Valid,
             if (session.jpeg == null) Coverage.NotRun else Coverage.Complete)
@@ -35,8 +44,8 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
     }
     if (Layer.Media in layers) {
         val mediaIssues = issues.filter { it.layer == Layer.Media }
-        checks += CheckResult("media.structure", Layer.Media, if (mediaIssues.any { it.severity == Severity.Error }) Verdict.Invalid else Verdict.Valid,
-            if (session.videos.size == session.bindings.count { it.video != null } && session.videos.isNotEmpty()) Coverage.Complete else if (session.videos.isNotEmpty()) Coverage.Partial else Coverage.NotRun, mediaIssues)
+        checks += CheckResult("media.structure", Layer.Media, if (mediaIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (mediaIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
+            if (session.videos.size == session.bindings.count { it.video != null } && auxiliaryRanges.all { it in verifiedAuxiliary } && (session.videos.isNotEmpty() || auxiliaryRanges.isNotEmpty())) Coverage.Complete else if (session.videos.isNotEmpty() || verifiedAuxiliary.isNotEmpty()) Coverage.Partial else Coverage.NotRun, mediaIssues)
         checks += CheckResult("media.decode", Layer.Media, Verdict.Warning, Coverage.NotRun,
             listOf(Issue(IssueCode("CAPABILITY_UNSUPPORTED"), Severity.Warning, Layer.Media)))
     }

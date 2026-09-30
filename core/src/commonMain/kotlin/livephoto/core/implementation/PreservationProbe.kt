@@ -6,6 +6,7 @@ import livephoto.core.google.*
 import livephoto.core.jpeg.*
 import livephoto.core.xml.*
 import livephoto.core.xmp.*
+import livephoto.core.vivo.*
 
 /** Hashes JPEG coding bytes including frame/tables/scan headers and entropy, excluding APP/COM. */
 internal suspend fun codingDigest(session: SourceSession): Digest {
@@ -24,6 +25,10 @@ internal suspend fun codingDigest(session: SourceSession): Digest {
     var offset = 0uL
     for (segment in excluded) { feed(ByteRange(offset, segment.range.offset - offset)); offset = segment.range.endExclusive }
     feed(ByteRange(offset, jpeg.primary.endExclusive - offset))
+    for (gainMap in session.gainMaps) {
+        hash.update(unsignedBytes(gainMap.range.length, 8, Endian.Big))
+        hash.update(Bytes(sha256Range(session.reader, gainMap.range).orThrow().value.encodeToByteArray()))
+    }
     session.recheck()
     return hash.finish()
 }
@@ -69,6 +74,10 @@ internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraField
         for (node in element.children) when (node) {
             is XmlElement -> {
                 val name = node.name.expanded
+                if (authority && name == ExpandedName(CONTAINER_URI, "Directory") && session.bindings.any { it.protocol == ProtocolIds.VivoModern && it.items.size == 3 }) {
+                    visit(VivoJpegWriter.withoutMotion(node), false, depth + 1u, false)
+                    continue
+                }
                 if (authority && (name.uri == CAMERA_URI && name.local in requestedCameraFields || session.bindings.any { name in it.ownedProperties })) continue
                 val directSubject = authoritativeTree && !authority && element.name.expanded == ExpandedName(RDF_URI, "RDF") && node.name.expanded == ExpandedName(RDF_URI, "Description")
                 visit(node, directSubject, depth + 1u, directSubject || authoritativeTree && !authority && node.name.expanded == ExpandedName(RDF_URI, "RDF"))
@@ -88,7 +97,7 @@ internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraField
 internal fun exactRecords(id: AssetId, digest: Digest, role: AssetRole, metadataSafe: Boolean, videoVerified: Boolean, imageVerified: Boolean): List<GuaranteeRecord> = Guarantee.entries.map { guarantee ->
     val outcome = when (guarantee) {
         Guarantee.ExactExtraction -> GuaranteeOutcome.Verified
-        Guarantee.ImageDataPreserving -> if (role in setOf(AssetRole.PrimaryImage, AssetRole.Composite)) { if (imageVerified) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown } else GuaranteeOutcome.NotApplicable
+        Guarantee.ImageDataPreserving -> if (role in setOf(AssetRole.PrimaryImage, AssetRole.Composite, AssetRole.AuxiliaryImage)) { if (imageVerified) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown } else GuaranteeOutcome.NotApplicable
         Guarantee.BitstreamPreserving -> if (role == AssetRole.MotionVideo) { if (videoVerified) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown } else if (role == AssetRole.Composite && videoVerified) GuaranteeOutcome.Verified else GuaranteeOutcome.NotApplicable
         Guarantee.MetadataPreserving -> if (metadataSafe) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown
     }
@@ -101,7 +110,8 @@ internal suspend fun opaqueOffsetsPreserved(input: SourceSession, output: Source
     val stagedJpeg = output.jpeg ?: return false
     // An unparsed MakerNote may depend on later contents, not just positions. Only an exact
     // whole-carrier readback proves that these unknown associations remain unchanged.
-    if (originalJpeg.hasExif || input.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true) {
+    if (originalJpeg.hasExif || input.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true ||
+        input.gainMaps.any { gainMap -> gainMap.jpeg.segments.any { it.payloadKind == AppPayloadKind.Unknown && it.marker in 0xe0..0xef } }) {
         val originalSize = input.reader.identity().orThrow().size
         val stagedSize = output.reader.identity().orThrow().size
         if (originalSize != stagedSize || sha256Range(input.reader, ByteRange(0uL, originalSize)).orThrow() !=
@@ -109,5 +119,6 @@ internal suspend fun opaqueOffsetsPreserved(input: SourceSession, output: Source
     }
     val original = originalJpeg.segments.filter { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown }
     val staged = stagedJpeg.segments.filter { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown }
-    return original.map { it.range } == staged.map { it.range }
+    if (original.map { it.range } != staged.map { it.range }) return false
+    return true
 }

@@ -10,6 +10,7 @@ import livephoto.core.xml.*
 import livephoto.core.exif.*
 import livephoto.core.oplus.*
 import livephoto.core.samsung.*
+import livephoto.core.vivo.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
 internal class SourceSession private constructor(
@@ -22,6 +23,7 @@ internal class SourceSession private constructor(
     val inspection: InspectionResult,
     val exifComments: List<ExifCommentFacts> = emptyList(),
     val sef: SefDirectory? = null,
+    val gainMaps: List<GainMapFacts> = emptyList(),
 ) {
     val reader: BinaryReader get() = readers.single()
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
@@ -100,18 +102,36 @@ internal class SourceSession private constructor(
             val oplus = OplusReader.read(xmp, google, jpeg, identity, comment, budget).orThrow()
             val sef = SefReader.parse(reader, jpeg.primary.endExclusive, budget).orThrow()
             val samsung = sef?.let { SamsungJpegReader.bind(it, google, jpeg) }
+            val vivo = VivoReader.read(xmp, google, jpeg, identity, budget).orThrow()
             var bindings = google.map { binding ->
-                val vendor = samsung?.takeIf { it.video != null } ?: oplus?.takeIf { it.video != null }
+                val vendor = samsung?.takeIf { it.video != null } ?: oplus?.takeIf { it.video != null } ?: vivo?.takeIf { it.video != null }
                 if (vendor != null && binding.protocol == ProtocolIds.GoogleV2) binding.copy(video = vendor.video, compatibleBaseOf = vendor.protocol,
-                    issues = binding.issues + if (binding.video != vendor.video) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList())
+                    issues = binding.issues + if (binding.video != vendor.video) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList(),
+                    ownedProperties = if (vendor.protocol == ProtocolIds.VivoModern && vendor.items.size == 3) binding.ownedProperties - ExpandedName(CONTAINER_URI, "Directory") else binding.ownedProperties)
                 else binding
-            } + listOfNotNull(oplus, samsung)
+            } + listOfNotNull(oplus, samsung, vivo)
+            val gainMaps = mutableListOf<GainMapFacts>()
+            val auxiliaryIssues = mutableListOf<Issue>()
+            val auxiliaryRanges = bindings.flatMap { it.items }.filter { it.semantic == "GainMap" && it.mime == "image/jpeg" }.map { it.range }.distinct() +
+                if (bindings.isEmpty()) listOfNotNull(ordinaryGainMap(xmp, jpeg, identity, budget)) else emptyList()
+            for (range in auxiliaryRanges.distinct()) {
+                try { gainMaps += verifyGainMap(reader, range, budget) }
+                catch (fault: CoreFault) {
+                    if (fault.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED", "UNEXPECTED_EOF")) throw fault
+                    auxiliaryIssues += Issue(fault.error.code, if (fault.error.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER")) Severity.Warning else Severity.Error, Layer.Media, Location(source = identity.id, range = range))
+                }
+            }
+            bindings = bindings.map { binding ->
+                if (binding.protocol == ProtocolIds.VivoModern && binding.items.any { it.semantic == "GainMap" }) binding.copy(issues = binding.issues.filterNot { issue -> issue.location?.selector == "vivo:GainMap:jpeg-verification" && binding.items.filter { it.semantic == "GainMap" }.all { item -> gainMaps.any { it.range == item.range } } } + auxiliaryIssues)
+                else binding
+            }
             val videos = linkedMapOf<ProtocolId, VideoStructure>()
             val videoCache = linkedMapOf<ByteRange, CoreResult<VideoStructure>>()
             val issues = mutableListOf<Issue>()
             issues += xmp.issues
             issues += exifIssues
             issues += imageFacts.issues
+            issues += auxiliaryIssues
             for (binding in bindings) {
                 issues += binding.issues
                 val range = binding.video ?: continue
@@ -169,7 +189,11 @@ internal class SourceSession private constructor(
                 val indexRegion = Region(ResourceId("samsung:sef:index"), identity.id, ByteRange(sef.table.offset, sef.footer.endExclusive - sef.table.offset), ResourceKind.Trailer)
                 regions += indexRegion; resources += Resource(indexRegion.id, indexRegion.kind, listOf(indexRegion), false)
             }
-            val media = listOf(imageFacts) + videos.values.map(::videoFacts)
+            if (bindings.isEmpty()) for ((index, gainMap) in gainMaps.withIndex()) {
+                val region = Region(ResourceId("ordinary:gainmap:$index"), identity.id, gainMap.range, ResourceKind.GainMap)
+                regions += region; resources += Resource(region.id, region.kind, listOf(region), true)
+            }
+            val media = listOf(imageFacts) + videos.values.map(::videoFacts) + gainMaps.map { it.media }
             val metadata = mutableListOf<MetadataEntry>()
             if (sef != null) for ((index, record) in sef.records.withIndex()) {
                 budget.item(); budget.retain(96uL)
@@ -216,12 +240,17 @@ internal class SourceSession private constructor(
                     owner = if (entry.marker != null && oplus != null) Ownership.SourceProtocol else Ownership.Ordinary,
                     location = Location(source = identity.id, range = entry.entry.valueRange, selector = "exif:UserComment"), origin = FactOrigin.Parsed)
             }
-            if (jpeg.trailing.length != 0uL && bindings.none { it.video != null }) {
+            if (jpeg.trailing.length != 0uL && bindings.none { it.video != null } && gainMaps.isEmpty()) {
                 val region = Region(ResourceId("unknown-trailer"), identity.id, jpeg.trailing, ResourceKind.Trailer)
                 regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
             }
             val rangeGroups = resources.groupBy { resource -> resource.extents.map { it.source to it.range } }
             val shared = resources.map { resource -> budget.item(); budget.retain(64uL); resource.copy(sharedWith = rangeGroups.getValue(resource.extents.map { it.source to it.range }).map { it.id }.filter { it != resource.id }) }
+            val verifiedGainMapRanges = gainMaps.map { it.range }.toSet()
+            val relationships = shared.filter { resource -> resource.kind == ResourceKind.GainMap && resource.extents.singleOrNull()?.range in verifiedGainMapRanges }.map { resource ->
+                budget.item(); budget.retain(64uL)
+                Relationship(RelationshipKind.AuxiliaryOf, resource.id, ResourceId("primary"))
+            }
             val primaryBinding = bindings.firstOrNull { it.selector == primary }
             val parsedKey = primaryBinding?.key ?: if (disposition != Disposition.Ambiguous) KeyPhotoResult(rawFields = bindings.flatMap { it.key.rawFields }.distinct(), issues = bindings.flatMap { it.key.issues }.distinct()) else KeyPhotoResult()
             val key = if (primaryBinding?.protocol == ProtocolIds.GoogleV2 && parsedKey.position == null && parsedKey.issues.isEmpty() && videos[primaryBinding.protocol] != null) {
@@ -229,8 +258,8 @@ internal class SourceSession private constructor(
                 catch (_: CoreFault) { parsedKey }
             } else parsedKey
             reader.validateIdentity().orThrow()
-            val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared)), frozenList(media), frozenList(metadata), key, issues = frozenList(issues))
-            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef)
+            val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared), frozenList(relationships)), frozenList(media), frozenList(metadata), key, issues = frozenList(issues))
+            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef, frozenList(gainMaps))
         }
     }
 }
@@ -247,7 +276,7 @@ internal fun videoFacts(video: VideoStructure): MediaFacts = MediaFacts(
         width = track.width, height = track.height, origin = FactOrigin.Parsed) }, coverage = Coverage.Partial,
 )
 
-private suspend fun jpegFacts(reader: BinaryReader, jpeg: JpegStructure): MediaFacts {
+internal suspend fun jpegFacts(reader: BinaryReader, jpeg: JpegStructure): MediaFacts {
     val frames = jpeg.segments.filter { it.marker in setOf(0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf) }
     if (frames.size != 1) return MediaFacts(imageFormat = ImageFormat.Jpeg, mime = "image/jpeg", coverage = Coverage.Partial,
         issues = listOf(Issue(IssueCode(if (frames.isEmpty()) "CORRUPTED_CONTAINER" else "UNSUPPORTED_CONTAINER"), if (frames.isEmpty()) Severity.Error else Severity.Warning, Layer.Structure)))

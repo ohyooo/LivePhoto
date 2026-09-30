@@ -47,6 +47,19 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
+        if (target.protocol == ProtocolIds.VivoModern) {
+            val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg")) else target
+            if (actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
+            val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            val writes = setOf(Operation.Create, Operation.SplitClean)
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                when { operation in reads -> Implementation.Supported; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
+                conditions = listOf(Condition(ConditionOperator.Equals, "resourceGraph", Value.Text("complete-jpeg-optional-verified-jpeg-gainmap-mp4"))) +
+                    if (operation == Operation.Create) listOf(Condition(ConditionOperator.Equals, "inputImage", Value.Text("plain-jpeg-no-auxiliary-suffix"))) else if (operation == Operation.SplitClean)
+                        listOf(Condition(ConditionOperator.Equals, "auxiliaryDependencies", Value.Text("no-mpf-exif-extended-xmp-relocation"))) else emptyList(),
+                reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         if (target.protocol == ProtocolIds.Samsung) {
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-sef-mpv3")) else target
             if (actual.profile !in setOf(ProfileId("jpeg-sef-mpv3"), ProfileId("heic-sef-mpv2"))) return ProtocolRegistry.planned().capabilities(actual)

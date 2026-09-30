@@ -9,7 +9,7 @@ import livephoto.core.xmp.*
 
 /** Produces staging bytes only; publication belongs exclusively to the Core orchestrator. */
 internal object GoogleJpegWriter {
-    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList(), primaryPadding: ULong = 0uL): CoreResult<JpegRewritePlan> = attemptNow {
+    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList(), primaryPadding: ULong = 0uL, motionPadding: ULong? = null): CoreResult<JpegRewritePlan> = attemptNow {
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Google JPEG creation requires JPEG image content")
         val xmp = session.xmp!!
         if (session.bindings.isNotEmpty() && !strip) fail("SOURCE_ALREADY_LIVE", "Image contains source protocol bindings")
@@ -37,7 +37,7 @@ internal object GoogleJpegWriter {
         }
         var bytes = if (packet == null) XmpWriter.create(updates.filterValues { it != null }.mapValues { it.value!! }, context).orThrow()
             else XmpWriter.merge(packet, updates, context).orThrow()
-        if (target.protocol == ProtocolIds.GoogleV2) bytes = addDirectory(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context, primaryPadding)
+        if (target.protocol == ProtocolIds.GoogleV2) bytes = addDirectory(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context, primaryPadding, motionPadding)
         patch(jpeg, bytes, additionalPatches)
     }
 
@@ -104,12 +104,13 @@ internal object GoogleJpegWriter {
         return XmpReader.parse(XmlWriter.write(document, context).orThrow(), context).orThrow()
     }
 
-    private fun addDirectory(packet: XmpPacket, length: ULong, mime: String, context: Context, primaryPadding: ULong): Bytes {
+    private fun addDirectory(packet: XmpPacket, length: ULong, mime: String, context: Context, primaryPadding: ULong, motionPadding: ULong?): Bytes {
         fun name(prefix: String, uri: String, local: String): XmlName = XmlName("$prefix:$local", ExpandedName(uri, local))
         fun item(semantic: String, type: String, bytes: ULong?): XmlElement {
             val attributes = mutableListOf(XmlAttribute(name("i", ITEM_URI, "Semantic"), semantic), XmlAttribute(name("i", ITEM_URI, "Mime"), type))
             if (bytes != null) attributes += XmlAttribute(name("i", ITEM_URI, "Length"), bytes.toString())
             if (semantic == "Primary" && primaryPadding != 0uL) attributes += XmlAttribute(name("i", ITEM_URI, "Padding"), primaryPadding.toString())
+            if (semantic == "MotionPhoto" && motionPadding != null) attributes += XmlAttribute(name("i", ITEM_URI, "Padding"), motionPadding.toString())
             val content = XmlElement(name("c", CONTAINER_URI, "Item"), attributes, mapOf("c" to CONTAINER_URI, "i" to ITEM_URI), emptyList())
             return XmlElement(name("r", RDF_URI, "li"), listOf(XmlAttribute(name("r", RDF_URI, "parseType"), "Resource")), emptyMap(), listOf(content))
         }
