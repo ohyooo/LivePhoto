@@ -5,7 +5,7 @@ import livephoto.core.*
 internal enum class Endian { Big, Little }
 
 /** Random reads over a borrowed source, consistently bound to its first observed identity. */
-internal class BinaryReader(private val source: BinarySource, val context: Context) {
+internal class BinaryReader(val source: BinarySource, val context: Context) {
     private var frozenIdentity: SourceIdentity? = null
 
     suspend fun identity(): CoreResult<SourceIdentity> = attempt { checkIdentity() }

@@ -15,8 +15,7 @@ internal data class BmffBox(
 internal data class BmffFileType(val majorBrand: String, val minorVersion: UInt, val compatibleBrands: List<String>)
 
 /** Generic structural reader. Unknown payloads stay source ranges and are never recursively guessed. */
-internal class BmffReader(private val reader: BinaryReader) {
-    private val budget = ParseBudget(reader.context)
+internal class BmffReader(private val reader: BinaryReader, private val budget: ParseBudget = ParseBudget(reader.context)) {
 
     /** Caller supplies the exact parent payload and schema depth, including any profile-specific prefix. */
     suspend fun readBoxes(parent: ByteRange, depth: UInt = 0u): CoreResult<List<BmffBox>> = attempt {

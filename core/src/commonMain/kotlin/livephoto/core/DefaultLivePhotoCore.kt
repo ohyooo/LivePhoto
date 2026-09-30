@@ -1,0 +1,77 @@
+package livephoto.core
+
+import livephoto.core.binary.*
+import livephoto.core.bmff.*
+import livephoto.core.implementation.*
+
+/**
+ * Content-based Core facade. Inputs are borrowed and operations execute serial staging IO.
+ * Protocol handlers never publish; the transaction adapter owns final identity/atomicity guards.
+ */
+public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : LivePhotoCore {
+    override suspend fun detect(request: ReadRequest): CoreResult<DetectionResult> = attempt { session(request).inspection.detection }
+    override suspend fun inspect(request: ReadRequest): CoreResult<InspectionResult> = attempt { session(request).inspection }
+    override suspend fun getKeyPhotoPosition(request: ReadRequest): CoreResult<KeyPhotoResult> = attempt { session(request).inspection.keyPhoto }
+    override suspend fun analyze(request: AnalyzeRequest): CoreResult<AnalysisResult> = attempt {
+        val session = session(ReadRequest(request.input, request.context))
+        AnalysisResult(session.inspection, validateSession(session, request.layers).orThrow(),
+            CapabilitySet(if (session.inspection.detection.primaryProtocol != null) Availability.Conditional else Availability.Unsupported,
+                session.inspection.detection.primaryProtocol?.let { getProtocolCapabilities(it).operations } ?: emptyList()))
+    }
+    override suspend fun validate(request: ValidationRequest): CoreResult<ValidationReport> = attempt {
+        validateSession(session(ReadRequest(request.input, request.context)), request.layers, request.requiredChecks, request.target).orThrow()
+    }
+    override suspend fun validateStructure(request: ValidationRequest): CoreResult<ValidationReport> = validate(ValidationRequest(request.input, listOf(Layer.Structure), request.requiredChecks, request.target, request.context))
+    override suspend fun validateProtocol(request: ValidationRequest): CoreResult<ValidationReport> = validate(ValidationRequest(request.input, listOf(Layer.Protocol), request.requiredChecks, request.target, request.context))
+    override suspend fun validateMedia(request: ValidationRequest): CoreResult<ValidationReport> = validate(ValidationRequest(request.input, listOf(Layer.Media), request.requiredChecks, request.target, request.context))
+
+    override suspend fun create(request: CreateRequest): CoreResult<OperationResult> = GoogleOperations.create(request)
+    override suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = GoogleOperations.extract(request)
+    override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
+    override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = unavailable(request)
+    override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = unavailable(request)
+    override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun trim(request: TrimRequest): CoreResult<TrimResult> = unavailable(request)
+    override suspend fun remux(request: RemuxRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun transcode(request: TranscodeRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = attempt {
+        if (request.decodeCheck) fail("CAPABILITY_UNSUPPORTED", "Trusted-resource decoder orchestration is not yet implemented", Stage.Validate)
+        val session = session(ReadRequest(request.media.input, request.context))
+        if (request.media.snapshot != null && request.media.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Resource snapshot no longer matches input")
+        val resource = request.media.resourceId
+        if (resource == null || resource == ResourceId("primary")) return@attempt session.inspection.media.firstOrNull() ?: fail("UNSUPPORTED_CONTAINER", "No implemented media facts")
+        val binding = session.bindings.firstOrNull { videoId(it.protocol) == resource } ?: fail("INVALID_ARGUMENT", "Resource ID is not part of this source inspection")
+        videoFacts(session.videos[binding.protocol] ?: fail("CAPABILITY_UNSUPPORTED", "Resource did not pass video structural validation"))
+    }
+
+    override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
+        val actual = if (target.profile == null && target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) target.copy(profile = ProfileId("jpeg")) else target
+        if (actual.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
+        val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+        val writes = setOf(Operation.Create, Operation.SplitClean)
+        return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+            when (operation) { in reads -> Implementation.Supported; in writes -> Implementation.Experimental; else -> Implementation.Planned },
+            conditions = if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
+                Condition(ConditionOperator.Equals, "videoStructure", Value.Text("unfragmented-single-mdat-one-video-at-most-one-aac")),
+                Condition(ConditionOperator.Equals, "metadataDependencies", Value.Text("verified-plain-resource-directory-no-unsafe-relocation")))
+                else if (operation in reads) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg"))) else emptyList(),
+            reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
+            verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
+    }
+    override fun getMediaCapabilities(): MediaCapabilities = MediaCapabilities(backend?.capabilities()?.backendIds ?: emptyList(),
+        listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map { CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED"))) })
+    override suspend fun getOperationCapabilities(request: MutationRequest): CoreResult<CapabilitySet> = when (val result = plan(request)) {
+        is CoreResult.Success -> CoreResult.Success(result.value.capabilities)
+        is CoreResult.Failure -> if (result.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED")) result
+            else CoreResult.Success(CapabilitySet(Availability.Unsupported, emptyList(), listOf(Issue(result.error.code, Severity.Warning, Layer.Compatibility, result.error.location))))
+    }
+    override suspend fun plan(request: MutationRequest): CoreResult<ExecutionPlan> = GoogleOperations.plan(request)
+
+    private suspend fun session(request: ReadRequest): SourceSession = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
+    private fun <T> unavailable(request: MutationRequest): CoreResult<T> = attemptNow {
+        RequestValidation.validate(request).orThrow()
+        fail("CAPABILITY_PLANNED", "This operation has not been implemented by this Core", Stage.Plan)
+    }
+}

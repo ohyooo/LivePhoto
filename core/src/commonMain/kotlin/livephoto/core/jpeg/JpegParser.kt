@@ -18,13 +18,12 @@ internal data class JpegStructure(
 
 /** Indexes markers and entropy data without materializing the image or appended video. */
 internal object JpegParser {
-    suspend fun parse(reader: BinaryReader): CoreResult<JpegStructure> = attempt {
+    suspend fun parse(reader: BinaryReader, budget: ParseBudget = ParseBudget(reader.context)): CoreResult<JpegStructure> = attempt {
         val size = reader.identity().orThrow().size
         if (size < 2uL || reader.readBuffer(0uL, 2u).orThrow() != Bytes(byteArrayOf(0xff.toByte(), 0xd8.toByte()))) {
             fail("CORRUPTED_CONTAINER", "JPEG start-of-image marker is missing")
         }
         val scanner = Scanner(reader, size)
-        val budget = ParseBudget(reader.context)
         val segments = mutableListOf(JpegSegment(0xd8, ByteRange(0uL, 2uL)))
         val scans = mutableListOf<ByteRange>()
         var position = 2uL

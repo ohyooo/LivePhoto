@@ -80,10 +80,9 @@ internal object XmpReader {
         return XmpPacket(document, frozenList(subjects))
     }
 
-    suspend fun readJpeg(reader: BinaryReader, structure: JpegStructure): CoreResult<XmpCollection> = attempt {
+    suspend fun readJpeg(reader: BinaryReader, structure: JpegStructure, budget: ParseBudget = ParseBudget(reader.context)): CoreResult<XmpCollection> = attempt {
         val packets = mutableListOf<XmpPacket>()
         val extended = mutableListOf<ExtendedXmpChunk>()
-        val budget = ParseBudget(reader.context)
         for (segment in structure.segments) {
             val payload = segment.payload ?: continue
             when (segment.payloadKind) {
