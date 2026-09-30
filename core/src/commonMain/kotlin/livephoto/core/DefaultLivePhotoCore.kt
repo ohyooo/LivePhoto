@@ -47,6 +47,20 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
+        if (target.protocol == ProtocolIds.Samsung) {
+            val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-sef-mpv3")) else target
+            if (actual.profile !in setOf(ProfileId("jpeg-sef-mpv3"), ProfileId("heic-sef-mpv2"))) return ProtocolRegistry.planned().capabilities(actual)
+            val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            val jpeg = actual.profile == ProfileId("jpeg-sef-mpv3")
+            val writes = if (jpeg) setOf(Operation.Create, Operation.SplitClean) else emptySet()
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                when { operation in reads -> if (jpeg) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
+                conditions = listOf(Condition(ConditionOperator.Equals, "sefGraph", Value.Text("unique-complete-indexed-records-107"))) +
+                    if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
+                        listOf(Condition(ConditionOperator.Equals, "coverage", Value.Text("verified-box-media-ranges-heif-item-graph-not-run"))) else emptyList(),
+                reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         val actual = if (target.profile == null && target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus)) target.copy(profile = ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else "jpeg")) else target
         if (actual.protocol == ProtocolIds.Oplus && actual.profile in setOf(ProfileId("jpeg-no-tail"), ProfileId("oneplus-tail-bearing"))) {
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)

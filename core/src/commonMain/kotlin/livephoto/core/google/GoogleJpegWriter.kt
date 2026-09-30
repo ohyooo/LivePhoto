@@ -9,7 +9,7 @@ import livephoto.core.xmp.*
 
 /** Produces staging bytes only; publication belongs exclusively to the Core orchestrator. */
 internal object GoogleJpegWriter {
-    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList()): CoreResult<JpegRewritePlan> = attemptNow {
+    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList(), primaryPadding: ULong = 0uL): CoreResult<JpegRewritePlan> = attemptNow {
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Google JPEG creation requires JPEG image content")
         val xmp = session.xmp!!
         if (session.bindings.isNotEmpty() && !strip) fail("SOURCE_ALREADY_LIVE", "Image contains source protocol bindings")
@@ -37,11 +37,11 @@ internal object GoogleJpegWriter {
         }
         var bytes = if (packet == null) XmpWriter.create(updates.filterValues { it != null }.mapValues { it.value!! }, context).orThrow()
             else XmpWriter.merge(packet, updates, context).orThrow()
-        if (target.protocol == ProtocolIds.GoogleV2) bytes = addDirectory(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context)
+        if (target.protocol == ProtocolIds.GoogleV2) bytes = addDirectory(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context, primaryPadding)
         patch(jpeg, bytes, additionalPatches)
     }
 
-    fun cleanPlan(session: SourceSession, context: Context, additionalPatches: List<JpegPatch> = emptyList()): CoreResult<JpegRewritePlan> = attemptNow {
+    fun cleanPlan(session: SourceSession, context: Context, additionalPatches: List<JpegPatch> = emptyList(), verifiedSamsungPadding: Boolean = false): CoreResult<JpegRewritePlan> = attemptNow {
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Clean JPEG requires JPEG content")
         val xmp = session.xmp!!
         if (session.bindings.isEmpty()) {
@@ -50,7 +50,7 @@ internal object GoogleJpegWriter {
         }
         if (session.bindings.filter { it.compatibleBaseOf == null }.any { !it.structurallyValid }) fail("UNSAFE_METADATA_REWRITE", "Broken or conflicting bindings cannot authorize clean deletion")
         if (session.bindings.any { it.trailer != null }) fail("CAPABILITY_UNSUPPORTED", "Unknown vendor trailer cleanup has not been implemented")
-        if (session.bindings.any { it.padding?.length != null && it.padding.length != 0uL || it.items.size > 2 }) fail("GAINMAP_PRESERVATION_UNAVAILABLE", "Auxiliary resources and unknown padding require a verified clean relocation plan")
+        if (session.bindings.any { it.padding?.length != null && it.padding.length != 0uL && !(verifiedSamsungPadding && it.padding.length == 24uL && (it.protocol == ProtocolIds.Samsung || it.compatibleBaseOf == ProtocolIds.Samsung)) || it.items.size > 2 }) fail("GAINMAP_PRESERVATION_UNAVAILABLE", "Auxiliary resources and unknown padding require a verified clean relocation plan")
         if (!xmp.rewriteAllowed) fail("UNSAFE_METADATA_REWRITE", "Clean requires one complete ordinary XMP packet")
         val packet = if (session.bindings.any { it.protocol == ProtocolIds.GoogleV2 }) removeDirectory(xmp.packets.single(), context) else xmp.packets.single()
         val fields = session.bindings.flatMap { it.ownedProperties }.filter { it != ExpandedName(CONTAINER_URI, "Directory") }.toSet()
@@ -104,11 +104,12 @@ internal object GoogleJpegWriter {
         return XmpReader.parse(XmlWriter.write(document, context).orThrow(), context).orThrow()
     }
 
-    private fun addDirectory(packet: XmpPacket, length: ULong, mime: String, context: Context): Bytes {
+    private fun addDirectory(packet: XmpPacket, length: ULong, mime: String, context: Context, primaryPadding: ULong): Bytes {
         fun name(prefix: String, uri: String, local: String): XmlName = XmlName("$prefix:$local", ExpandedName(uri, local))
         fun item(semantic: String, type: String, bytes: ULong?): XmlElement {
             val attributes = mutableListOf(XmlAttribute(name("i", ITEM_URI, "Semantic"), semantic), XmlAttribute(name("i", ITEM_URI, "Mime"), type))
             if (bytes != null) attributes += XmlAttribute(name("i", ITEM_URI, "Length"), bytes.toString())
+            if (semantic == "Primary" && primaryPadding != 0uL) attributes += XmlAttribute(name("i", ITEM_URI, "Padding"), primaryPadding.toString())
             val content = XmlElement(name("c", CONTAINER_URI, "Item"), attributes, mapOf("c" to CONTAINER_URI, "i" to ITEM_URI), emptyList())
             return XmlElement(name("r", RDF_URI, "li"), listOf(XmlAttribute(name("r", RDF_URI, "parseType"), "Resource")), emptyMap(), listOf(content))
         }

@@ -36,6 +36,10 @@ internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraField
         text("raw:${segment.marker}")
         hash.update(Bytes(sha256Range(session.reader, segment.range).orThrow().value.encodeToByteArray()))
     }
+    for (record in session.sef?.records.orEmpty().filter { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) }.sortedWith(Comparator { a, b -> checkCancelled(session.reader.context); a.range.offset.compareTo(b.range.offset) })) {
+        text("ordinary-sef"); text(record.type.toString()); text(record.prefix.toString())
+        hash.update(Bytes(sha256Range(session.reader, record.range).orThrow().value.encodeToByteArray()))
+    }
     if (verifiedExifRewrite) for (facts in session.exifComments) {
         val document = facts.document
         val root = document.ifds.firstOrNull { it.relativeOffset == document.firstIfdOffset }
@@ -97,7 +101,7 @@ internal suspend fun opaqueOffsetsPreserved(input: SourceSession, output: Source
     val stagedJpeg = output.jpeg ?: return false
     // An unparsed MakerNote may depend on later contents, not just positions. Only an exact
     // whole-carrier readback proves that these unknown associations remain unchanged.
-    if (originalJpeg.hasExif) {
+    if (originalJpeg.hasExif || input.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true) {
         val originalSize = input.reader.identity().orThrow().size
         val stagedSize = output.reader.identity().orThrow().size
         if (originalSize != stagedSize || sha256Range(input.reader, ByteRange(0uL, originalSize)).orThrow() !=

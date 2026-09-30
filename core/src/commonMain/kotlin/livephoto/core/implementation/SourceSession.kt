@@ -9,6 +9,7 @@ import livephoto.core.xmp.*
 import livephoto.core.xml.*
 import livephoto.core.exif.*
 import livephoto.core.oplus.*
+import livephoto.core.samsung.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
 internal class SourceSession private constructor(
@@ -20,6 +21,7 @@ internal class SourceSession private constructor(
     val videos: Map<ProtocolId, VideoStructure>,
     val inspection: InspectionResult,
     val exifComments: List<ExifCommentFacts> = emptyList(),
+    val sef: SefDirectory? = null,
 ) {
     val reader: BinaryReader get() = readers.single()
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
@@ -46,6 +48,32 @@ internal class SourceSession private constructor(
             val identity = identities.single()
             val content = detectContent(reader).orThrow()
             if (content.kind != ContentKind.Jpeg) {
+                if (content.kind == ContentKind.IsoBmff && BmffBrandHint.Heic in content.brandHints) {
+                    val heic = SamsungHeicReader.read(reader, budget).orThrow()
+                    if (heic != null) {
+                        val binding = heic.binding
+                        val video = heic.video
+                        val strength = if (heic.directory.legacyDialect) MatchStrength.Legacy else if (video != null && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT", "UNSUPPORTED_CONTAINER") }) MatchStrength.Strong else MatchStrength.Weak
+                        val match = Match(binding.selector, strength, issues = binding.issues, resourceIds = listOf(videoId(binding.protocol)))
+                        val detection = DetectionResult(if (strength == MatchStrength.Strong) Disposition.Live else Disposition.Candidate, binding.selector, listOf(match), binding.issues, snapshot)
+                        val primaryRegion = Region(ResourceId("primary"), identity.id, heic.primary, ResourceKind.PrimaryImage)
+                        val videoRegion = Region(videoId(binding.protocol), identity.id, binding.video!!, ResourceKind.Video, binding.protocol)
+                        val regions = mutableListOf(primaryRegion, videoRegion)
+                        val resources = mutableListOf(Resource(primaryRegion.id, primaryRegion.kind, listOf(primaryRegion), false), Resource(videoRegion.id, videoRegion.kind, listOf(videoRegion), true))
+                        for ((index, record) in heic.directory.records.withIndex()) {
+                            budget.item(); budget.retain(96uL)
+                            val region = Region(ResourceId("samsung:sef:record:$index"), identity.id, record.range, ResourceKind.Trailer,
+                                if (record.type in setOf(0x0a30.toUShort(), 0x0a31.toUShort())) ProtocolIds.Samsung else null)
+                            regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
+                        }
+                        val media = listOf(MediaFacts(imageFormat = ImageFormat.Heic, mime = "image/heic", coverage = Coverage.Partial, issues = binding.issues.filter { it.layer == Layer.Structure })) + listOfNotNull(video?.let(::videoFacts))
+                        val metadata = listOf(MetadataEntry("samsung:mpv2:pointer-mode", value = heic.pointerMode?.let { Value.Text(it) }, owner = Ownership.SourceProtocol,
+                            location = Location(source = identity.id, range = heic.directory.motionRecord!!.payloadRange, selector = "samsung:mpv2:pointer-mode"), origin = FactOrigin.Parsed))
+                        val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources), media, metadata, binding.key, issues = binding.issues)
+                        reader.validateIdentity().orThrow()
+                        return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory)
+                    }
+                }
                 val detection = DetectionResult(Disposition.Unknown, matches = emptyList(), snapshot = snapshot)
                 val inspection = InspectionResult(snapshot, detection, Layout(identities, emptyList(), emptyList()), emptyList(), emptyList(), KeyPhotoResult())
                 return@attempt SourceSession(readers, snapshot, null, null, emptyList(), emptyMap(), inspection)
@@ -70,11 +98,14 @@ internal class SourceSession private constructor(
             val comments = exifComments.flatMap { it.comments }
             val comment = if (comments.size == 1) comments.single().text else null
             val oplus = OplusReader.read(xmp, google, jpeg, identity, comment, budget).orThrow()
+            val sef = SefReader.parse(reader, jpeg.primary.endExclusive, budget).orThrow()
+            val samsung = sef?.let { SamsungJpegReader.bind(it, google, jpeg) }
             var bindings = google.map { binding ->
-                if (oplus?.video != null && binding.protocol == ProtocolIds.GoogleV2) binding.copy(video = oplus.video, compatibleBaseOf = ProtocolIds.Oplus,
-                    issues = binding.issues + if (oplus.trailer != null) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList())
+                val vendor = samsung?.takeIf { it.video != null } ?: oplus?.takeIf { it.video != null }
+                if (vendor != null && binding.protocol == ProtocolIds.GoogleV2) binding.copy(video = vendor.video, compatibleBaseOf = vendor.protocol,
+                    issues = binding.issues + if (binding.video != vendor.video) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList())
                 else binding
-            } + listOfNotNull(oplus)
+            } + listOfNotNull(oplus, samsung)
             val videos = linkedMapOf<ProtocolId, VideoStructure>()
             val videoCache = linkedMapOf<ByteRange, CoreResult<VideoStructure>>()
             val issues = mutableListOf<Issue>()
@@ -100,7 +131,7 @@ internal class SourceSession private constructor(
                 binding.copy(issues = binding.issues + profileIssues)
             }
             val matches = bindings.map { binding -> Match(binding.selector,
-                if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
+                if (binding.protocol == ProtocolIds.Samsung && sef?.legacyDialect == true && binding.protocol in videos) MatchStrength.Legacy else if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
                 issues = binding.issues, resourceIds = if (binding.video != null) listOf(videoId(binding.protocol)) else emptyList()) }
             val strong = matches.filter { it.strength == MatchStrength.Strong }
             val conflicting = strong.mapNotNull { match -> bindings.first { it.selector == match.target }.video }.distinct().size > 1
@@ -130,8 +161,23 @@ internal class SourceSession private constructor(
                     regions += region; resources += Resource(region.id, region.kind, listOf(region), true)
                 }
             }
+            if (sef != null) {
+                for ((index, record) in sef.records.withIndex()) {
+                    val region = Region(ResourceId("samsung:sef:record:$index"), identity.id, record.range, ResourceKind.Trailer, if (record.type in setOf(0x0a30.toUShort(), 0x0a31.toUShort())) ProtocolIds.Samsung else null)
+                    regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
+                }
+                val indexRegion = Region(ResourceId("samsung:sef:index"), identity.id, ByteRange(sef.table.offset, sef.footer.endExclusive - sef.table.offset), ResourceKind.Trailer)
+                regions += indexRegion; resources += Resource(indexRegion.id, indexRegion.kind, listOf(indexRegion), false)
+            }
             val media = listOf(imageFacts) + videos.values.map(::videoFacts)
             val metadata = mutableListOf<MetadataEntry>()
+            if (sef != null) for ((index, record) in sef.records.withIndex()) {
+                budget.item(); budget.retain(96uL)
+                val selector = when (record.type) { 0x0a30.toUShort() -> "samsung:sef:MotionPhoto_Data"; 0x0a31.toUShort() -> "samsung:sef:MotionPhoto_Version"; else -> "samsung:sef:type:${record.type}:$index" }
+                metadata += MetadataEntry(selector, value = Value.Text("type=${record.type}; recordLength=${record.range.length}"), raw = ResourceId("samsung:sef:record:$index"),
+                    owner = if (record.type in setOf(0x0a30.toUShort(), 0x0a31.toUShort())) Ownership.SourceProtocol else Ownership.Unknown,
+                    location = Location(source = identity.id, range = record.range), origin = FactOrigin.Parsed)
+            }
             for ((index, segment) in jpeg.segments.withIndex()) {
                 if (segment.marker !in 0xe0..0xef && segment.marker != 0xfe) continue
                 val kind = when (segment.payloadKind) { AppPayloadKind.Xmp, AppPayloadKind.ExtendedXmp -> ResourceKind.Xmp; AppPayloadKind.Exif -> ResourceKind.Exif; AppPayloadKind.Icc -> ResourceKind.Icc; else -> ResourceKind.Unknown }
@@ -184,7 +230,7 @@ internal class SourceSession private constructor(
             } else parsedKey
             reader.validateIdentity().orThrow()
             val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared)), frozenList(media), frozenList(metadata), key, issues = frozenList(issues))
-            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments))
+            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef)
         }
     }
 }
