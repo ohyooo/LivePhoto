@@ -1,13 +1,28 @@
 package livephoto.core
 
 /** An immutable byte buffer. Neither the supplied array nor returned copies alias its storage. */
-public class Bytes(value: ByteArray) {
-    private val storage: ByteArray = value.copyOf()
-    public val size: Int get() = storage.size
-    public operator fun get(index: Int): Byte = storage[index]
-    public fun toByteArray(): ByteArray = storage.copyOf()
-    override fun equals(other: Any?): Boolean = other is Bytes && storage.contentEquals(other.storage)
-    override fun hashCode(): Int = storage.contentHashCode()
+public class Bytes private constructor(private val storage: ByteArray, private val start: Int, public val size: Int) {
+    public constructor(value: ByteArray) : this(value.copyOf(), 0, value.size)
+    public operator fun get(index: Int): Byte {
+        require(index in 0 until size) { "Byte index exceeds buffer" }
+        return storage[start + index]
+    }
+    public fun toByteArray(): ByteArray = storage.copyOfRange(start, start + size)
+    internal fun copyInto(destination: ByteArray, destinationOffset: Int): Unit {
+        require(destinationOffset >= 0 && size <= destination.size - destinationOffset)
+        storage.copyInto(destination, destinationOffset, start, start + size)
+    }
+    /** An immutable view over already immutable storage; no repeated short-IO buffer copying. */
+    public fun slice(startIndex: Int, endIndex: Int = size): Bytes {
+        require(startIndex >= 0 && endIndex >= startIndex && endIndex <= size)
+        return Bytes(storage, start + startIndex, endIndex - startIndex)
+    }
+    override fun equals(other: Any?): Boolean = other is Bytes && size == other.size && (0 until size).all { this[it] == other[it] }
+    override fun hashCode(): Int {
+        var hash = 1
+        for (index in 0 until size) hash = 31 * hash + this[index]
+        return hash
+    }
     override fun toString(): String = "Bytes(size=$size)"
 }
 

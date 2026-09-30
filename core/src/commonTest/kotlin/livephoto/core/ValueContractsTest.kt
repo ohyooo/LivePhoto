@@ -20,6 +20,23 @@ class ValueContractsTest {
     }
 
     @Test
+    fun immutableByteViewsRespectTheirOwnBoundsAndValueEquality() {
+        val original = Bytes(byteArrayOf(1, 2, 3, 4, 5))
+        val view = original.slice(1, 4).slice(1)
+        assertEquals(Bytes(byteArrayOf(3, 4)), view)
+        assertEquals(Bytes(byteArrayOf(3, 4)).hashCode(), view.hashCode())
+        val returned = view.toByteArray()
+        returned[0] = 99
+        assertEquals(3.toByte(), view[0])
+        assertFailsWith<IllegalArgumentException> { view[-1] }
+        assertFailsWith<IllegalArgumentException> { view[2] }
+        assertFailsWith<IllegalArgumentException> { original.slice(-1) }
+        assertFailsWith<IllegalArgumentException> { original.slice(4, 3) }
+        assertFailsWith<IllegalArgumentException> { original.slice(0, 6) }
+        assertEquals(Bytes(byteArrayOf()), original.slice(5))
+    }
+
+    @Test
     fun byteRangesRejectOverflowAndUseHalfOpenEndpoints() {
         val range = ByteRange(ULong.MAX_VALUE - 2uL, 2uL)
         assertEquals(ULong.MAX_VALUE, range.endExclusive)
