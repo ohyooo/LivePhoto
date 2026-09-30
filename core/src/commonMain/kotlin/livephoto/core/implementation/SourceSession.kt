@@ -11,6 +11,7 @@ import livephoto.core.exif.*
 import livephoto.core.oplus.*
 import livephoto.core.samsung.*
 import livephoto.core.vivo.*
+import livephoto.core.huawei.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
 internal class SourceSession private constructor(
@@ -24,6 +25,7 @@ internal class SourceSession private constructor(
     val exifComments: List<ExifCommentFacts> = emptyList(),
     val sef: SefDirectory? = null,
     val gainMaps: List<GainMapFacts> = emptyList(),
+    val huaweiTail: HuaweiTailFacts? = null,
 ) {
     val reader: BinaryReader get() = readers.single()
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
@@ -103,13 +105,15 @@ internal class SourceSession private constructor(
             val sef = SefReader.parse(reader, jpeg.primary.endExclusive, budget).orThrow()
             val samsung = sef?.let { SamsungJpegReader.bind(it, google, jpeg) }
             val vivo = VivoReader.read(xmp, google, jpeg, identity, budget).orThrow()
+            val huaweiTail = HuaweiTail.read(reader, jpeg.primary.endExclusive, budget).orThrow()?.let { HuaweiJpegReader.confirmEnvelope(reader, it, budget) }
+            val huawei = huaweiTail?.let(HuaweiJpegReader::bind)
             var bindings = google.map { binding ->
                 val vendor = samsung?.takeIf { it.video != null } ?: oplus?.takeIf { it.video != null } ?: vivo?.takeIf { it.video != null }
                 if (vendor != null && binding.protocol == ProtocolIds.GoogleV2) binding.copy(video = vendor.video, compatibleBaseOf = vendor.protocol,
                     issues = binding.issues + if (binding.video != vendor.video) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList(),
                     ownedProperties = if (vendor.protocol == ProtocolIds.VivoModern && vendor.items.size == 3) binding.ownedProperties - ExpandedName(CONTAINER_URI, "Directory") else binding.ownedProperties)
                 else binding
-            } + listOfNotNull(oplus, samsung, vivo)
+            } + listOfNotNull(oplus, samsung, vivo, huawei)
             val gainMaps = mutableListOf<GainMapFacts>()
             val auxiliaryIssues = mutableListOf<Issue>()
             val auxiliaryRanges = bindings.flatMap { it.items }.filter { it.semantic == "GainMap" && it.mime == "image/jpeg" }.map { it.range }.distinct() +
@@ -193,8 +197,24 @@ internal class SourceSession private constructor(
                 val region = Region(ResourceId("ordinary:gainmap:$index"), identity.id, gainMap.range, ResourceKind.GainMap)
                 regions += region; resources += Resource(region.id, region.kind, listOf(region), true)
             }
+            if (huaweiTail != null) {
+                for ((id, range) in listOfNotNull(huaweiTail.gap?.let { "huawei:unknown-gap" to it }, huaweiTail.candidateVideoRange.takeIf { huaweiTail.videoRange == null }?.let { "huawei:unconfirmed-media" to it })) {
+                    budget.item(); budget.retain(96uL)
+                    val region = Region(ResourceId(id), identity.id, range, ResourceKind.Unknown)
+                    regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
+                }
+            }
             val media = listOf(imageFacts) + videos.values.map(::videoFacts) + gainMaps.map { it.media }
             val metadata = mutableListOf<MetadataEntry>()
+            if (huaweiTail != null) {
+                for (field in huaweiTail.rawFrameFields) {
+                    budget.item(); budget.retain(96uL)
+                    metadata += MetadataEntry(field.selector, value = field.rawValue, owner = if (huaweiTail.variant == HuaweiTailVariant.Basic60) Ownership.SourceProtocol else Ownership.Unknown,
+                        location = field.location, origin = FactOrigin.Parsed)
+                }
+                metadata += MetadataEntry("huawei:tail:LIVE", value = Value.Text("LIVE_${huaweiTail.liveValue}"), owner = if (huaweiTail.variant == HuaweiTailVariant.Basic60) Ownership.SourceProtocol else Ownership.Unknown,
+                    location = Location(source = identity.id, range = ByteRange(huaweiTail.tailRange.offset + 40uL, 20uL)), origin = FactOrigin.Parsed)
+            }
             if (sef != null) for ((index, record) in sef.records.withIndex()) {
                 budget.item(); budget.retain(96uL)
                 val selector = when (record.type) { 0x0a30.toUShort() -> "samsung:sef:MotionPhoto_Data"; 0x0a31.toUShort() -> "samsung:sef:MotionPhoto_Version"; else -> "samsung:sef:type:${record.type}:$index" }
@@ -259,7 +279,7 @@ internal class SourceSession private constructor(
             } else parsedKey
             reader.validateIdentity().orThrow()
             val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared), frozenList(relationships)), frozenList(media), frozenList(metadata), key, issues = frozenList(issues))
-            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef, frozenList(gainMaps))
+            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef, frozenList(gainMaps), huaweiTail)
         }
     }
 }

@@ -47,6 +47,21 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
+        if (target.protocol == ProtocolIds.Huawei) {
+            val actual = if (target.profile == null) target.copy(profile = ProfileId("basic60")) else target
+            if (actual.profile !in setOf(ProfileId("basic60"), ProfileId("honor-extended"))) return ProtocolRegistry.planned().capabilities(actual)
+            val basic = actual.profile == ProfileId("basic60")
+            val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            val writes = if (basic) setOf(Operation.Create, Operation.SplitClean) else emptySet()
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                when { operation in reads -> if (basic) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
+                conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("jpeg-fixed-sixty-byte-tail")),
+                    Condition(ConditionOperator.Equals, "keySemantics", Value.Text("raw-fields-unknown-units"))) +
+                    if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("plain-jpeg-mp4-no-gap-no-honor-extensions-no-explicit-key"))) else if (!basic)
+                        listOf(Condition(ConditionOperator.Equals, "mediaBinding", Value.Text("unconfirmed-extensions-not-a-pure-video-claim"))) else emptyList(),
+                reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         if (target.protocol == ProtocolIds.VivoModern) {
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg")) else target
             if (actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)

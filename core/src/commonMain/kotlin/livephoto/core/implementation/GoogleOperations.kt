@@ -8,6 +8,7 @@ import livephoto.core.jpeg.*
 import livephoto.core.oplus.*
 import livephoto.core.samsung.*
 import livephoto.core.vivo.*
+import livephoto.core.huawei.*
 
 internal object GoogleOperations {
     suspend fun create(request: CreateRequest): CoreResult<OperationResult> = attempt {
@@ -27,8 +28,12 @@ internal object GoogleOperations {
         if (request.preference.imageFormat != null && request.preference.imageFormat != ImageFormat.Jpeg || request.preference.videoContainer != null && request.preference.videoContainer != video.container ||
             request.preference.videoCodec != null && video.tracks.filter { it.handler == "vide" }.any { it.codec != request.preference.videoCodec } ||
             request.preference.audioCodec != null && video.tracks.filter { it.handler == "soun" }.any { it.audioCodec != request.preference.audioCodec } || request.preference.dynamicRange != DynamicRangePolicy.Preserve) fail("CAPABILITY_UNSUPPORTED", "Media preference requires an unimplemented transformation")
-        val key = selectKey(video, request.edits?.keyPosition)
-        val timestamp = microseconds(key.position!!)
+        val huawei = request.target.protocol == ProtocolIds.Huawei
+        if (huawei && !basicMediaEnvelope(videoReader, ByteRange(0uL, videoIdentity.size), budget)) fail("UNKNOWN_PROTOCOL_VARIANT", "Huawei writer cannot bind unknown media extensions", Stage.Plan)
+        if (huawei && request.target.profile != null && request.target.profile != ProfileId("basic60")) fail("UNSUPPORTED_PROTOCOL", "Huawei writer only implements basic60 JPEG")
+        val huaweiPlan = if (huawei) HuaweiJpegWriter.createPlan(image, video, videoIdentity.size, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.edits?.keyPosition, budget).orThrow() else null
+        val key = if (huawei) KeyPhotoResult() else selectKey(video, request.edits?.keyPosition)
+        val timestamp = if (huawei) 0L else microseconds(key.position!!)
         val mime = if (video.container == VideoContainer.Mov) "video/quicktime" else "video/mp4"
         val oplus = request.target.protocol == ProtocolIds.Oplus
         val samsung = request.target.protocol == ProtocolIds.Samsung
@@ -37,15 +42,15 @@ internal object GoogleOperations {
         if (samsung && request.target.profile != null && request.target.profile != ProfileId("jpeg-sef-mpv3")) fail("UNSUPPORTED_PROTOCOL", "Samsung writer only implements JPEG SEF mpv3")
         val samsungPlan = if (samsung) SamsungJpegWriter.createPlan(image, videoReader, ByteRange(0uL, videoIdentity.size), timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else null
         if (oplus && request.target.profile != null && request.target.profile != ProfileId("jpeg-no-tail")) fail("UNSUPPORTED_PROTOCOL", "Oplus writer only implements jpeg-no-tail")
-        val rewrite = if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.createPlan(image, videoIdentity.size, timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.createPlan(image, videoIdentity.size, timestamp,
+        val rewrite = if (huaweiPlan != null) huaweiPlan.image else if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.createPlan(image, videoIdentity.size, timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.createPlan(image, videoIdentity.size, timestamp,
             request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow()
             else GoogleJpegWriter.createPlan(image, request.target, videoIdentity.size, mime, timestamp,
                 request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context).orThrow()
         val videoDigest = sha256Range(videoReader, ByteRange(0uL, videoIdentity.size)).orThrow()
         val coding = codingDigest(image)
-        val metadata = ordinaryDigest(image, if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS, oplus)
+        val metadata = ordinaryDigest(image, if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS, oplus)
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
-            write = { writer -> JpegRewrite.write(image.reader, writer, image.jpeg, rewrite, request.context).orThrow(); if (samsungPlan != null) SefWriter.write(samsungPlan.suffix, writer, request.context).orThrow() else copyRange(videoReader, writer, ByteRange(0uL, videoIdentity.size), request.context).orThrow() },
+            write = { writer -> JpegRewrite.write(image.reader, writer, image.jpeg, rewrite, request.context).orThrow(); if (samsungPlan != null) SefWriter.write(samsungPlan.suffix, writer, request.context).orThrow() else copyRange(videoReader, writer, ByteRange(0uL, videoIdentity.size), request.context).orThrow(); if (huaweiPlan != null) writer.writeAll(huaweiPlan.tail).orThrow() },
             verify = { id, reader ->
                 val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, budget).orThrow()
                 val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol), target = request.target).orThrow()
@@ -60,9 +65,9 @@ internal object GoogleOperations {
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "Create constructs a new composite carrier; no whole-carrier exact extraction claim"),
                     GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.Verified, videoDigest, extractedDigest, "Embedded resource ${videoId(binding.protocol).value}: complete encoded video suffix bytes unchanged"),
                     GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.Verified, coding, outputCoding, "JPEG frame/tables/scan headers/entropy bytes unchanged"),
-                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata, "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately")), key.copy(position = Time(timestamp, 1_000_000u)))
+                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata, "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately")), if (huawei) staged.inspection.keyPhoto else key.copy(position = Time(timestamp, 1_000_000u)))
             })
-        val targetFields = if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS
+        val targetFields = if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS
         val changes = targetFields.map { field ->
             val selector = "{$CAMERA_URI}$field"
             Change(selector, before = image.inspection.metadata.firstOrNull { it.selector == selector }?.value,
@@ -74,7 +79,10 @@ internal object GoogleOperations {
             Change("samsung:sef:MotionPhoto_Data", after = Value.Text("type=0x0A30; header=24; videoLength=${videoIdentity.size}"), reason = "Write requested Samsung motion record", requested = true),
             Change("samsung:sef:MotionPhoto_Version", after = Value.Text("mpv3"), reason = "Write requested Samsung version record", requested = true)) else emptyList()
         val vivoChanges = if (vivo) mapOf("VMotionPhotoVersion" to "1", "VMotionPhotoSource" to "1", "VMediaKitVersion" to "1.0.0.9").map { (field, value) -> Change("{$VIVO_URI}$field", after = Value.Text(value), reason = "Write requested minimal vivo binding", requested = true) } else emptyList()
-        val allChanges = changes + vendorChanges + vivoChanges + if (oplus) listOf(
+        val huaweiChanges = if (huaweiPlan != null) listOf(Change("huawei:tail:first-field", after = Value.Text(huaweiPlan.tail.slice(0, 6).toByteArray().decodeToString().trimEnd(' ')), reason = "Write explicitly raw fixed-tail prefix", requested = true),
+            Change("huawei:tail:history-field", after = Value.Text(huaweiPlan.tail.slice(20, 28).toByteArray().decodeToString().trimEnd(' ')), reason = "Write raw zero/count fields without claiming a timestamp unit", requested = true),
+            Change("huawei:tail:LIVE", after = Value.Text(huaweiPlan.tail.slice(40, 60).toByteArray().decodeToString().trimEnd(' ')), reason = "Write bounded pure-video length plus 20", requested = true)) else emptyList()
+        val allChanges = changes + vendorChanges + vivoChanges + huaweiChanges + if (oplus) listOf(
             Change("{$OPLUS_URI}VideoLength", after = Value.Text(videoIdentity.size.toString()), reason = "Write pure Oplus video length", requested = true),
             Change("{$OPLUS_URI}MotionPhotoPrimaryPresentationTimestampUs", after = Value.Text(timestamp.toString()), reason = "Synchronize the Oplus timestamp", requested = true),
             Change("{$OPLUS_URI}MotionPhotoOwner", after = Value.Text("oplus"), reason = "Write Oplus ownership", requested = true),
@@ -117,7 +125,7 @@ internal object GoogleOperations {
                 val video = session.videos[binding.protocol]
                 assets += rawAsset(session, resource.extents.single().range, AssetRole.MotionVideo, video?.let { videoFacts(it).mime } ?: "application/octet-stream", request.context, video?.container)
             }
-            for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.Trailer && it.extents.singleOrNull()?.owner == ProtocolIds.Oplus }) assets += rawAsset(session, resource.extents.single().range, AssetRole.VendorTrailer, "application/octet-stream", request.context)
+            for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.Trailer && it.extents.singleOrNull()?.owner in setOf(ProtocolIds.Oplus, ProtocolIds.Huawei) }) assets += rawAsset(session, resource.extents.single().range, AssetRole.VendorTrailer, "application/octet-stream", request.context)
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
         }
         val budget = ParseBudget(request.context)
@@ -126,7 +134,7 @@ internal object GoogleOperations {
         val oplus = session.bindings.any { it.protocol == ProtocolIds.Oplus }
         val vivo = session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()
         val samsungPlan = if (session.sef != null) SamsungJpegWriter.cleanPlan(session, request.context, budget).orThrow() else null
-        val rewrite = if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.cleanPlan(session, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.cleanPlan(session, request.context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, request.context).orThrow()
+        val rewrite = if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.cleanPlan(session, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.cleanPlan(session, request.context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, request.context).orThrow()
         val coding = codingDigest(session)
         val metadata = ordinaryDigest(session, verifiedExifRewrite = oplus)
         val image = StagedAsset(OutputAssetSpec(AssetRole.PrimaryImage, mime = "image/jpeg"), ImageFormat.Jpeg,
@@ -182,8 +190,12 @@ internal object GoogleOperations {
             if (request.preference.imageFormat != null && request.preference.imageFormat != ImageFormat.Jpeg || request.preference.videoContainer != null && request.preference.videoContainer != video.container ||
                 request.preference.videoCodec != null && video.tracks.filter { it.handler == "vide" }.any { it.codec != request.preference.videoCodec } ||
                 request.preference.audioCodec != null && video.tracks.filter { it.handler == "soun" }.any { it.audioCodec != request.preference.audioCodec } || request.preference.dynamicRange != DynamicRangePolicy.Preserve) fail("CAPABILITY_UNSUPPORTED", "Plan requires an unimplemented media transformation")
-            val key = selectKey(video, request.edits?.keyPosition)
-            if (request.target.protocol == ProtocolIds.Samsung) {
+            val key = if (request.target.protocol == ProtocolIds.Huawei) KeyPhotoResult() else selectKey(video, request.edits?.keyPosition)
+            if (request.target.protocol == ProtocolIds.Huawei) {
+                if (!basicMediaEnvelope(videoReader, ByteRange(0uL, identity.size), budget)) fail("UNKNOWN_PROTOCOL_VARIANT", "Huawei plan cannot bind unknown media extensions", Stage.Plan)
+                if (request.target.profile != null && request.target.profile != ProfileId("basic60")) fail("UNSUPPORTED_PROTOCOL", "Huawei plan only implements basic60")
+                HuaweiJpegWriter.createPlan(session, video, identity.size, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.edits?.keyPosition, budget).orThrow()
+            } else if (request.target.protocol == ProtocolIds.Samsung) {
                 if (request.target.profile != null && request.target.profile != ProfileId("jpeg-sef-mpv3")) fail("UNSUPPORTED_PROTOCOL", "Samsung plan only implements jpeg-sef-mpv3")
                 SamsungJpegWriter.createPlan(session, videoReader, ByteRange(0uL, identity.size), microseconds(key.position!!), request.sourceBindings == SourceBindingPolicy.StripSourceBindings, context, budget).orThrow()
             } else if (request.target.protocol == ProtocolIds.VivoModern) {
@@ -200,7 +212,7 @@ internal object GoogleOperations {
             }
             snapshot = Snapshot(session.snapshot.identities + identity, GenerationToken(hash.finish().value))
         } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
-            if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
+            if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
         }
         else if (request is ExtractRequest) {
             if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction plan snapshot is stale")
@@ -210,7 +222,7 @@ internal object GoogleOperations {
         val policy = when (request) { is CreateRequest -> request.policy; is SplitRequest -> request.policy; else -> MutationPolicy() }
         val outputCaps = output.capabilities()
         if (!outputCaps.canReadStaged || policy.atomicity == Atomicity.AssetSetRequired && !outputCaps.assetSetAtomic || policy.existingOutput == ExistingOutput.Replace && !outputCaps.replacesAtomically) fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Plan cannot satisfy requested transaction guarantees")
-        val implemented = (session.jpeg != null || operation == Operation.ExtractRaw && session.bindings.isNotEmpty()) && (target == null || target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern) && (target.profile == null || target.profile == ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else if (target.protocol == ProtocolIds.Samsung) "jpeg-sef-mpv3" else "jpeg")))
+        val implemented = (session.jpeg != null || operation == Operation.ExtractRaw && session.bindings.isNotEmpty()) && (target == null || target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern, ProtocolIds.Huawei) && (target.profile == null || target.profile == ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else if (target.protocol == ProtocolIds.Samsung) "jpeg-sef-mpv3" else if (target.protocol == ProtocolIds.Huawei) "basic60" else "jpeg")))
         val entry = CapabilityEntry(operation, if (!implemented) Implementation.Unsupported else if (operation == Operation.ExtractRaw && session.jpeg != null) Implementation.Supported else Implementation.Experimental,
             conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text(session.inspection.media.firstOrNull()?.mime ?: "unknown"))), verification = listOf(Verification.SourceReviewed))
         ExecutionPlan(snapshot, target, listOf(PlanStep(Stage.Verify, listOf(Operation.Validate), session.inspection.layout.resources.map { it.id }, "Verify staging and source identities before atomic publication")),

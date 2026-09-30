@@ -28,7 +28,7 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
             if (session.jpeg == null) Coverage.NotRun else Coverage.Complete)
         val imageIssues = issues.filter { it.layer == Layer.Structure }
         checks += CheckResult("jpeg.frame", Layer.Structure, if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (imageIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
-            if (session.jpeg == null || imageIssues.any { it.code.value == "UNSUPPORTED_CONTAINER" }) Coverage.NotRun else Coverage.Complete, imageIssues)
+            if (session.jpeg == null || imageIssues.any { it.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.NotRun else Coverage.Complete, imageIssues)
         val binaryIssues = issues.filter { it.layer == Layer.Structure || it.layer == Layer.Media && it.severity == Severity.Error }
         checks += CheckResult("bmff.samples", Layer.Structure, if (binaryIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (binaryIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
             if (session.videos.size == session.bindings.count { it.video != null } && session.videos.isNotEmpty()) Coverage.Complete else if (session.videos.isNotEmpty()) Coverage.Partial else Coverage.NotRun, binaryIssues)
