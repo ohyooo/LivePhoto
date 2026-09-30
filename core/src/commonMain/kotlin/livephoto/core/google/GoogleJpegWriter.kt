@@ -9,7 +9,7 @@ import livephoto.core.xmp.*
 
 /** Produces staging bytes only; publication belongs exclusively to the Core orchestrator. */
 internal object GoogleJpegWriter {
-    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context): CoreResult<JpegRewritePlan> = attemptNow {
+    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList()): CoreResult<JpegRewritePlan> = attemptNow {
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Google JPEG creation requires JPEG image content")
         val xmp = session.xmp!!
         if (session.bindings.isNotEmpty() && !strip) fail("SOURCE_ALREADY_LIVE", "Image contains source protocol bindings")
@@ -38,26 +38,27 @@ internal object GoogleJpegWriter {
         var bytes = if (packet == null) XmpWriter.create(updates.filterValues { it != null }.mapValues { it.value!! }, context).orThrow()
             else XmpWriter.merge(packet, updates, context).orThrow()
         if (target.protocol == ProtocolIds.GoogleV2) bytes = addDirectory(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context)
-        patch(jpeg, bytes)
+        patch(jpeg, bytes, additionalPatches)
     }
 
-    fun cleanPlan(session: SourceSession, context: Context): CoreResult<JpegRewritePlan> = attemptNow {
+    fun cleanPlan(session: SourceSession, context: Context, additionalPatches: List<JpegPatch> = emptyList()): CoreResult<JpegRewritePlan> = attemptNow {
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Clean JPEG requires JPEG content")
         val xmp = session.xmp!!
         if (session.bindings.isEmpty()) {
             if (jpeg.trailing.length != 0uL) fail("UNSAFE_METADATA_REWRITE", "Unowned suffix cannot be silently removed by clean split")
-            return@attemptNow JpegRewrite.plan(jpeg, emptyList()).orThrow()
+            return@attemptNow JpegRewrite.plan(jpeg, additionalPatches).orThrow()
         }
-        if (session.bindings.any { !it.structurallyValid }) fail("UNSAFE_METADATA_REWRITE", "Broken or conflicting bindings cannot authorize clean deletion")
+        if (session.bindings.filter { it.compatibleBaseOf == null }.any { !it.structurallyValid }) fail("UNSAFE_METADATA_REWRITE", "Broken or conflicting bindings cannot authorize clean deletion")
+        if (session.bindings.any { it.trailer != null }) fail("CAPABILITY_UNSUPPORTED", "Unknown vendor trailer cleanup has not been implemented")
         if (session.bindings.any { it.padding?.length != null && it.padding.length != 0uL || it.items.size > 2 }) fail("GAINMAP_PRESERVATION_UNAVAILABLE", "Auxiliary resources and unknown padding require a verified clean relocation plan")
         if (!xmp.rewriteAllowed) fail("UNSAFE_METADATA_REWRITE", "Clean requires one complete ordinary XMP packet")
         val packet = if (session.bindings.any { it.protocol == ProtocolIds.GoogleV2 }) removeDirectory(xmp.packets.single(), context) else xmp.packets.single()
-        val fields = session.bindings.flatMap { if (it.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS }.toSet()
-        val bytes = XmpWriter.merge(packet, fields.associate { ExpandedName(CAMERA_URI, it) to null }, context).orThrow()
-        patch(jpeg, bytes)
+        val fields = session.bindings.flatMap { it.ownedProperties }.filter { it != ExpandedName(CONTAINER_URI, "Directory") }.toSet()
+        val bytes = XmpWriter.merge(packet, fields.associateWith { null }, context).orThrow()
+        patch(jpeg, bytes, additionalPatches)
     }
 
-    private fun patch(jpeg: JpegStructure, xml: Bytes): JpegRewritePlan {
+    internal fun patch(jpeg: JpegStructure, xml: Bytes, additionalPatches: List<JpegPatch> = emptyList()): JpegRewritePlan {
         val header = XMP_HEADER.encodeToByteArray()
         val length = checkedAdd(header.size.toULong(), xml.size.toULong())
         if (length > 65_533uL) fail("VALUE_NOT_REPRESENTABLE", "Canonical XMP does not fit one JPEG APP1 segment")
@@ -67,7 +68,7 @@ internal object GoogleJpegWriter {
         val original = jpeg.segments.filter { it.payloadKind == AppPayloadKind.Xmp }
         if (original.size > 1) fail("UNSAFE_METADATA_REWRITE", "Multiple XMP packets need explicit authority")
         val range = original.singleOrNull()?.range ?: ByteRange(jpeg.segments.firstOrNull { it.marker == 0xda }?.range?.offset ?: fail("CORRUPTED_CONTAINER", "JPEG has no scan header"), 0uL)
-        return JpegRewrite.plan(jpeg, listOf(JpegPatch(range, app))).orThrow()
+        return JpegRewrite.plan(jpeg, additionalPatches + JpegPatch(range, app)).orThrow()
     }
 
     private fun removeDirectory(packet: XmpPacket, context: Context): XmpPacket {

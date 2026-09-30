@@ -7,6 +7,8 @@ import livephoto.core.google.*
 import livephoto.core.jpeg.*
 import livephoto.core.xmp.*
 import livephoto.core.xml.*
+import livephoto.core.exif.*
+import livephoto.core.oplus.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
 internal class SourceSession private constructor(
@@ -14,9 +16,10 @@ internal class SourceSession private constructor(
     val snapshot: Snapshot,
     val jpeg: JpegStructure?,
     val xmp: XmpCollection?,
-    val bindings: List<GoogleBinding>,
+    val bindings: List<CarrierBinding>,
     val videos: Map<ProtocolId, VideoStructure>,
     val inspection: InspectionResult,
+    val exifComments: List<ExifCommentFacts> = emptyList(),
 ) {
     val reader: BinaryReader get() = readers.single()
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
@@ -50,11 +53,33 @@ internal class SourceSession private constructor(
             val jpeg = JpegParser.parse(reader, budget).orThrow()
             val xmp = XmpReader.readJpeg(reader, jpeg, budget).orThrow()
             val imageFacts = jpegFacts(reader, jpeg)
-            val bindings = GoogleJpegReader.read(xmp, jpeg, identity, budget).orThrow()
+            val google = GoogleJpegReader.read(xmp, jpeg, identity, budget).orThrow()
+            val exifComments = mutableListOf<ExifCommentFacts>()
+            val exifIssues = mutableListOf<Issue>()
+            for (segment in jpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }) {
+                val payload = segment.payload!!
+                val range = checkedRange(payload.offset + 6uL, payload.length - 6uL, identity.size)
+                when (val facts = ExifUserCommentReader(reader, budget).read(range)) {
+                    is CoreResult.Success -> exifComments += facts.value
+                    is CoreResult.Failure -> {
+                        if (facts.error.code.value in setOf("CANCELLED", "RESOURCE_LIMIT_EXCEEDED", "SOURCE_CHANGED", "IO_READ_FAILED", "UNEXPECTED_EOF")) throw CoreFault(facts.error)
+                        exifIssues += Issue(facts.error.code, Severity.Warning, Layer.Structure, Location(source = identity.id, range = range))
+                    }
+                }
+            }
+            val comments = exifComments.flatMap { it.comments }
+            val comment = if (comments.size == 1) comments.single().text else null
+            val oplus = OplusReader.read(xmp, google, jpeg, identity, comment, budget).orThrow()
+            var bindings = google.map { binding ->
+                if (oplus?.video != null && binding.protocol == ProtocolIds.GoogleV2) binding.copy(video = oplus.video, compatibleBaseOf = ProtocolIds.Oplus,
+                    issues = binding.issues + if (oplus.trailer != null) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList())
+                else binding
+            } + listOfNotNull(oplus)
             val videos = linkedMapOf<ProtocolId, VideoStructure>()
             val videoCache = linkedMapOf<ByteRange, CoreResult<VideoStructure>>()
             val issues = mutableListOf<Issue>()
             issues += xmp.issues
+            issues += exifIssues
             issues += imageFacts.issues
             for (binding in bindings) {
                 issues += binding.issues
@@ -69,8 +94,13 @@ internal class SourceSession private constructor(
                     }
                 }
             }
+            bindings = bindings.map { binding ->
+                val profileIssues = videos[binding.protocol]?.let { googleVideoIssues(it, binding.selector, false) } ?: emptyList()
+                issues += profileIssues
+                binding.copy(issues = binding.issues + profileIssues)
+            }
             val matches = bindings.map { binding -> Match(binding.selector,
-                if (binding.protocol in videos && binding.structurallyValid) MatchStrength.Strong else MatchStrength.Weak,
+                if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
                 issues = binding.issues, resourceIds = if (binding.video != null) listOf(videoId(binding.protocol)) else emptyList()) }
             val strong = matches.filter { it.strength == MatchStrength.Strong }
             val conflicting = strong.mapNotNull { match -> bindings.first { it.selector == match.target }.video }.distinct().size > 1
@@ -80,7 +110,7 @@ internal class SourceSession private constructor(
                 matches.isNotEmpty() -> Disposition.Candidate
                 else -> Disposition.NonLive
             }
-            val primary = if (conflicting) null else (strong.firstOrNull { it.target.protocol == ProtocolIds.GoogleV2 } ?: strong.firstOrNull() ?: matches.singleOrNull())?.target
+            val primary = if (conflicting) null else (strong.firstOrNull { it.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) } ?: strong.firstOrNull { it.target.protocol == ProtocolIds.GoogleV2 } ?: strong.firstOrNull() ?: matches.singleOrNull())?.target
             val detection = DetectionResult(disposition, primary, frozenList(matches), frozenList(issues), snapshot)
             val regions = mutableListOf(Region(ResourceId("primary"), identity.id, jpeg.primary, ResourceKind.PrimaryImage))
             val resources = mutableListOf(Resource(ResourceId("primary"), ResourceKind.PrimaryImage, listOf(regions.first()), true))
@@ -90,6 +120,10 @@ internal class SourceSession private constructor(
                     regions += region; resources += Resource(region.id, region.kind, listOf(region), true)
                 }
                 binding.padding?.let { regions += Region(ResourceId("${binding.protocol.value}:padding"), identity.id, it, ResourceKind.Padding, binding.protocol) }
+                binding.trailer?.let { range ->
+                    val region = Region(ResourceId("${binding.protocol.value}:trailer"), identity.id, range, ResourceKind.Trailer, binding.protocol)
+                    regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
+                }
                 for ((index, item) in binding.items.withIndex()) if (index > 0 && index < binding.items.lastIndex) {
                     val kind = if (item.semantic == "GainMap") ResourceKind.GainMap else ResourceKind.Unknown
                     val region = Region(ResourceId("${binding.protocol.value}:aux:$index"), identity.id, item.range, kind, binding.protocol)
@@ -112,7 +146,7 @@ internal class SourceSession private constructor(
                 for (attribute in element.attributes) if (attribute.name.expanded.uri != RDF_URI) {
                     budget.item(depth)
                     val name = attribute.name.expanded
-                    val owned = authoritative && name.uri == CAMERA_URI && bindings.any { name.local in if (it.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS }
+                    val owned = authoritative && bindings.any { name in it.ownedProperties }
                     val selector = "{${name.uri}}${name.local}"
                     budget.retain(96uL + selector.length.toULong() * 4uL)
                     metadata += MetadataEntry(selector, value = Value.Text(attribute.value), owner = if (owned) Ownership.SourceProtocol else Ownership.Ordinary,
@@ -124,12 +158,18 @@ internal class SourceSession private constructor(
                     val selector = "{${name.uri}}${name.local}"
                     budget.retain(96uL + selector.length.toULong() * 4uL)
                     if (name.uri != RDF_URI) metadata += MetadataEntry(selector, value = Value.Text(child.children.mapNotNull { (it as? XmlText)?.text ?: (it as? XmlCData)?.text }.joinToString("")),
-                        owner = if (authoritative && name.uri == CAMERA_URI && bindings.any { name.local in if (it.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS }) Ownership.SourceProtocol else Ownership.Ordinary,
+                        owner = if (authoritative && bindings.any { name in it.ownedProperties } && name != ExpandedName(CONTAINER_URI, "Directory")) Ownership.SourceProtocol else Ownership.Ordinary,
                         location = Location(source = identity.id, selector = selector), origin = FactOrigin.Parsed)
                     propertyMetadata(child, false, depth + 1u)
                 }
             }
             for (packet in xmp.packets) for (description in packet.descriptions) propertyMetadata(description, true)
+            for (facts in exifComments) for (entry in facts.comments) {
+                budget.item(); budget.retain(96uL)
+                metadata += MetadataEntry("exif:UserComment", value = entry.text?.let { Value.Text(it) },
+                    owner = if (entry.marker != null && oplus != null) Ownership.SourceProtocol else Ownership.Ordinary,
+                    location = Location(source = identity.id, range = entry.entry.valueRange, selector = "exif:UserComment"), origin = FactOrigin.Parsed)
+            }
             if (jpeg.trailing.length != 0uL && bindings.none { it.video != null }) {
                 val region = Region(ResourceId("unknown-trailer"), identity.id, jpeg.trailing, ResourceKind.Trailer)
                 regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
@@ -137,14 +177,14 @@ internal class SourceSession private constructor(
             val rangeGroups = resources.groupBy { resource -> resource.extents.map { it.source to it.range } }
             val shared = resources.map { resource -> budget.item(); budget.retain(64uL); resource.copy(sharedWith = rangeGroups.getValue(resource.extents.map { it.source to it.range }).map { it.id }.filter { it != resource.id }) }
             val primaryBinding = bindings.firstOrNull { it.selector == primary }
-            val parsedKey = primaryBinding?.key ?: KeyPhotoResult()
+            val parsedKey = primaryBinding?.key ?: if (disposition != Disposition.Ambiguous) KeyPhotoResult(rawFields = bindings.flatMap { it.key.rawFields }.distinct(), issues = bindings.flatMap { it.key.issues }.distinct()) else KeyPhotoResult()
             val key = if (primaryBinding?.protocol == ProtocolIds.GoogleV2 && parsedKey.position == null && parsedKey.issues.isEmpty() && videos[primaryBinding.protocol] != null) {
                 try { selectKey(videos.getValue(primaryBinding.protocol), null).copy(rawFields = parsedKey.rawFields) }
                 catch (_: CoreFault) { parsedKey }
             } else parsedKey
             reader.validateIdentity().orThrow()
             val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared)), frozenList(media), frozenList(metadata), key, issues = frozenList(issues))
-            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection)
+            SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments))
         }
     }
 }

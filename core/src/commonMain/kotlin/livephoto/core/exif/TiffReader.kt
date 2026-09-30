@@ -26,11 +26,10 @@ internal data class TiffDocument(
 )
 
 /** Read-only TIFF 6/EXIF infrastructure. No relocation or private MakerNote interpretation. */
-internal class TiffReader(private val reader: BinaryReader) {
+internal class TiffReader(private val reader: BinaryReader, private val budget: ParseBudget = ParseBudget(reader.context)) {
     suspend fun read(range: ByteRange): CoreResult<TiffDocument> = attempt {
         checkedRange(range.offset, range.length, reader.identity().orThrow().size)
         if (range.length < 8uL) fail("CORRUPTED_CONTAINER", "TIFF header is truncated")
-        val budget = ParseBudget(reader.context)
         budget.retain(8uL)
         val header = reader.readExactly(range.offset, 8u).orThrow()
         val endian = when {

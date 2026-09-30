@@ -2,8 +2,9 @@ package livephoto.core.jpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*
+import livephoto.core.exif.ExifMarkerPatch
 
-internal data class JpegPatch(val range: ByteRange, val replacement: Bytes)
+internal data class JpegPatch(val range: ByteRange, val replacement: Bytes, val exifProof: ExifMarkerPatch? = null)
 internal data class JpegRewritePlan(val patches: List<JpegPatch>, val outputLength: ULong)
 
 internal object JpegRewrite {
@@ -33,7 +34,14 @@ internal object JpegRewrite {
                 structure.segments.any { it.range.offset == patch.range.offset || it.range.endExclusive == patch.range.offset }
             if (segment == null && !insertion) fail("UNSAFE_METADATA_REWRITE", "Patch is not a complete APP segment or a safe APP boundary")
             validateAppBytes(patch.replacement)
-            if (segment?.payloadKind == AppPayloadKind.Mpf || segment?.payloadKind == AppPayloadKind.Exif || protectedReplacement(patch.replacement)) {
+            val proof = patch.exifProof
+            if (proof != null) {
+                val expected = appSegment(0xe1, proof.replacementPayload).orThrow()
+                if (patch.replacement != expected || proof.originalTiffRange == null && (!insertion || structure.hasExif) ||
+                    proof.originalTiffRange != null && (segment?.payloadKind != AppPayloadKind.Exif || segment.payload == null ||
+                        proof.originalTiffRange != ByteRange(segment.payload.offset + 6uL, segment.payload.length - 6uL))) fail("UNSAFE_METADATA_REWRITE", "EXIF authorization does not match this exact JPEG patch")
+            }
+            if (segment?.payloadKind == AppPayloadKind.Mpf || proof == null && (segment?.payloadKind == AppPayloadKind.Exif || protectedReplacement(patch.replacement))) {
                 fail("UNSAFE_METADATA_REWRITE", "MPF and EXIF edits require a verified parsed dependency model")
             }
             if (structure.hasExtendedXmp && (segment?.payloadKind == AppPayloadKind.Xmp || segment?.payloadKind == AppPayloadKind.ExtendedXmp || insertion)) {
@@ -48,7 +56,10 @@ internal object JpegRewrite {
         }
         // Unknown EXIF/MakerNote relocation is blocked until the caller has a parsed safe model.
         for (patch in ordered) {
-            if (patch.replacement.size.toULong() != patch.range.length && structure.segments.any { it.payloadKind == AppPayloadKind.Exif && it.range.offset >= patch.range.endExclusive }) {
+            if (patch.replacement.size.toULong() != patch.range.length && structure.segments.any { exif ->
+                    exif.payloadKind == AppPayloadKind.Exif && exif.range.offset >= patch.range.endExclusive &&
+                        ordered.none { it.range == exif.range && it.exifProof?.isNoOp == false }
+                }) {
                 fail("UNSAFE_METADATA_REWRITE", "Metadata resizing would relocate an unverified EXIF block")
             }
         }
@@ -60,6 +71,10 @@ internal object JpegRewrite {
         if (verifiedPlan.outputLength != plan.outputLength) fail("INVALID_ARGUMENT", "JPEG rewrite plan length is inconsistent")
         var position = 0uL
         for (patch in verifiedPlan.patches) {
+            patch.exifProof?.let { proof ->
+                if (reader.identity().orThrow() != proof.sourceIdentity || proof.originalTiffRange != null &&
+                    sha256Range(reader, proof.originalTiffRange).orThrow() != proof.originalTiffDigest) fail("SOURCE_CHANGED", "Verified EXIF source changed before staging write")
+            }
             copyRange(reader, writer, ByteRange(position, patch.range.offset - position), context).orThrow()
             writer.writeAll(patch.replacement).orThrow()
             position = patch.range.endExclusive

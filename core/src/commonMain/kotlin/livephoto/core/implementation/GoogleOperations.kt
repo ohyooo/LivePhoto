@@ -5,6 +5,7 @@ import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.google.*
 import livephoto.core.jpeg.*
+import livephoto.core.oplus.*
 
 internal object GoogleOperations {
     suspend fun create(request: CreateRequest): CoreResult<OperationResult> = attempt {
@@ -27,22 +28,26 @@ internal object GoogleOperations {
         val key = selectKey(video, request.edits?.keyPosition)
         val timestamp = microseconds(key.position!!)
         val mime = if (video.container == VideoContainer.Mov) "video/quicktime" else "video/mp4"
-        val rewrite = GoogleJpegWriter.createPlan(image, request.target, videoIdentity.size, mime, timestamp,
-            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context).orThrow()
+        val oplus = request.target.protocol == ProtocolIds.Oplus
+        if (oplus && request.target.profile != null && request.target.profile != ProfileId("jpeg-no-tail")) fail("UNSUPPORTED_PROTOCOL", "Oplus writer only implements jpeg-no-tail")
+        val rewrite = if (oplus) OplusJpegWriter.createPlan(image, videoIdentity.size, timestamp,
+            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow()
+            else GoogleJpegWriter.createPlan(image, request.target, videoIdentity.size, mime, timestamp,
+                request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context).orThrow()
         val videoDigest = sha256Range(videoReader, ByteRange(0uL, videoIdentity.size)).orThrow()
         val coding = codingDigest(image)
-        val metadata = ordinaryDigest(image, if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS)
+        val metadata = ordinaryDigest(image, if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS, oplus)
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
             write = { writer -> JpegRewrite.write(image.reader, writer, image.jpeg, rewrite, request.context).orThrow(); copyRange(videoReader, writer, ByteRange(0uL, videoIdentity.size), request.context).orThrow() },
             verify = { id, reader ->
                 val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, budget).orThrow()
-                val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol)).orThrow()
-                val binding = staged.bindings.singleOrNull() ?: fail("POSTCONDITION_FAILED", "Created carrier has no unique Google binding", Stage.Verify)
+                val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol), target = request.target).orThrow()
+                val binding = staged.bindings.singleOrNull { it.protocol == request.target.protocol } ?: fail("POSTCONDITION_FAILED", "Created carrier has no unique target binding", Stage.Verify)
                 if (binding.protocol != request.target.protocol || !binding.structurallyValid || binding.protocol !in staged.videos || report.verdict == Verdict.Invalid ||
                     report.checks.any { it.coverage != Coverage.Complete }) fail("POSTCONDITION_FAILED", "Created carrier failed required protocol and media checks", Stage.Verify)
                 val extractedDigest = sha256Range(reader, binding.video!!).orThrow()
                 val outputCoding = codingDigest(staged)
-                val outputMetadata = ordinaryDigest(staged)
+                val outputMetadata = ordinaryDigest(staged, verifiedExifRewrite = oplus)
                 if (videoDigest != extractedDigest || coding != outputCoding || metadata != outputMetadata) fail("POSTCONDITION_FAILED", "Create changed unrequested video, image coding, or ordinary metadata", Stage.Verify)
                 AssetVerification(report, listOf(
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "Create constructs a new composite carrier; no whole-carrier exact extraction claim"),
@@ -57,8 +62,14 @@ internal object GoogleOperations {
                 after = Value.Text(when { field.endsWith("PresentationTimestampUs") -> timestamp.toString(); field == "MicroVideoOffset" -> videoIdentity.size.toString(); else -> "1" }), reason = "Write requested target protocol binding", requested = true)
         } + image.inspection.metadata.filter { it.owner == Ownership.SourceProtocol && it.selector !in targetFields.map { field -> "{$CAMERA_URI}$field" } }.map { entry ->
             Change(entry.selector, entry.value, null, "Explicitly strip verified source binding", true)
-        } + if (request.target.protocol == ProtocolIds.GoogleV2) listOf(Change("{$CONTAINER_URI}Directory", after = Value.Text("Canonical Primary/MotionPhoto resource directory"), reason = "Write requested target directory", requested = true)) else emptyList()
-        publish(request.output, request.policy, request.context, image.readers + videoReader, listOf(asset), changes).orThrow()
+        } + if (request.target.protocol in setOf(ProtocolIds.GoogleV2, ProtocolIds.Oplus)) listOf(Change("{$CONTAINER_URI}Directory", after = Value.Text("Canonical Primary/MotionPhoto resource directory"), reason = "Write requested target directory", requested = true)) else emptyList()
+        val allChanges = changes + if (oplus) listOf(
+            Change("{$OPLUS_URI}VideoLength", after = Value.Text(videoIdentity.size.toString()), reason = "Write pure Oplus video length", requested = true),
+            Change("{$OPLUS_URI}MotionPhotoPrimaryPresentationTimestampUs", after = Value.Text(timestamp.toString()), reason = "Synchronize the Oplus timestamp", requested = true),
+            Change("{$OPLUS_URI}MotionPhotoOwner", after = Value.Text("oplus"), reason = "Write Oplus ownership", requested = true),
+            Change("{$OPLUS_URI}OLivePhotoVersion", after = Value.Text("2"), reason = "Write the implemented Oplus version", requested = true),
+            Change("exif:UserComment", after = Value.Text(OPLUS_MARKER), reason = "Write the requested vendor recognition marker", requested = true)) else emptyList()
+        publish(request.output, request.policy, request.context, image.readers + videoReader, listOf(asset), allChanges).orThrow()
     }
 
     suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = attempt {
@@ -94,21 +105,23 @@ internal object GoogleOperations {
                 val video = session.videos[binding.protocol]
                 assets += rawAsset(session, resource.extents.single().range, AssetRole.MotionVideo, video?.let { videoFacts(it).mime } ?: "application/octet-stream", request.context, video?.container)
             }
+            for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.Trailer && it.extents.singleOrNull()?.owner == ProtocolIds.Oplus }) assets += rawAsset(session, resource.extents.single().range, AssetRole.VendorTrailer, "application/octet-stream", request.context)
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
         }
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
         if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_PROTOCOL", "Clean needs one trusted resource graph")
-        val rewrite = GoogleJpegWriter.cleanPlan(session, request.context).orThrow()
+        val oplus = session.bindings.any { it.protocol == ProtocolIds.Oplus }
+        val rewrite = if (oplus) OplusJpegWriter.cleanPlan(session, request.context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, request.context).orThrow()
         val coding = codingDigest(session)
-        val metadata = ordinaryDigest(session)
+        val metadata = ordinaryDigest(session, verifiedExifRewrite = oplus)
         val image = StagedAsset(OutputAssetSpec(AssetRole.PrimaryImage, mime = "image/jpeg"), ImageFormat.Jpeg,
             write = { writer -> JpegRewrite.write(session.reader, writer, session.jpeg!!, rewrite, request.context).orThrow() },
             verify = { id, reader ->
                 val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, budget).orThrow()
                 if (staged.bindings.isNotEmpty() || staged.jpeg?.trailing?.length != 0uL) fail("POSTCONDITION_FAILED", "Clean image still contains live bindings or hidden suffix", Stage.Verify)
                 val outputCoding = codingDigest(staged)
-                val outputMetadata = ordinaryDigest(staged)
+                val outputMetadata = ordinaryDigest(staged, verifiedExifRewrite = oplus)
                 if (coding != outputCoding || metadata != outputMetadata) fail("POSTCONDITION_FAILED", "Clean changed image coding or ordinary metadata", Stage.Verify)
                 AssetVerification(validateSession(staged, listOf(Layer.Structure)).orThrow(), listOf(
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable),
@@ -156,14 +169,19 @@ internal object GoogleOperations {
                 request.preference.videoCodec != null && video.tracks.filter { it.handler == "vide" }.any { it.codec != request.preference.videoCodec } ||
                 request.preference.audioCodec != null && video.tracks.filter { it.handler == "soun" }.any { it.audioCodec != request.preference.audioCodec } || request.preference.dynamicRange != DynamicRangePolicy.Preserve) fail("CAPABILITY_UNSUPPORTED", "Plan requires an unimplemented media transformation")
             val key = selectKey(video, request.edits?.keyPosition)
-            GoogleJpegWriter.createPlan(session, request.target, identity.size, videoFacts(video).mime!!, microseconds(key.position!!), request.sourceBindings == SourceBindingPolicy.StripSourceBindings, context).orThrow()
+            if (request.target.protocol == ProtocolIds.Oplus) {
+                if (request.target.profile != null && request.target.profile != ProfileId("jpeg-no-tail")) fail("UNSUPPORTED_PROTOCOL", "Oplus plan only implements jpeg-no-tail")
+                OplusJpegWriter.createPlan(session, identity.size, microseconds(key.position!!), request.sourceBindings == SourceBindingPolicy.StripSourceBindings, context, budget).orThrow()
+            } else GoogleJpegWriter.createPlan(session, request.target, identity.size, videoFacts(video).mime!!, microseconds(key.position!!), request.sourceBindings == SourceBindingPolicy.StripSourceBindings, context).orThrow()
             val hash = Sha256()
             hash.update(Bytes(session.snapshot.token.value.encodeToByteArray()))
             for (field in listOf(identity.id.value, identity.generation.value, identity.size.toString(), identity.digest?.value ?: "")) {
                 val bytes = Bytes(field.encodeToByteArray()); hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes)
             }
             snapshot = Snapshot(session.snapshot.identities + identity, GenerationToken(hash.finish().value))
-        } else if (request is SplitRequest && request.mode == SplitMode.Clean) GoogleJpegWriter.cleanPlan(session, context).orThrow()
+        } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
+            if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
+        }
         else if (request is ExtractRequest) {
             if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction plan snapshot is stale")
             if (request.resources.any { id -> session.inspection.layout.resources.none { it.id == id } }) fail("INVALID_ARGUMENT", "Extraction plan refers to unknown resource")
@@ -172,7 +190,7 @@ internal object GoogleOperations {
         val policy = when (request) { is CreateRequest -> request.policy; is SplitRequest -> request.policy; else -> MutationPolicy() }
         val outputCaps = output.capabilities()
         if (!outputCaps.canReadStaged || policy.atomicity == Atomicity.AssetSetRequired && !outputCaps.assetSetAtomic || policy.existingOutput == ExistingOutput.Replace && !outputCaps.replacesAtomically) fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Plan cannot satisfy requested transaction guarantees")
-        val implemented = session.jpeg != null && (target == null || target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) && (target.profile == null || target.profile == ProfileId("jpeg")))
+        val implemented = session.jpeg != null && (target == null || target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus) && (target.profile == null || target.profile == ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else "jpeg")))
         val entry = CapabilityEntry(operation, if (!implemented) Implementation.Unsupported else if (operation == Operation.ExtractRaw) Implementation.Supported else Implementation.Experimental,
             conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("jpeg"))), verification = listOf(Verification.SourceReviewed))
         ExecutionPlan(snapshot, target, listOf(PlanStep(Stage.Verify, listOf(Operation.Validate), session.inspection.layout.resources.map { it.id }, "Verify staging and source identities before atomic publication")),

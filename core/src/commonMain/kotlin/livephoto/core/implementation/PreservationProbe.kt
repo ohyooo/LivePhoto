@@ -29,12 +29,27 @@ internal suspend fun codingDigest(session: SourceSession): Digest {
 }
 
 /** Ordinary XMP meaning and each non-XMP APP/COM byte string, without protocol bindings. */
-internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraFields: Set<String> = emptySet()): Digest {
+internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraFields: Set<String> = emptySet(), verifiedExifRewrite: Boolean = false): Digest {
     val hash = Sha256()
     fun text(value: String) { val bytes = Bytes(value.encodeToByteArray()); hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes) }
-    for (segment in session.jpeg!!.segments) if ((segment.marker in 0xe0..0xef || segment.marker == 0xfe) && segment.payloadKind != AppPayloadKind.Xmp) {
+    for (segment in session.jpeg!!.segments) if ((segment.marker in 0xe0..0xef || segment.marker == 0xfe) && segment.payloadKind != AppPayloadKind.Xmp && !(verifiedExifRewrite && segment.payloadKind == AppPayloadKind.Exif)) {
         text("raw:${segment.marker}")
         hash.update(Bytes(sha256Range(session.reader, segment.range).orThrow().value.encodeToByteArray()))
+    }
+    if (verifiedExifRewrite) for (facts in session.exifComments) {
+        val document = facts.document
+        val root = document.ifds.firstOrNull { it.relativeOffset == document.firstIfdOffset }
+        val pointers = root?.entries?.filter { it.tag in setOf(0x8769u.toUShort(), 0x8825u.toUShort()) }?.associate { entry ->
+            (entry.value?.let { readUnsigned(it, document.endian).toUInt() } ?: 0u) to entry.tag
+        } ?: emptyMap()
+        for (ifd in document.ifds) for (entry in ifd.entries.sortedBy { it.tag }) {
+            if (entry.tag in setOf(0x8769u.toUShort(), 0x8825u.toUShort(), 0xa005u.toUShort(), 0x014au.toUShort())) continue
+            if (facts.comments.any { it.entry.entryRange == entry.entryRange && it.marker != null }) continue
+            text("exif"); text(if (ifd.relativeOffset == document.firstIfdOffset) "primary" else "ifd:${pointers[ifd.relativeOffset] ?: 0u}")
+            text(entry.tag.toString()); text(entry.type.toString()); text(entry.count.toString())
+            val value = entry.value ?: entry.rawValueField
+            hash.update(unsignedBytes(value.size.toULong(), 8, Endian.Big)); hash.update(value)
+        }
     }
     fun visit(element: XmlElement, authority: Boolean, depth: UInt, authoritativeTree: Boolean) {
         checkCancelled(session.reader.context)
@@ -44,14 +59,13 @@ internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraField
         for (attribute in element.attributes.sortedWith(compareBy({ it.name.expanded.uri }, { it.name.expanded.local }))) {
             val name = attribute.name.expanded
             if (name == ExpandedName(RDF_URI, "about") && attribute.value.isEmpty()) continue
-            if (authority && name.uri == CAMERA_URI && (name.local in requestedCameraFields || session.bindings.any { name.local in if (it.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS })) continue
+            if (authority && (name.uri == CAMERA_URI && name.local in requestedCameraFields || session.bindings.any { name in it.ownedProperties })) continue
             text("attribute"); text(name.uri); text(name.local); text(attribute.value)
         }
         for (node in element.children) when (node) {
             is XmlElement -> {
                 val name = node.name.expanded
-                if (authority && name.uri == CAMERA_URI && (name.local in requestedCameraFields || session.bindings.any { name.local in if (it.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS })) continue
-                if (authority && name == ExpandedName(CONTAINER_URI, "Directory") && session.bindings.isNotEmpty()) continue
+                if (authority && (name.uri == CAMERA_URI && name.local in requestedCameraFields || session.bindings.any { name in it.ownedProperties })) continue
                 val directSubject = authoritativeTree && !authority && element.name.expanded == ExpandedName(RDF_URI, "RDF") && node.name.expanded == ExpandedName(RDF_URI, "Description")
                 visit(node, directSubject, depth + 1u, directSubject || authoritativeTree && !authority && node.name.expanded == ExpandedName(RDF_URI, "RDF"))
             }

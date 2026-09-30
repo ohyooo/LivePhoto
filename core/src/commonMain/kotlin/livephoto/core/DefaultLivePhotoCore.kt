@@ -47,7 +47,19 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
-        val actual = if (target.profile == null && target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) target.copy(profile = ProfileId("jpeg")) else target
+        val actual = if (target.profile == null && target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus)) target.copy(profile = ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else "jpeg")) else target
+        if (actual.protocol == ProtocolIds.Oplus && actual.profile in setOf(ProfileId("jpeg-no-tail"), ProfileId("oneplus-tail-bearing"))) {
+            val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            val writes = if (actual.profile == ProfileId("jpeg-no-tail")) setOf(Operation.Create, Operation.SplitClean) else emptySet()
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                when { operation in reads -> Implementation.Supported; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
+                conditions = listOf(Condition(ConditionOperator.Equals, "imageContent", Value.Text("jpeg")),
+                    Condition(ConditionOperator.Equals, "videoContent", Value.Text("validated-mp4")),
+                    Condition(ConditionOperator.Equals, "vendorMarker", Value.Text("standard-exif-usercomment"))) + if (operation in writes)
+                    listOf(Condition(ConditionOperator.Equals, "exifDependencies", Value.Text("verified-safe-subset-no-ordinary-comment-collision"))) else emptyList(),
+                reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         if (actual.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
         val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
         val writes = setOf(Operation.Create, Operation.SplitClean)

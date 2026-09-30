@@ -5,6 +5,7 @@ import livephoto.core.binary.*
 import livephoto.core.jpeg.*
 import livephoto.core.xml.*
 import livephoto.core.xmp.*
+import livephoto.core.implementation.*
 
 internal const val CAMERA_URI: String = "http://ns.google.com/photos/1.0/camera/"
 internal const val CONTAINER_URI: String = "http://ns.google.com/photos/1.0/container/"
@@ -12,20 +13,8 @@ internal const val ITEM_URI: String = "http://ns.google.com/photos/1.0/container
 internal val V1_FIELDS: Set<String> = setOf("MicroVideo", "MicroVideoVersion", "MicroVideoOffset", "MicroVideoPresentationTimestampUs")
 internal val V2_FIELDS: Set<String> = setOf("MotionPhoto", "MotionPhotoVersion", "MotionPhotoPresentationTimestampUs")
 
-/** Parsed bindings are distinct from a validated media resource and never authorize writes. */
-internal data class GoogleBinding(
-    val protocol: ProtocolId,
-    val video: ByteRange? = null,
-    val padding: ByteRange? = null,
-    val items: List<GoogleItem> = emptyList(),
-    val key: KeyPhotoResult = KeyPhotoResult(),
-    val issues: List<Issue> = emptyList(),
-) {
-    val selector: ProtocolSelector get() = ProtocolSelector(protocol, ProfileId("jpeg"))
-    val structurallyValid: Boolean get() = video != null && issues.none { it.severity == Severity.Error }
-}
-
-internal data class GoogleItem(val semantic: String, val mime: String, val range: ByteRange, val length: ULong)
+internal typealias GoogleBinding = CarrierBinding
+internal typealias GoogleItem = CarrierItem
 
 internal object GoogleJpegReader {
     fun read(xmp: XmpCollection, jpeg: JpegStructure, source: SourceIdentity, budget: ParseBudget): CoreResult<List<GoogleBinding>> = attemptNow {
@@ -57,7 +46,8 @@ internal object GoogleJpegReader {
                 GoogleBinding(protocol, issues = listOf(Issue(fault.error.code, if (fault.error.code.value == "CAPABILITY_UNSUPPORTED") Severity.Warning else Severity.Error, Layer.Protocol,
                     fault.error.location ?: Location(source = source.id))))
             }
-            bindings += binding
+            val properties = fields.map { ExpandedName(CAMERA_URI, it) }.toSet() + if (protocol == ProtocolIds.GoogleV2) setOf(ExpandedName(CONTAINER_URI, "Directory")) else emptySet()
+            bindings += binding.copy(ownedProperties = properties)
         }
         frozenList(bindings)
     }
