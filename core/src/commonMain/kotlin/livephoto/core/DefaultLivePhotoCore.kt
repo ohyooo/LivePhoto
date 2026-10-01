@@ -29,7 +29,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = GoogleOperations.extract(request)
     override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
     override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = ConvertOperations.convert(request)
-    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairPreview.preview(request)
+    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairOperations.repair(request)
     override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = KeyMetadataOperations.set(request)
     override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = unavailable(request)
     override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> = unavailable(request)
@@ -137,7 +137,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo, Operation.SetKey)
         return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
             when { operation in reads -> Implementation.Supported; operation in writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1 -> Implementation.Experimental; else -> Implementation.Planned },
-            conditions = if (operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Condition(ConditionOperator.Equals, "dryRun", Value.BooleanValue(true)),
+            conditions = if (operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Condition(ConditionOperator.Equals, "mode", Value.Text("safe-metadata-only")),
                 Condition(ConditionOperator.Equals, "evidence", Value.Text("single-verified-post-jpeg-video-offset-only"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
                 Condition(ConditionOperator.Equals, "videoStructure", Value.Text("unfragmented-single-mdat-one-video-at-most-one-aac")),
                 Condition(ConditionOperator.Equals, "metadataDependencies", Value.Text("verified-plain-resource-directory-no-unsafe-relocation")))
@@ -156,7 +156,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         when (request) {
             is ConvertRequest -> ConvertOperations.plan(request)
             is SetKeyRequest -> KeyMetadataOperations.plan(request)
-            is RepairRequest -> RepairPreview.plan(request)
+            is RepairRequest -> RepairOperations.plan(request)
             else -> GoogleOperations.plan(request)
         }
 

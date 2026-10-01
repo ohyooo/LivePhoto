@@ -59,6 +59,7 @@ public data class SplitRequest(
     public val context: Context,
 ) : MutationRequest
 
+/** An empty allowedIssueCodes list allows all proven-safe repairs; dryRun never writes. */
 public class RepairRequest(
     public val input: SourceSet,
     public val mode: RepairMode = RepairMode.SafeMetadataOnly,
