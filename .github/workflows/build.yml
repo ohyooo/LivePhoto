@@ -1,0 +1,67 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (JDK 25)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Check build environment
+        shell: bash
+        run: |
+          criteria="$(find . -type f -name gradle-daemon-jvm.properties -print -quit)"
+          if [[ -n "$criteria" ]]; then
+            echo "::error::Remove $criteria before running Gradle."
+            exit 1
+          fi
+          if [[ -z "${JAVA_HOME_25_X64:-}" || ! -x "$JAVA_HOME_25_X64/bin/javac" ]]; then
+            echo "::error::This runner must provide an existing JDK 25; Java auto-provisioning is disabled."
+            exit 1
+          fi
+          echo "JAVA_HOME=$JAVA_HOME_25_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_25_X64/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Gradle and validate Wrapper
+        uses: gradle/actions/setup-gradle@07d1f8453baaff67fb503883367f8b13e6158a54 # v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Build and test
+        shell: bash
+        run: |
+          mkdir -p ci-output
+          bash ./gradlew build --console=plain --warning-mode=all 2>&1 | tee ci-output/gradle.log
+
+      - name: Upload build outputs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-outputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            **/build/libs/
+            **/build/distributions/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload test reports and build log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: build-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            ci-output/gradle.log
+          if-no-files-found: warn
+          retention-days: 14
