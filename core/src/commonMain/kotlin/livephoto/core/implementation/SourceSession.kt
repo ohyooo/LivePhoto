@@ -37,7 +37,7 @@ internal class SourceSession internal constructor(
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
 
     companion object {
-        suspend fun open(input: SourceSet, context: Context, budget: ParseBudget): CoreResult<SourceSession> = attempt {
+        suspend fun open(input: SourceSet, context: Context, budget: ParseBudget, probeEmbeddedVideo: Boolean = true): CoreResult<SourceSession> = attempt {
             val sources = when (input) {
                 is SourceSet.Single -> listOf(input.source)
                 is SourceSet.Pair -> listOf(input.image, input.video)
@@ -169,6 +169,9 @@ internal class SourceSession internal constructor(
             for (binding in bindings) {
                 issues += binding.issues
                 val range = binding.video ?: continue
+                // Repair preview independently probes a bounded physical suffix. Deferred media
+                // remains absent from videos and therefore cannot acquire complete coverage.
+                if (!probeEmbeddedVideo) continue
                 val probe = videoCache[range] ?: BmffVideoProbe(reader, budget).probe(range).also { videoCache[range] = it }
                 when (probe) {
                     is CoreResult.Success -> videos[binding.protocol] = probe.value

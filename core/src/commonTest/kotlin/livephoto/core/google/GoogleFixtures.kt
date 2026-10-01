@@ -14,7 +14,7 @@ internal object GoogleFixtures {
             segment(0xc4, dcTable + acTable) + segment(0xda, scanHeader) + bytes(0x3f, 0xff, 0xd9)
     }
 
-    fun video(editList: ByteArray? = null, composition: ByteArray? = null, trackDuration: UInt = 80u, hevc: Boolean = false, co64: Boolean = false, aac: Boolean = false, audioConfig: ByteArray = bytes(0x11, 0x90)): Video {
+    fun video(editList: ByteArray? = null, composition: ByteArray? = null, trackDuration: UInt = 80u, hevc: Boolean = false, co64: Boolean = false, aac: Boolean = false, audioConfig: ByteArray = bytes(0x11, 0x90), sampleDurations: Pair<UInt, UInt>? = null): Video {
         val samples = if (hevc) listOf(bytes(0, 0, 0, 2, 0x26, 1), bytes(0, 0, 0, 3, 2, 1, 0x22))
             else listOf(bytes(0, 0, 0, 2, 0x65, 0x88), bytes(0, 0, 0, 3, 0x41, 0x9a, 0x22))
         val configuration = if (hevc) {
@@ -32,7 +32,8 @@ internal object GoogleFixtures {
         put16(visualHeader, 76, 0xffff)
         val sampleDescription = box(if (hevc) "hvc1" else "avc1", visualHeader + box(if (hevc) "hvcC" else "avcC", configuration))
         val stsd = fullBox("stsd", u32(1u) + sampleDescription)
-        val stts = fullBox("stts", u32(1u) + u32(2u) + u32(40u))
+        val stts = if (sampleDurations == null) fullBox("stts", u32(1u) + u32(2u) + u32(40u))
+            else fullBox("stts", u32(2u) + u32(1u) + u32(sampleDurations.first) + u32(1u) + u32(sampleDurations.second))
         val stsc = fullBox("stsc", u32(1u) + u32(1u) + u32(2u) + u32(1u))
         val stsz = fullBox("stsz", u32(0u) + u32(2u) + u32(6u) + u32(7u))
         val stss = fullBox("stss", u32(1u) + u32(1u))

@@ -311,7 +311,7 @@ internal fun selectKey(video: VideoStructure, requested: CoverPosition?): KeyPho
     return KeyPhotoResult(position, source = if (requested == null) KeySource.DerivedDefault else KeySource.ProtocolField)
 }
 
-private fun microseconds(time: Time): Long {
+internal fun microseconds(time: Time): Long {
     if (time.value < 0) fail("INVALID_PRESENTATION_TIMESTAMP", "Key timestamp must be nonnegative")
     val whole = checkedMultiply((time.value / time.timescale.toLong()).toULong(), 1_000_000uL)
     val fractional = (time.value % time.timescale.toLong()).toULong() * 1_000_000uL / time.timescale.toULong()

@@ -29,8 +29,8 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = GoogleOperations.extract(request)
     override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
     override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = ConvertOperations.convert(request)
-    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = unavailable(request)
-    override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairPreview.preview(request)
+    override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = KeyMetadataOperations.set(request)
     override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = unavailable(request)
     override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> = unavailable(request)
     override suspend fun trim(request: TrimRequest): CoreResult<TrimResult> = unavailable(request)
@@ -134,15 +134,16 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         }
         if (actual.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
         val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-        val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo)
+        val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo, Operation.SetKey)
         return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
-            when (operation) { in reads -> Implementation.Supported; in writes -> Implementation.Experimental; else -> Implementation.Planned },
-            conditions = if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
+            when { operation in reads -> Implementation.Supported; operation in writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1 -> Implementation.Experimental; else -> Implementation.Planned },
+            conditions = if (operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Condition(ConditionOperator.Equals, "dryRun", Value.BooleanValue(true)),
+                Condition(ConditionOperator.Equals, "evidence", Value.Text("single-verified-post-jpeg-video-offset-only"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
                 Condition(ConditionOperator.Equals, "videoStructure", Value.Text("unfragmented-single-mdat-one-video-at-most-one-aac")),
                 Condition(ConditionOperator.Equals, "metadataDependencies", Value.Text("verified-plain-resource-directory-no-unsafe-relocation")))
                 else if (operation in reads) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg"))) else emptyList(),
-            reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
-            verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
+            reasons = if (operation in reads + writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
+            verification = if (operation in reads + writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Verification.SourceReviewed) else emptyList()) })
     }
     override fun getMediaCapabilities(): MediaCapabilities = MediaCapabilities(backend?.capabilities()?.backendIds ?: emptyList(),
         listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map { CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED"))) })
@@ -152,7 +153,12 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             else CoreResult.Success(CapabilitySet(Availability.Unsupported, emptyList(), listOf(Issue(result.error.code, Severity.Warning, Layer.Compatibility, result.error.location))))
     }
     override suspend fun plan(request: MutationRequest): CoreResult<ExecutionPlan> =
-        if (request is ConvertRequest) ConvertOperations.plan(request) else GoogleOperations.plan(request)
+        when (request) {
+            is ConvertRequest -> ConvertOperations.plan(request)
+            is SetKeyRequest -> KeyMetadataOperations.plan(request)
+            is RepairRequest -> RepairPreview.plan(request)
+            else -> GoogleOperations.plan(request)
+        }
 
     private suspend fun session(request: ReadRequest): SourceSession = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
     private fun <T> unavailable(request: MutationRequest): CoreResult<T> = attemptNow {
