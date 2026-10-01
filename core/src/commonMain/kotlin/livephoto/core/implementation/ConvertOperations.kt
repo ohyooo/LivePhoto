@@ -36,12 +36,12 @@ internal object ConvertOperations {
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
         val prepared = prepare(request, session, budget)
         if (prepared == null) {
-            val selectedReaders = session.legacyPair?.let { listOf(it.imageReader, it.videoReader) } ?: session.readers
+            val selectedReaders = session.applePair?.let { listOf(it.imageReader, it.videoReader) } ?: session.legacyPair?.let { listOf(it.imageReader, it.videoReader) } ?: session.readers
             val assets = selectedReaders.map { reader ->
                 val identity = reader.identity().orThrow()
-                val role = if (session.legacyPair == null) AssetRole.Composite else if (reader === session.reader) AssetRole.PrimaryImage else AssetRole.MotionVideo
+                val role = if (session.legacyPair == null && session.applePair == null) AssetRole.Composite else if (reader === session.reader) AssetRole.PrimaryImage else AssetRole.MotionVideo
                 GoogleOperations.rawAsset(session, ByteRange(0uL, identity.size), role,
-                    if (role == AssetRole.MotionVideo) "video/mp4" else "image/jpeg", request.context, inputReader = reader)
+                    if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.let { videoFacts(it).mime } ?: "application/octet-stream" else "image/jpeg", request.context, inputReader = reader)
             }
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
         }
@@ -65,6 +65,7 @@ internal object ConvertOperations {
             if (request.edits != null || request.preference != MediaPreference()) fail("INVALID_ARGUMENT", "PreserveAsIs does not apply requested media edits", Stage.Plan)
             return null
         }
+        if (session.applePair != null) fail("CAPABILITY_UNSUPPORTED", "Apple conversion requires verified selective binding cleanup", Stage.Plan)
         if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) fail("CAPABILITY_UNSUPPORTED", "This conversion batch implements Google JPEG targets", Stage.Plan)
         if (request.edits?.trim != null || request.edits?.replacementFrame != null) fail("CAPABILITY_UNSUPPORTED", "Conversion media edits require backend orchestration", Stage.Plan)
         val pair = session.legacyPair

@@ -47,6 +47,17 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
+        if (target.protocol == ProtocolIds.Apple) {
+            val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-mov")) else target
+            if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
+            val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                if (operation in reads) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
+                conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("exact-id-jpeg-quicktime-meta-pair")),
+                    Condition(ConditionOperator.Equals, "timedMetadata", Value.Text("bounded-mebx-samples-with-exact-edit-mapping"))),
+                reasons = if (operation in reads) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in reads) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         if (target.protocol in setOf(ProtocolIds.VivoLegacy, ProtocolIds.Fusion)) {
             val profile = ProfileId(if (target.protocol == ProtocolIds.VivoLegacy) "pair" else "jpeg")
             val actual = if (target.profile == null) target.copy(profile = profile) else target

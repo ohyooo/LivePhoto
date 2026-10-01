@@ -101,7 +101,7 @@ internal object GoogleOperations {
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
         if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction snapshot is stale", Stage.Extract)
-        val selected = if (request.resources.isEmpty()) session.inspection.layout.resources.filter { it.kind == ResourceKind.Video || session.legacyPair != null && it.kind == ResourceKind.PrimaryImage }.distinctBy { it.extents.map { extent -> extent.source to extent.range } }.map { it.id } else request.resources
+        val selected = if (request.resources.isEmpty()) session.inspection.layout.resources.filter { it.kind == ResourceKind.Video || (session.legacyPair != null || session.applePair != null) && it.kind == ResourceKind.PrimaryImage }.distinctBy { it.extents.map { extent -> extent.source to extent.range } }.map { it.id } else request.resources
         if (selected.distinct().size != selected.size) fail("INVALID_ARGUMENT", "Duplicate extraction resource IDs")
         checkResourceAliases(session, selected)
         val assets = mutableListOf<StagedAsset>()
@@ -130,6 +130,7 @@ internal object GoogleOperations {
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
         if (session.legacyPair != null) return@attempt VivoPairOperations.split(request, session).orThrow()
+        if (session.applePair != null && request.mode == SplitMode.Clean) fail("CAPABILITY_UNSUPPORTED", "Apple clean requires verified selective MakerNote and timed-track rewriting", Stage.Plan)
         if (request.mode == SplitMode.Raw) {
             val primary = session.inspection.layout.resources.firstOrNull { it.kind == ResourceKind.PrimaryImage }?.extents?.singleOrNull()?.range ?: fail("UNSUPPORTED_CONTAINER", "Raw split requires a contiguous primary range")
             val assets = mutableListOf(rawAsset(session, primary, AssetRole.PrimaryImage, session.inspection.media.firstOrNull()?.mime ?: "application/octet-stream", request.context))
@@ -137,7 +138,7 @@ internal object GoogleOperations {
             for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.Video }.distinctBy { it.extents.map { extent -> extent.range } }) {
                 val binding = session.bindings.first { videoId(it.protocol) == resource.id }
                 val video = session.videos[binding.protocol]
-                assets += rawAsset(session, resource.extents.single().range, AssetRole.MotionVideo, video?.let { videoFacts(it).mime } ?: "application/octet-stream", request.context, video?.container)
+                assets += rawAsset(session, resource.extents.single().range, AssetRole.MotionVideo, video?.let { videoFacts(it).mime } ?: "application/octet-stream", request.context, video?.container, session.readerFor(resource.extents.single().source))
             }
             for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.Trailer && it.extents.singleOrNull()?.owner in setOf(ProtocolIds.Oplus, ProtocolIds.Huawei) }) assets += rawAsset(session, resource.extents.single().range, AssetRole.VendorTrailer, "application/octet-stream", request.context)
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
@@ -224,6 +225,7 @@ internal object GoogleOperations {
             }
             snapshot = Snapshot(session.snapshot.identities + identity, GenerationToken(hash.finish().value))
         } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
+            if (session.applePair != null) fail("CAPABILITY_UNSUPPORTED", "Apple clean requires verified selective MakerNote and timed-track rewriting", Stage.Plan)
             if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_LAYOUT", "Clean plan needs one trusted resource graph")
             if (session.legacyPair != null) VivoPairOperations.preflightClean(session) else if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
         }

@@ -13,6 +13,7 @@ import livephoto.core.samsung.*
 import livephoto.core.vivo.*
 import livephoto.core.huawei.*
 import livephoto.core.legacy.*
+import livephoto.core.apple.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
 internal class SourceSession internal constructor(
@@ -28,8 +29,9 @@ internal class SourceSession internal constructor(
     val gainMaps: List<GainMapFacts> = emptyList(),
     val huaweiTail: HuaweiTailFacts? = null,
     val legacyPair: VivoPairFacts? = null,
+    val applePair: ApplePairFacts? = null,
 ) {
-    val reader: BinaryReader get() = legacyPair?.imageReader ?: readers.single()
+    val reader: BinaryReader get() = applePair?.imageReader ?: legacyPair?.imageReader ?: readers.single()
     suspend fun readerFor(source: SourceId): BinaryReader = readers.firstOrNull { it.identity().orThrow().id == source }
         ?: fail("INVALID_ARGUMENT", "Resource source is absent from the operation snapshot")
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
@@ -51,11 +53,23 @@ internal class SourceSession internal constructor(
                 hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes)
             }
             val snapshot = Snapshot(identities, GenerationToken(hash.finish().value))
-            if (readers.size != 1) return@attempt VivoPairSession.open(input, readers, snapshot, budget).orThrow()
+            if (readers.size != 1) {
+                val apple = ApplePairSession.open(input, readers, snapshot, budget)
+                val vivo = VivoPairSession.open(input, readers, snapshot, budget)
+                val missing = setOf("PAIR_ASSET_MISSING", "INVALID_PAIR_IDENTIFIER")
+                for (result in listOf(apple, vivo)) if (result is CoreResult.Failure && result.error.code.value !in missing) throw CoreFault(result.error)
+                val appleSession = (apple as? CoreResult.Success)?.value
+                val vivoSession = (vivo as? CoreResult.Success)?.value
+                if (appleSession != null && vivoSession != null) fail("AMBIGUOUS_PAIR", "Candidates contain more than one protocol pair", Stage.Inspect)
+                return@attempt appleSession ?: vivoSession ?: apple.orThrow() ?: vivo.orThrow()
+            }
             val reader = readers.single()
             val identity = identities.single()
             val content = detectContent(reader).orThrow()
             if (content.kind != ContentKind.Jpeg) {
+                if (content.kind == ContentKind.IsoBmff && BmffBrandHint.Heic !in content.brandHints) {
+                    ApplePairSession.open(input, readers, snapshot, budget).orThrow()?.let { return@attempt it }
+                }
                 if (content.kind == ContentKind.IsoBmff && BmffBrandHint.Heic in content.brandHints) {
                     val heic = SamsungHeicReader.read(reader, budget).orThrow()
                     if (heic != null) {
@@ -104,6 +118,9 @@ internal class SourceSession internal constructor(
                 }
             }
             val comments = exifComments.flatMap { it.comments }
+            val appleIdentifier = AppleImageReader.read(reader, jpeg, budget, exifComments.map { it.document }).orThrow()
+            val apple = appleIdentifier?.let { CarrierBinding(ProtocolIds.Apple, profile = ProfileId("jpeg-mov"),
+                issues = listOf(Issue(IssueCode("PAIR_ASSET_MISSING"), Severity.Error, Layer.Protocol))) }
             val comment = if (comments.size == 1) comments.single().text else null
             val oplus = OplusReader.read(xmp, google, jpeg, identity, comment, budget).orThrow()
             val sef = SefReader.parse(reader, jpeg.primary.endExclusive, budget).orThrow()
@@ -118,7 +135,7 @@ internal class SourceSession internal constructor(
                     issues = binding.issues + if (binding.video != vendor.video) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList(),
                     ownedProperties = if (vendor.protocol == ProtocolIds.VivoModern && vendor.items.size == 3) binding.ownedProperties - ExpandedName(CONTAINER_URI, "Directory") else binding.ownedProperties)
                 else binding
-            } + listOfNotNull(oplus, samsung, vivo, huawei, fusion)
+            } + listOfNotNull(oplus, samsung, vivo, huawei, fusion, apple)
             if (fusion?.structurallyValid == true) {
                 // Shared ranges come from the checked SEF graph. Each base match retains its own issues.
                 bindings = bindings.map { binding ->
@@ -292,7 +309,10 @@ internal class SourceSession internal constructor(
                 catch (_: CoreFault) { parsedKey }
             } else parsedKey
             reader.validateIdentity().orThrow()
-            val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared), frozenList(relationships)), frozenList(media), frozenList(metadata), key, issues = frozenList(issues))
+            if (appleIdentifier != null) metadata += MetadataEntry("apple:image:content-identifier", value = Value.Text(appleIdentifier.value), owner = Ownership.SourceProtocol,
+                location = Location(source = identity.id, range = appleIdentifier.range), origin = FactOrigin.Parsed)
+            val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared), frozenList(relationships)), frozenList(media), frozenList(metadata), key,
+                pairing = appleIdentifier?.let { PairingFacts(imageIdentifier = it.value, matches = false) }, issues = frozenList(issues))
             SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef, frozenList(gainMaps), huaweiTail)
         }
     }

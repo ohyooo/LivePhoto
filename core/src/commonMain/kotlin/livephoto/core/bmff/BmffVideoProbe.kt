@@ -14,11 +14,12 @@ internal data class VideoTrack(
     val transform: Bytes, val displayWidthFixed: UInt, val displayHeightFixed: UInt,
     val audioChannels: UInt? = null, val audioSampleRateFixed: UInt? = null, val audioSampleSize: UInt? = null,
     val audioActualSampleRate: UInt? = null, val audioActualChannelCount: UInt? = null,
+    val metadataKeys: Map<UInt, TimedMetadataKey> = emptyMap(),
 )
 internal data class VideoStructure(val container: VideoContainer, val range: ByteRange, val tracks: List<VideoTrack>, val movieTimescale: UInt, val movieDuration: ULong, val decoderValidated: Boolean = false)
 
 /** Unfragmented, single-mdat AVC/HEVC + AAC structural coverage. No decoder/playability claim. */
-internal class BmffVideoProbe(private val reader: BinaryReader, private val budget: ParseBudget = ParseBudget(reader.context)) {
+internal class BmffVideoProbe(private val reader: BinaryReader, private val budget: ParseBudget = ParseBudget(reader.context), private val allowTimedMetadata: Boolean = false) {
     private val boxes = BmffReader(reader, budget)
 
     suspend fun probe(range: ByteRange): CoreResult<VideoStructure> = attempt {
@@ -34,7 +35,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         if (brands.any { it in setOf("heic", "heix", "mif1", "msf1", "avif", "avis") }) unsupported("Mixed image/video brand semantics are not implemented")
         val mdats = root.filter { it.type == "mdat" }
         if (mdats.isEmpty()) corrupt("Movie has no mdat")
-        if (mdats.size != 1) unsupported("Multiple mdat boxes are not implemented")
+        if (mdats.size != 1 && !allowTimedMetadata) unsupported("Multiple mdat boxes are not implemented for this profile")
         val moov = children(one(root, "moov"), 1u)
         if (moov.any { it.type == "mvex" }) unsupported("Fragmented movie metadata is not implemented")
         val mvhd = bytes(one(moov, "mvhd"))
@@ -45,7 +46,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         val movieDuration = if (u8(mvhd, 0) == 0) u32(mvhd, 16).toULong() else u64(mvhd, 24)
         if (movieDuration == 0uL) corrupt("Movie duration is zero")
         val tracks = mutableListOf<VideoTrack>()
-        for (trak in moov.filter { it.type == "trak" }) tracks.add(track(trak, range, mdats.single().payload, movieScale, movieDuration))
+        for (trak in moov.filter { it.type == "trak" }) tracks.add(track(trak, range, mdats.map { it.payload }, movieScale, movieDuration))
         if (tracks.isEmpty() || tracks.none { it.handler == "vide" }) corrupt("Movie has no video track")
         if (tracks.map { it.trackId }.distinct().size != tracks.size) corrupt("Duplicate track identifiers")
         // Disallow overlapping chunk/sample resources, including across tracks.
@@ -55,7 +56,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         VideoStructure(container, range, tracks.toList(), movieScale, movieDuration)
     }
 
-    private suspend fun track(trak: BmffBox, videoRange: ByteRange, mdat: ByteRange, movieScale: UInt, movieDuration: ULong): VideoTrack {
+    private suspend fun track(trak: BmffBox, videoRange: ByteRange, mdats: List<ByteRange>, movieScale: UInt, movieDuration: ULong): VideoTrack {
         val children = children(trak, 2u)
         val tkhd = bytes(one(children, "tkhd"))
         fullVersion(tkhd, setOf(0, 1), allowFlags = true)
@@ -80,13 +81,14 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         val hdlr = bytes(one(mdia, "hdlr"))
         fullVersion(hdlr, setOf(0)); need(hdlr, 24)
         val handler = fourCc(hdlr, 8)
-        if (handler !in setOf("vide", "soun")) unsupported("Track handler $handler is not implemented")
+        val metadata = allowTimedMetadata && handler == "meta"
+        if (handler !in setOf("vide", "soun") && !metadata) unsupported("Track handler $handler is not implemented")
         val minf = children(one(mdia, "minf"), 4u)
-        val mediaHeader = bytes(one(minf, if (handler == "vide") "vmhd" else "smhd"))
+        val mediaHeader = if (metadata) bytes(one(children(one(minf, "gmhd"), 5u), "gmin")) else bytes(one(minf, if (handler == "vide") "vmhd" else "smhd"))
         if (handler == "vide") {
             exact(mediaHeader, 12uL)
             if (u32(mediaHeader, 0) != 1u) unsupported("Video media header version/flags are not implemented")
-        } else { fullVersion(mediaHeader, setOf(0)); exact(mediaHeader, 8uL) }
+        } else { fullVersion(mediaHeader, setOf(0)); exact(mediaHeader, if (metadata) 16uL else 8uL) }
         val edit = optional(children, "edts")?.let { parseEdit(it, movieScale) }
         val emptyTicks = if (edit == null) 0uL else convertTicks(edit.emptyDuration, movieScale, timescale)
         val presentationDuration = if (edit == null) Time(duration.toLong(), timescale) else {
@@ -116,7 +118,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         val references = boxes.readBoxes(ByteRange(checkedAdd(drefBox.payload.offset, 8uL), drefBox.payload.length - 8uL), 6u).orThrow()
         val reference = references.singleOrNull() ?: corrupt("Data reference count disagrees with entries")
         val refBytes = bytes(reference)
-        if (reference.type != "url " || refBytes.size != 4 || u8(refBytes, 0) != 0 || u8(refBytes, 1) != 0 || u8(refBytes, 2) != 0 || u8(refBytes, 3) != 1) unsupported("External data references are not implemented")
+        if (reference.type != "url " && !(allowTimedMetadata && reference.type == "alis") || refBytes.size != 4 || u8(refBytes, 0) != 0 || u8(refBytes, 1) != 0 || u8(refBytes, 2) != 0 || u8(refBytes, 3) != 1) unsupported("External data references are not implemented")
         val stbl = children(one(minf, "stbl"), 5u)
         if (stbl.any { it.type in setOf("stz2", "senc", "saiz", "saio") }) unsupported("Compact/encrypted sample tables are not implemented")
         val stsdBox = one(stbl, "stsd")
@@ -126,13 +128,14 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         val descriptions = boxes.readBoxes(ByteRange(checkedAdd(stsdBox.payload.offset, 8uL), stsdBox.payload.length - 8uL), 6u).orThrow()
         val entry = descriptions.singleOrNull() ?: corrupt("Sample description count disagrees with entries")
         val entryBytes = bytes(entry)
-        need(entryBytes, if (handler == "vide") 78 else 28)
+        need(entryBytes, if (handler == "vide") 78 else if (metadata) 8 else 28)
         if (u16(entryBytes, 6) != 1) unsupported("Sample entry does not use the local data reference")
         val codec: VideoCodec?
         val audio: AudioCodec?
         val config: Bytes
         var nalWidth = 0
         var aacConfiguration: AacConfiguration? = null
+        var metadataKeys: Map<UInt, TimedMetadataKey> = emptyMap()
         if (handler == "vide") {
             if (u16(entryBytes, 24) == 0 || u16(entryBytes, 26) == 0) corrupt("Video dimensions are zero")
             codec = when (entry.type) { "avc1", "avc3" -> VideoCodec.Avc; "hvc1", "hev1" -> VideoCodec.Hevc; else -> unsupported("Video sample entry ${entry.type} is not implemented") }
@@ -140,6 +143,11 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             val extra = boxes.readBoxes(ByteRange(checkedAdd(entry.payload.offset, 78uL), entry.payload.length - 78uL), 7u).orThrow()
             config = bytes(one(extra, if (codec == VideoCodec.Avc) "avcC" else "hvcC"))
             nalWidth = if (codec == VideoCodec.Avc) avcConfig(config, budget, entry.type == "avc3") else hevcConfig(config, budget, entry.type == "hev1")
+        } else if (metadata) {
+            if (entry.type != "mebx") unsupported("Only boxed timed metadata samples are implemented")
+            codec = null; audio = null
+            config = entryBytes.slice(8)
+            metadataKeys = TimedMetadata.readKeys(reader, ByteRange(entry.payload.offset + 8uL, entry.payload.length - 8uL), budget).orThrow()
         } else {
             codec = null; audio = AudioCodec.Aac
             if (entry.type != "mp4a") unsupported("Audio sample entry ${entry.type} is not implemented")
@@ -209,8 +217,8 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             for (ignored in 0 until checkedInt(inChunk)) {
                 checkCancelled(reader.context)
                 val size = sizes[sampleIndex].toUInt().toULong()
-                checkedRange(cursor, size, mdat.endExclusive)
-                if (cursor < mdat.offset) corrupt("Sample points outside mdat payload")
+                checkedRange(cursor, size, videoRange.endExclusive)
+                if (mdats.none { cursor >= it.offset && cursor <= it.endExclusive && size <= it.endExclusive - cursor }) corrupt("Sample points outside a complete mdat payload")
                 if (dts > Long.MAX_VALUE.toULong()) fail("INTEGER_OVERFLOW", "Decode time cannot be represented as signed presentation time")
                 val offset = composition[sampleIndex]
                 val base = dts.toLong()
@@ -238,7 +246,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             if (handler == "soun") u16(entryBytes, 16).toUInt() else null,
             if (handler == "soun") u32(entryBytes, 24) else null,
             if (handler == "soun") u16(entryBytes, 18).toUInt() else null,
-            aacConfiguration?.actualSampleRate, aacConfiguration?.channelCount)
+            aacConfiguration?.actualSampleRate, aacConfiguration?.channelCount, metadataKeys)
     }
 
     private fun timeTable(bytes: Bytes, count: Int, composition: Boolean): LongArray {
