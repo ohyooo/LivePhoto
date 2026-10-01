@@ -12,9 +12,10 @@ import livephoto.core.oplus.*
 import livephoto.core.samsung.*
 import livephoto.core.vivo.*
 import livephoto.core.huawei.*
+import livephoto.core.legacy.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
-internal class SourceSession private constructor(
+internal class SourceSession internal constructor(
     val readers: List<BinaryReader>,
     val snapshot: Snapshot,
     val jpeg: JpegStructure?,
@@ -26,8 +27,11 @@ internal class SourceSession private constructor(
     val sef: SefDirectory? = null,
     val gainMaps: List<GainMapFacts> = emptyList(),
     val huaweiTail: HuaweiTailFacts? = null,
+    val legacyPair: VivoPairFacts? = null,
 ) {
-    val reader: BinaryReader get() = readers.single()
+    val reader: BinaryReader get() = legacyPair?.imageReader ?: readers.single()
+    suspend fun readerFor(source: SourceId): BinaryReader = readers.firstOrNull { it.identity().orThrow().id == source }
+        ?: fail("INVALID_ARGUMENT", "Resource source is absent from the operation snapshot")
     suspend fun recheck(): Unit { for (reader in readers) reader.validateIdentity().orThrow() }
 
     companion object {
@@ -47,7 +51,7 @@ internal class SourceSession private constructor(
                 hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes)
             }
             val snapshot = Snapshot(identities, GenerationToken(hash.finish().value))
-            if (readers.size != 1) fail("CAPABILITY_UNSUPPORTED", "Pair and candidate protocol orchestration is not implemented", Stage.Inspect)
+            if (readers.size != 1) return@attempt VivoPairSession.open(input, readers, snapshot, budget).orThrow()
             val reader = readers.single()
             val identity = identities.single()
             val content = detectContent(reader).orThrow()
@@ -107,13 +111,22 @@ internal class SourceSession private constructor(
             val vivo = VivoReader.read(xmp, google, jpeg, identity, budget).orThrow()
             val huaweiTail = HuaweiTail.read(reader, jpeg.primary.endExclusive, budget).orThrow()?.let { HuaweiJpegReader.confirmEnvelope(reader, it, budget) }
             val huawei = huaweiTail?.let(HuaweiJpegReader::bind)
+            val fusion = FusionReader.read(xmp, samsung, oplus, vivo, google, budget).orThrow()
             var bindings = google.map { binding ->
                 val vendor = samsung?.takeIf { it.video != null } ?: oplus?.takeIf { it.video != null } ?: vivo?.takeIf { it.video != null }
                 if (vendor != null && binding.protocol == ProtocolIds.GoogleV2) binding.copy(video = vendor.video, compatibleBaseOf = vendor.protocol,
                     issues = binding.issues + if (binding.video != vendor.video) listOf(Issue(IssueCode("MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol, Location(source = identity.id, range = binding.video))) else emptyList(),
                     ownedProperties = if (vendor.protocol == ProtocolIds.VivoModern && vendor.items.size == 3) binding.ownedProperties - ExpandedName(CONTAINER_URI, "Directory") else binding.ownedProperties)
                 else binding
-            } + listOfNotNull(oplus, samsung, vivo, huawei)
+            } + listOfNotNull(oplus, samsung, vivo, huawei, fusion)
+            if (fusion?.structurallyValid == true) {
+                // Shared ranges come from the checked SEF graph. Each base match retains its own issues.
+                bindings = bindings.map { binding ->
+                    if (binding.protocol in setOf(ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.VivoModern))
+                        binding.copy(video = fusion.video, compatibleBaseOf = ProtocolIds.Fusion)
+                    else binding
+                }
+            }
             val gainMaps = mutableListOf<GainMapFacts>()
             val auxiliaryIssues = mutableListOf<Issue>()
             val auxiliaryRanges = bindings.flatMap { it.items }.filter { it.semantic == "GainMap" && it.mime == "image/jpeg" }.map { it.range }.distinct() +
@@ -155,17 +168,18 @@ internal class SourceSession private constructor(
                 binding.copy(issues = binding.issues + profileIssues)
             }
             val matches = bindings.map { binding -> Match(binding.selector,
-                if (binding.protocol == ProtocolIds.Samsung && sef?.legacyDialect == true && binding.protocol in videos) MatchStrength.Legacy else if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
+                if (binding.protocol == ProtocolIds.Fusion && binding.structurallyValid && binding.protocol in videos) MatchStrength.Legacy else if (binding.protocol == ProtocolIds.Samsung && sef?.legacyDialect == true && binding.protocol in videos) MatchStrength.Legacy else if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
                 issues = binding.issues, resourceIds = if (binding.video != null) listOf(videoId(binding.protocol)) else emptyList()) }
             val strong = matches.filter { it.strength == MatchStrength.Strong }
-            val conflicting = strong.mapNotNull { match -> bindings.first { it.selector == match.target }.video }.distinct().size > 1
+            val conflicting = strong.mapNotNull { match -> bindings.first { it.selector == match.target }.video }.distinct().size > 1 ||
+                fusion?.issues?.any { it.severity == Severity.Error && it.code.value == "CONFLICTING_METADATA" } == true
             val disposition = when {
                 conflicting -> Disposition.Ambiguous
                 strong.isNotEmpty() -> Disposition.Live
                 matches.isNotEmpty() -> Disposition.Candidate
                 else -> Disposition.NonLive
             }
-            val primary = if (conflicting) null else (strong.firstOrNull { it.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) } ?: strong.firstOrNull { it.target.protocol == ProtocolIds.GoogleV2 } ?: strong.firstOrNull() ?: matches.singleOrNull())?.target
+            val primary = if (conflicting) null else (matches.firstOrNull { it.target.protocol == ProtocolIds.Fusion && it.strength == MatchStrength.Legacy } ?: strong.firstOrNull { it.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) } ?: strong.firstOrNull { it.target.protocol == ProtocolIds.GoogleV2 } ?: strong.firstOrNull() ?: matches.singleOrNull())?.target
             val detection = DetectionResult(disposition, primary, frozenList(matches), frozenList(issues), snapshot)
             val regions = mutableListOf(Region(ResourceId("primary"), identity.id, jpeg.primary, ResourceKind.PrimaryImage))
             val resources = mutableListOf(Resource(ResourceId("primary"), ResourceKind.PrimaryImage, listOf(regions.first()), true))

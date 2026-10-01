@@ -48,9 +48,10 @@ internal object GoogleJpegWriter {
             if (jpeg.trailing.length != 0uL) fail("UNSAFE_METADATA_REWRITE", "Unowned suffix cannot be silently removed by clean split")
             return@attemptNow JpegRewrite.plan(jpeg, additionalPatches).orThrow()
         }
-        if (session.bindings.filter { it.compatibleBaseOf == null }.any { !it.structurallyValid }) fail("UNSAFE_METADATA_REWRITE", "Broken or conflicting bindings cannot authorize clean deletion")
-        if (session.bindings.any { it.trailer != null }) fail("CAPABILITY_UNSUPPORTED", "Unknown vendor trailer cleanup has not been implemented")
-        if (session.bindings.any { it.padding?.length != null && it.padding.length != 0uL && !(verifiedSamsungPadding && it.padding.length == 24uL && (it.protocol == ProtocolIds.Samsung || it.compatibleBaseOf == ProtocolIds.Samsung)) || it.items.size > 2 }) fail("GAINMAP_PRESERVATION_UNAVAILABLE", "Auxiliary resources and unknown padding require a verified clean relocation plan")
+        val effective = session.bindings.filter { it.compatibleBaseOf == null }
+        if (effective.any { !it.structurallyValid || it.issues.any { issue -> issue.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") } }) fail("UNSAFE_METADATA_REWRITE", "Broken or conflicting bindings cannot authorize clean deletion")
+        if (effective.any { it.trailer != null }) fail("CAPABILITY_UNSUPPORTED", "Unknown vendor trailer cleanup has not been implemented")
+        if (effective.any { it.padding?.length != null && it.padding.length != 0uL && !(verifiedSamsungPadding && it.padding.length == 24uL && it.protocol in setOf(ProtocolIds.Samsung, ProtocolIds.Fusion)) || it.items.size > 2 }) fail("GAINMAP_PRESERVATION_UNAVAILABLE", "Auxiliary resources and unknown padding require a verified clean relocation plan")
         if (!xmp.rewriteAllowed) fail("UNSAFE_METADATA_REWRITE", "Clean requires one complete ordinary XMP packet")
         val packet = if (session.bindings.any { it.protocol == ProtocolIds.GoogleV2 }) removeDirectory(xmp.packets.single(), context) else xmp.packets.single()
         val fields = session.bindings.flatMap { it.ownedProperties }.filter { it != ExpandedName(CONTAINER_URI, "Directory") }.toSet()

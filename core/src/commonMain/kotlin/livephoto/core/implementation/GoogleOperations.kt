@@ -11,7 +11,7 @@ import livephoto.core.vivo.*
 import livephoto.core.huawei.*
 
 internal object GoogleOperations {
-    suspend fun create(request: CreateRequest): CoreResult<OperationResult> = attempt {
+    suspend fun create(request: CreateRequest, originalInputs: List<BinaryReader> = emptyList(), sourceChanges: List<Change> = emptyList(), sourceKey: KeyPhotoResult? = null, metadataUnproven: Boolean = false): CoreResult<OperationResult> = attempt {
         RequestValidation.validate(request).orThrow()
         if (Guarantee.ExactExtraction in request.policy.requiredGuarantees) fail("PRESERVATION_REQUIREMENT_FAILED", "Create constructs a new composite asset; whole-asset exact extraction is not applicable", Stage.Plan)
         if (request.context.limits.maxSources < 2u) fail("RESOURCE_LIMIT_EXCEEDED", "Create requires two input sources")
@@ -32,8 +32,13 @@ internal object GoogleOperations {
         if (huawei && !basicMediaEnvelope(videoReader, ByteRange(0uL, videoIdentity.size), budget)) fail("UNKNOWN_PROTOCOL_VARIANT", "Huawei writer cannot bind unknown media extensions", Stage.Plan)
         if (huawei && request.target.profile != null && request.target.profile != ProfileId("basic60")) fail("UNSUPPORTED_PROTOCOL", "Huawei writer only implements basic60 JPEG")
         val huaweiPlan = if (huawei) HuaweiJpegWriter.createPlan(image, video, videoIdentity.size, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.edits?.keyPosition, budget).orThrow() else null
-        val key = if (huawei) KeyPhotoResult() else selectKey(video, request.edits?.keyPosition)
-        val timestamp = if (huawei) 0L else microseconds(key.position!!)
+        val key = if (huawei) KeyPhotoResult() else if (request.edits?.keyPosition == null && sourceKey != null) sourceKey else selectKey(video, request.edits?.keyPosition)
+        key.position?.let { position ->
+            val duration = video.tracks.filter { it.handler == "vide" }.maxOfOrNull { it.presentationDuration }
+                ?: fail("FRAME_INDEX_UNAVAILABLE", "Target video has no presentation timeline")
+            if (position < Time.Zero || position >= duration) fail("INVALID_PRESENTATION_TIMESTAMP", "Preserved key position is outside the target video", Stage.Plan)
+        }
+        val timestamp = if (huawei) 0L else key.position?.let(::microseconds) ?: -1L
         val mime = if (video.container == VideoContainer.Mov) "video/quicktime" else "video/mp4"
         val oplus = request.target.protocol == ProtocolIds.Oplus
         val samsung = request.target.protocol == ProtocolIds.Samsung
@@ -65,7 +70,7 @@ internal object GoogleOperations {
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "Create constructs a new composite carrier; no whole-carrier exact extraction claim"),
                     GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.Verified, videoDigest, extractedDigest, "Embedded resource ${videoId(binding.protocol).value}: complete encoded video suffix bytes unchanged"),
                     GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.Verified, coding, outputCoding, "JPEG frame/tables/scan headers/entropy bytes unchanged"),
-                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata, "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately")), if (huawei) staged.inspection.keyPhoto else key.copy(position = Time(timestamp, 1_000_000u)))
+                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (!metadataUnproven && opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata, "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately")), if (huawei || sourceKey != null) staged.inspection.keyPhoto else key.copy(position = Time(timestamp, 1_000_000u)))
             })
         val targetFields = if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS
         val changes = targetFields.map { field ->
@@ -88,15 +93,17 @@ internal object GoogleOperations {
             Change("{$OPLUS_URI}MotionPhotoOwner", after = Value.Text("oplus"), reason = "Write Oplus ownership", requested = true),
             Change("{$OPLUS_URI}OLivePhotoVersion", after = Value.Text("2"), reason = "Write the implemented Oplus version", requested = true),
             Change("exif:UserComment", after = Value.Text(OPLUS_MARKER), reason = "Write the requested vendor recognition marker", requested = true)) else emptyList()
-        publish(request.output, request.policy, request.context, image.readers + videoReader, listOf(asset), allChanges).orThrow()
+        publish(request.output, request.policy, request.context, originalInputs + image.readers + videoReader, listOf(asset), sourceChanges + allChanges).orThrow()
     }
 
     suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = attempt {
+        RequestValidation.validate(request).orThrow()
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
         if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction snapshot is stale", Stage.Extract)
-        val selected = if (request.resources.isEmpty()) session.inspection.layout.resources.filter { it.kind == ResourceKind.Video }.distinctBy { it.extents.map { extent -> extent.source to extent.range } }.map { it.id } else request.resources
+        val selected = if (request.resources.isEmpty()) session.inspection.layout.resources.filter { it.kind == ResourceKind.Video || session.legacyPair != null && it.kind == ResourceKind.PrimaryImage }.distinctBy { it.extents.map { extent -> extent.source to extent.range } }.map { it.id } else request.resources
         if (selected.distinct().size != selected.size) fail("INVALID_ARGUMENT", "Duplicate extraction resource IDs")
+        checkResourceAliases(session, selected)
         val assets = mutableListOf<StagedAsset>()
         for (id in selected) {
             val resource = session.inspection.layout.resources.firstOrNull { it.id == id } ?: fail("INVALID_ARGUMENT", "Resource ID does not belong to current source inspection")
@@ -106,17 +113,24 @@ internal object GoogleOperations {
             val video = binding?.let { session.videos[it.protocol] }
             val role = when (resource.kind) { ResourceKind.Video -> AssetRole.MotionVideo; ResourceKind.PrimaryImage -> AssetRole.PrimaryImage; ResourceKind.GainMap, ResourceKind.Depth, ResourceKind.Thumbnail -> AssetRole.AuxiliaryImage; ResourceKind.Trailer -> AssetRole.VendorTrailer; else -> AssetRole.SidecarMetadata }
             val mime = if (resource.kind == ResourceKind.PrimaryImage) session.inspection.media.firstOrNull()?.mime ?: "application/octet-stream" else if (resource.kind == ResourceKind.GainMap && session.gainMaps.any { it.range == range }) "image/jpeg" else if (video?.container == VideoContainer.Mov) "video/quicktime" else if (video?.container == VideoContainer.Mp4) "video/mp4" else binding?.items?.lastOrNull()?.mime ?: "application/octet-stream"
-            assets += rawAsset(session, range, role, mime, request.context, video?.container)
+            assets += rawAsset(session, range, role, mime, request.context, video?.container, session.readerFor(resource.extents.single().source))
         }
-        if (request.includeRawCarrier) assets += rawAsset(session, ByteRange(0uL, session.snapshot.identities.single().size), AssetRole.Composite, session.inspection.media.firstOrNull()?.mime ?: "application/octet-stream", request.context)
+        if (request.includeRawCarrier) {
+            for (reader in session.readers) {
+                val identity = reader.identity().orThrow()
+                assets += rawAsset(session, ByteRange(0uL, identity.size), AssetRole.Composite, "application/octet-stream", request.context, inputReader = reader)
+            }
+        }
         if (assets.isEmpty()) fail("MOTION_VIDEO_MISSING", "No requested embedded resources are available", Stage.Extract)
         publish(request.output, MutationPolicy(), request.context, session.readers, assets).orThrow()
     }
 
     suspend fun split(request: SplitRequest): CoreResult<OperationResult> = attempt {
         RequestValidation.validate(request).orThrow()
+        val budget = ParseBudget(request.context)
+        val session = SourceSession.open(request.input, request.context, budget).orThrow()
+        if (session.legacyPair != null) return@attempt VivoPairOperations.split(request, session).orThrow()
         if (request.mode == SplitMode.Raw) {
-            val session = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
             val primary = session.inspection.layout.resources.firstOrNull { it.kind == ResourceKind.PrimaryImage }?.extents?.singleOrNull()?.range ?: fail("UNSUPPORTED_CONTAINER", "Raw split requires a contiguous primary range")
             val assets = mutableListOf(rawAsset(session, primary, AssetRole.PrimaryImage, session.inspection.media.firstOrNull()?.mime ?: "application/octet-stream", request.context))
             for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.GainMap }.distinctBy { it.extents.map { extent -> extent.source to extent.range } }) assets += rawAsset(session, resource.extents.single().range, AssetRole.AuxiliaryImage, "image/jpeg", request.context)
@@ -128,8 +142,6 @@ internal object GoogleOperations {
             for (resource in session.inspection.layout.resources.filter { it.kind == ResourceKind.Trailer && it.extents.singleOrNull()?.owner in setOf(ProtocolIds.Oplus, ProtocolIds.Huawei) }) assets += rawAsset(session, resource.extents.single().range, AssetRole.VendorTrailer, "application/octet-stream", request.context)
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
         }
-        val budget = ParseBudget(request.context)
-        val session = SourceSession.open(request.input, request.context, budget).orThrow()
         if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_PROTOCOL", "Clean needs one trusted resource graph")
         val oplus = session.bindings.any { it.protocol == ProtocolIds.Oplus }
         val vivo = session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()
@@ -212,11 +224,13 @@ internal object GoogleOperations {
             }
             snapshot = Snapshot(session.snapshot.identities + identity, GenerationToken(hash.finish().value))
         } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
-            if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
+            if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_LAYOUT", "Clean plan needs one trusted resource graph")
+            if (session.legacyPair != null) VivoPairOperations.preflightClean(session) else if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
         }
         else if (request is ExtractRequest) {
             if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction plan snapshot is stale")
             if (request.resources.any { id -> session.inspection.layout.resources.none { it.id == id } }) fail("INVALID_ARGUMENT", "Extraction plan refers to unknown resource")
+            checkResourceAliases(session, request.resources)
         }
         val output = when (request) { is CreateRequest -> request.output; is ExtractRequest -> request.output; is SplitRequest -> request.output }
         val policy = when (request) { is CreateRequest -> request.policy; is SplitRequest -> request.policy; else -> MutationPolicy() }
@@ -229,21 +243,32 @@ internal object GoogleOperations {
             PreservationReport(), CapabilitySet(if (implemented) Availability.Conditional else Availability.Unsupported, listOf(entry)))
     }
 
-    private suspend fun rawAsset(session: SourceSession, range: ByteRange, role: AssetRole, mime: String, context: Context, container: VideoContainer? = null): StagedAsset {
-        val digest = sha256Range(session.reader, range).orThrow()
+    internal suspend fun rawAsset(session: SourceSession, range: ByteRange, role: AssetRole, mime: String, context: Context, container: VideoContainer? = null, inputReader: BinaryReader = session.reader): StagedAsset {
+        val digest = sha256Range(inputReader, range).orThrow()
         return StagedAsset(OutputAssetSpec(role, mime = mime), if (role == AssetRole.PrimaryImage || role == AssetRole.Composite) session.inspection.media.firstOrNull()?.imageFormat else if (role == AssetRole.AuxiliaryImage && session.gainMaps.any { it.range == range }) ImageFormat.Jpeg else null, container,
-            write = { writer -> copyRange(session.reader, writer, range, context).orThrow() },
+            write = { writer -> copyRange(inputReader, writer, range, context).orThrow() },
             verify = { id, reader ->
                 val size = reader.identity().orThrow().size
                 if (size != range.length || sha256Range(reader, ByteRange(0uL, size)).orThrow() != digest) fail("POSTCONDITION_FAILED", "Raw extraction is not byte-identical", Stage.Verify)
                 val check = CheckResult("extraction.sha256", Layer.Preservation, Verdict.Valid, Coverage.Complete)
                 val jpeg = session.jpeg
-                val metadataSafe = role == AssetRole.Composite || role == AssetRole.MotionVideo || role == AssetRole.PrimaryImage && jpeg != null && jpeg.trailing.length == 0uL && !jpeg.hasMpf
+                val metadataSafe = role == AssetRole.Composite || role == AssetRole.MotionVideo || session.legacyPair != null && range == ByteRange(0uL, inputReader.identity().orThrow().size) || role == AssetRole.PrimaryImage && jpeg != null && jpeg.trailing.length == 0uL && !jpeg.hasMpf
                 val videoVerified = if (role == AssetRole.Composite) session.videos.isNotEmpty() else session.bindings.any { it.video == range && it.protocol in session.videos }
                 val imageVerified = if (role == AssetRole.AuxiliaryImage) session.gainMaps.any { it.range == range } else session.inspection.media.firstOrNull()?.width != null && session.inspection.media.firstOrNull()?.height != null
                 AssetVerification(ValidationReport(Verdict.Valid, Coverage.Complete, listOf(check), snapshot = session.snapshot), exactRecords(id, digest, role, metadataSafe, videoVerified, imageVerified))
             })
     }
+}
+
+internal fun checkResourceAliases(session: SourceSession, selected: List<ResourceId>): Unit {
+    val resources = selected.map { id -> session.inspection.layout.resources.firstOrNull { it.id == id }
+        ?: fail("INVALID_ARGUMENT", "Resource ID does not belong to current source inspection") }
+    val aliases = resources.groupBy { it.extents.map { extent -> extent.source to extent.range } }.values.firstOrNull { it.size > 1 } ?: return
+    throw CoreFault(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Explicit resource IDs refer to the same source bytes",
+        details = mapOf("resourceIds" to Value.ArrayValue(aliases.map { Value.Text(it.id.value) }),
+            "source" to Value.Text(aliases.first().extents.first().source.value),
+            "offset" to Value.Number(aliases.first().extents.first().range.offset.toString()),
+            "length" to Value.Number(aliases.first().extents.first().range.length.toString()))))
 }
 
 internal fun selectKey(video: VideoStructure, requested: CoverPosition?): KeyPhotoResult {

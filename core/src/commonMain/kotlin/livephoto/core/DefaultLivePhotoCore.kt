@@ -28,7 +28,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun create(request: CreateRequest): CoreResult<OperationResult> = GoogleOperations.create(request)
     override suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = GoogleOperations.extract(request)
     override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
-    override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = ConvertOperations.convert(request)
     override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = unavailable(request)
     override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = unavailable(request)
     override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = unavailable(request)
@@ -47,6 +47,21 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
+        if (target.protocol in setOf(ProtocolIds.VivoLegacy, ProtocolIds.Fusion)) {
+            val profile = ProfileId(if (target.protocol == ProtocolIds.VivoLegacy) "pair" else "jpeg")
+            val actual = if (target.profile == null) target.copy(profile = profile) else target
+            if (actual.profile != profile) return ProtocolRegistry.planned().capabilities(actual)
+            val implemented = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.SplitClean, Operation.ConvertFrom, Operation.GetKey)
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                if (operation in implemented) Implementation.Experimental else Implementation.Unsupported,
+                lifecycle = Lifecycle.Legacy,
+                exposure = if (operation in setOf(Operation.Create, Operation.ConvertTo)) Exposure.Hidden else Exposure.Public,
+                conditions = listOf(Condition(ConditionOperator.Equals, "profile", Value.Text(if (target.protocol == ProtocolIds.VivoLegacy)
+                    "exact-id-jpeg-mp4-pair-clean-only-terminal-owned-uuid" else "author-marker-canonical-sef-verified-vendor-authority"))) +
+                    if (operation == Operation.ConvertFrom) listOf(Condition(ConditionOperator.Equals, "target", Value.Text("google-jpeg-no-auxiliary-or-ordinary-sef-relocation"))) else emptyList(),
+                reasons = if (operation in implemented) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in implemented) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         if (target.protocol == ProtocolIds.Huawei) {
             val actual = if (target.profile == null) target.copy(profile = ProfileId("basic60")) else target
             if (actual.profile !in setOf(ProfileId("basic60"), ProfileId("honor-extended"))) return ProtocolRegistry.planned().capabilities(actual)
@@ -104,7 +119,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         }
         if (actual.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
         val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-        val writes = setOf(Operation.Create, Operation.SplitClean)
+        val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo)
         return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
             when (operation) { in reads -> Implementation.Supported; in writes -> Implementation.Experimental; else -> Implementation.Planned },
             conditions = if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
@@ -121,7 +136,8 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         is CoreResult.Failure -> if (result.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED")) result
             else CoreResult.Success(CapabilitySet(Availability.Unsupported, emptyList(), listOf(Issue(result.error.code, Severity.Warning, Layer.Compatibility, result.error.location))))
     }
-    override suspend fun plan(request: MutationRequest): CoreResult<ExecutionPlan> = GoogleOperations.plan(request)
+    override suspend fun plan(request: MutationRequest): CoreResult<ExecutionPlan> =
+        if (request is ConvertRequest) ConvertOperations.plan(request) else GoogleOperations.plan(request)
 
     private suspend fun session(request: ReadRequest): SourceSession = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
     private fun <T> unavailable(request: MutationRequest): CoreResult<T> = attemptNow {

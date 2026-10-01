@@ -5,6 +5,8 @@ import livephoto.core.binary.*
 import livephoto.core.google.*
 import livephoto.core.implementation.*
 import livephoto.core.jpeg.*
+import livephoto.core.exif.ExifMarkerAction
+import livephoto.core.oplus.OplusJpegWriter
 
 internal data class SamsungJpegPlan(val image: JpegRewritePlan, val suffix: SefWritePlan)
 
@@ -30,7 +32,9 @@ internal object SamsungJpegWriter {
         val suffix = SefWriter.cleanPlan(session.reader, directory, budget).orThrow()
         val image = if (session.bindings.none { it.protocol == ProtocolIds.GoogleV2 }) JpegRewrite.plan(jpeg, emptyList()).orThrow()
             else if (binding == null) JpegRewrite.plan(jpeg, emptyList()).orThrow()
-            else GoogleJpegWriter.cleanPlan(session, context, verifiedSamsungPadding = true).orThrow()
+            else GoogleJpegWriter.cleanPlan(session, context,
+                additionalPatches = if (session.bindings.any { it.protocol == ProtocolIds.Fusion && it.structurallyValid }) OplusJpegWriter.markerPatch(session, ExifMarkerAction.RemoveOwned, budget) else emptyList(),
+                verifiedSamsungPadding = true).orThrow()
         SamsungJpegPlan(image, suffix)
     }
 }

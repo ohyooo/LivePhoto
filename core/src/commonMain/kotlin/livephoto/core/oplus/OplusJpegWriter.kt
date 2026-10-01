@@ -57,7 +57,7 @@ internal object OplusJpegWriter {
         result
     }
 
-    private suspend fun markerPatch(session: SourceSession, action: ExifMarkerAction, budget: ParseBudget): List<JpegPatch> {
+    internal suspend fun markerPatch(session: SourceSession, action: ExifMarkerAction, budget: ParseBudget): List<JpegPatch> {
         val jpeg = session.jpeg!!
         val segments = jpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }
         if (segments.size > 1) fail("CONFLICTING_METADATA", "Multiple EXIF APP1 blocks cannot authorize one Oplus marker")
