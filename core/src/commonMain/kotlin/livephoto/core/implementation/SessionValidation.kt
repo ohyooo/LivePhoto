@@ -35,10 +35,11 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
     }
     if (Layer.Protocol in layers) {
         val protocolIssues = issues.filter { it.layer == Layer.Protocol }
-        checks += CheckResult("google.binding", Layer.Protocol, if (protocolIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (protocolIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
+        val apple = selectedTarget?.protocol == ProtocolIds.Apple
+        checks += CheckResult(if (apple) "apple.pair" else "google.binding", Layer.Protocol, if (protocolIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (protocolIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
             if (selectedBindings.isEmpty()) Coverage.NotRun else if (protocolIssues.any { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.Partial else Coverage.Complete, protocolIssues)
-        val targetIssues = selectedBindings.flatMap { binding -> session.videos[binding.protocol]?.let { googleVideoIssues(it, binding.selector, false) } ?: emptyList() }
-        checks += CheckResult("google.video-profile", Layer.Protocol,
+        val targetIssues = selectedBindings.flatMap { binding -> if (binding.protocol == ProtocolIds.Apple) emptyList() else session.videos[binding.protocol]?.let { googleVideoIssues(it, binding.selector, false) } ?: emptyList() }
+        checks += CheckResult(if (apple) "apple.media-profile" else "google.video-profile", Layer.Protocol,
             if (targetIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (targetIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
             if (selectedBindings.none { it.protocol in session.videos }) Coverage.NotRun else if (selectedBindings.any { it.video != null && it.protocol !in session.videos } || targetIssues.any { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.Partial else Coverage.Complete, targetIssues)
     }

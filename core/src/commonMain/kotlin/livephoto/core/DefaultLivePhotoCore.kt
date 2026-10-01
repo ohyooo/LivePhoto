@@ -51,12 +51,16 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-mov")) else target
             if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            val writes = setOf(Operation.SplitClean, Operation.ConvertFrom)
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
-                if (operation in reads) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
+                if (operation in reads + writes) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
                 conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("exact-id-jpeg-quicktime-meta-pair")),
-                    Condition(ConditionOperator.Equals, "timedMetadata", Value.Text("bounded-mebx-samples-with-exact-edit-mapping"))),
-                reasons = if (operation in reads) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
-                verification = if (operation in reads) listOf(Verification.SourceReviewed) else emptyList()) })
+                    Condition(ConditionOperator.Equals, "timedMetadata", Value.Text("bounded-mebx-samples-with-exact-edit-mapping"))) +
+                    if (operation in writes) listOf(Condition(ConditionOperator.Equals, "cleanup", Value.Text("cid-only-maker-note-and-dedicated-cid-meta-and-still-time-tracks")),
+                        Condition(ConditionOperator.Equals, "preservation", Value.Text("fixed-offset-no-unclassified-track-fields-opaque-associations-unknown"))) +
+                        if (operation == Operation.ConvertFrom) listOf(Condition(ConditionOperator.Equals, "target", Value.Text("google-jpeg-single-mdat-or-unchanged-same-target"))) else emptyList() else emptyList(),
+                reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
+                verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
         }
         if (target.protocol in setOf(ProtocolIds.VivoLegacy, ProtocolIds.Fusion)) {
             val profile = ProfileId(if (target.protocol == ProtocolIds.VivoLegacy) "pair" else "jpeg")

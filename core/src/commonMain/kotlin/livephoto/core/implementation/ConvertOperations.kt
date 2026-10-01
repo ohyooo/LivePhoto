@@ -8,6 +8,7 @@ import livephoto.core.oplus.*
 import livephoto.core.samsung.*
 import livephoto.core.vivo.*
 import livephoto.core.jpeg.*
+import livephoto.core.apple.*
 
 internal object ConvertOperations {
     suspend fun plan(request: ConvertRequest): CoreResult<ExecutionPlan> = attempt {
@@ -41,11 +42,12 @@ internal object ConvertOperations {
                 val identity = reader.identity().orThrow()
                 val role = if (session.legacyPair == null && session.applePair == null) AssetRole.Composite else if (reader === session.reader) AssetRole.PrimaryImage else AssetRole.MotionVideo
                 GoogleOperations.rawAsset(session, ByteRange(0uL, identity.size), role,
-                    if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.let { videoFacts(it).mime } ?: "application/octet-stream" else "image/jpeg", request.context, inputReader = reader)
+                    if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.let { videoFacts(it).mime } ?: "application/octet-stream" else "image/jpeg", request.context,
+                    container = if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.container else null, inputReader = reader)
             }
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
         }
-        val changes = session.inspection.metadata.filter { it.owner == Ownership.SourceProtocol }.map { Change(it.selector, it.value, null, "Remove confirmed source binding before conversion", true) } +
+        val changes = if (session.applePair != null) ApplePairOperations.changes(session) else session.inspection.metadata.filter { it.owner == Ownership.SourceProtocol }.map { Change(it.selector, it.value, null, "Remove confirmed source binding before conversion", true) } +
             if (session.legacyPair != null) listOf(Change("vivo:legacy:image-tail", reason = "Remove confirmed source tail", requested = true), Change("vivo:legacy:video-uuid", reason = "Remove terminal owned UUID", requested = true)) else emptyList()
         GoogleOperations.create(CreateRequest(prepared.first, prepared.second, request.target, request.preference, request.edits,
             policy = request.policy, output = request.output, context = request.context), session.readers, changes, session.inspection.keyPhoto,
@@ -65,9 +67,12 @@ internal object ConvertOperations {
             if (request.edits != null || request.preference != MediaPreference()) fail("INVALID_ARGUMENT", "PreserveAsIs does not apply requested media edits", Stage.Plan)
             return null
         }
-        if (session.applePair != null) fail("CAPABILITY_UNSUPPORTED", "Apple conversion requires verified selective binding cleanup", Stage.Plan)
         if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) fail("CAPABILITY_UNSUPPORTED", "This conversion batch implements Google JPEG targets", Stage.Plan)
         if (request.edits?.trim != null || request.edits?.replacementFrame != null) fail("CAPABILITY_UNSUPPORTED", "Conversion media edits require backend orchestration", Stage.Plan)
+        if (session.applePair != null) {
+            val clean = AppleClean.prepare(session, budget).orThrow()
+            return clean.image to clean.video
+        }
         val pair = session.legacyPair
         val image: BinarySource
         val video: BinarySource

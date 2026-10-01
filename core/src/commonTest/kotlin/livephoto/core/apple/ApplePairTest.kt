@@ -59,7 +59,7 @@ class ApplePairTest {
 
     @Test fun cleanFailsBeforeStagingWhileSameTargetKeepsBothAssets(): Unit = runImmediate {
         val output = MemoryOutputTransaction(context, "apple-clean")
-        assertEquals(IssueCode("CAPABILITY_UNSUPPORTED"), assertIs<CoreResult.Failure>(core.split(SplitRequest(pair(), output = output, context = context))).error.code)
+        assertEquals(IssueCode("UNSAFE_METADATA_REWRITE"), assertIs<CoreResult.Failure>(core.split(SplitRequest(pair(), output = output, context = context))).error.code)
         assertTrue(value(output.query()).assetIds.isEmpty())
         val preserved = MemoryOutputTransaction(context, "apple-preserved")
         val result = value(core.convert(ConvertRequest(pair(), ProtocolSelector(ProtocolIds.Apple), output = preserved, context = context)))

@@ -9,6 +9,7 @@ import livephoto.core.oplus.*
 import livephoto.core.samsung.*
 import livephoto.core.vivo.*
 import livephoto.core.huawei.*
+import livephoto.core.apple.*
 
 internal object GoogleOperations {
     suspend fun create(request: CreateRequest, originalInputs: List<BinaryReader> = emptyList(), sourceChanges: List<Change> = emptyList(), sourceKey: KeyPhotoResult? = null, metadataUnproven: Boolean = false): CoreResult<OperationResult> = attempt {
@@ -130,7 +131,7 @@ internal object GoogleOperations {
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
         if (session.legacyPair != null) return@attempt VivoPairOperations.split(request, session).orThrow()
-        if (session.applePair != null && request.mode == SplitMode.Clean) fail("CAPABILITY_UNSUPPORTED", "Apple clean requires verified selective MakerNote and timed-track rewriting", Stage.Plan)
+        if (session.applePair != null && request.mode == SplitMode.Clean) return@attempt ApplePairOperations.split(request, session).orThrow()
         if (request.mode == SplitMode.Raw) {
             val primary = session.inspection.layout.resources.firstOrNull { it.kind == ResourceKind.PrimaryImage }?.extents?.singleOrNull()?.range ?: fail("UNSUPPORTED_CONTAINER", "Raw split requires a contiguous primary range")
             val assets = mutableListOf(rawAsset(session, primary, AssetRole.PrimaryImage, session.inspection.media.firstOrNull()?.mime ?: "application/octet-stream", request.context))
@@ -225,9 +226,9 @@ internal object GoogleOperations {
             }
             snapshot = Snapshot(session.snapshot.identities + identity, GenerationToken(hash.finish().value))
         } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
-            if (session.applePair != null) fail("CAPABILITY_UNSUPPORTED", "Apple clean requires verified selective MakerNote and timed-track rewriting", Stage.Plan)
             if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_LAYOUT", "Clean plan needs one trusted resource graph")
-            if (session.legacyPair != null) VivoPairOperations.preflightClean(session) else if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
+            if (session.applePair != null) AppleClean.prepare(session, budget).orThrow()
+            else if (session.legacyPair != null) VivoPairOperations.preflightClean(session) else if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
         }
         else if (request is ExtractRequest) {
             if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction plan snapshot is stale")
