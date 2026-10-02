@@ -36,15 +36,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun trim(request: TrimRequest): CoreResult<TrimResult> = unavailable(request)
     override suspend fun remux(request: RemuxRequest): CoreResult<OperationResult> = unavailable(request)
     override suspend fun transcode(request: TranscodeRequest): CoreResult<OperationResult> = unavailable(request)
-    override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = attempt {
-        if (request.decodeCheck) fail("CAPABILITY_UNSUPPORTED", "Trusted-resource decoder orchestration is not yet implemented", Stage.Validate)
-        val session = session(ReadRequest(request.media.input, request.context))
-        if (request.media.snapshot != null && request.media.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Resource snapshot no longer matches input")
-        val resource = request.media.resourceId
-        if (resource == null || resource == ResourceId("primary")) return@attempt session.inspection.media.firstOrNull() ?: fail("UNSUPPORTED_CONTAINER", "No implemented media facts")
-        val binding = session.bindings.firstOrNull { videoId(it.protocol) == resource } ?: fail("INVALID_ARGUMENT", "Resource ID is not part of this source inspection")
-        videoFacts(session.videos[binding.protocol] ?: fail("CAPABILITY_UNSUPPORTED", "Resource did not pass video structural validation"))
-    }
+    override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = ProbeOperations.probe(request, backend)
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
         if (target.protocol == ProtocolIds.Apple) {
@@ -147,7 +139,11 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             verification = if (operation in reads + writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Verification.SourceReviewed) else emptyList()) })
     }
     override fun getMediaCapabilities(): MediaCapabilities = MediaCapabilities(backend?.capabilities()?.backendIds ?: emptyList(),
-        listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map { CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED"))) })
+        listOf(CapabilityEntry(Operation.Probe, Implementation.Experimental,
+            conditions = listOf(Condition(ConditionOperator.Equals, "structuralScope", Value.Text("verified-jpeg-or-bounded-bmff-resource")),
+                Condition(ConditionOperator.Equals, "decodeCheck", Value.Text(if (backend == null) "unsupported-without-decoder" else "injected-backend-with-resource-and-identity-guards"))),
+            verification = listOf(Verification.SourceReviewed))) +
+            listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map { CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED"))) })
     override suspend fun getOperationCapabilities(request: MutationRequest): CoreResult<CapabilitySet> = when (val result = plan(request)) {
         is CoreResult.Success -> CoreResult.Success(result.value.capabilities)
         is CoreResult.Failure -> if (result.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED")) result
