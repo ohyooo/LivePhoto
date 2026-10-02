@@ -96,11 +96,11 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg")) else target
             if (actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = setOf(Operation.Create, Operation.SplitClean)
+            val writes = setOf(Operation.Create, Operation.SplitClean, Operation.SetKey)
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> Implementation.Supported; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "resourceGraph", Value.Text("complete-jpeg-optional-verified-jpeg-gainmap-mp4"))) +
-                    if (operation == Operation.Create) listOf(Condition(ConditionOperator.Equals, "inputImage", Value.Text("plain-jpeg-no-auxiliary-suffix"))) else if (operation == Operation.SplitClean)
+                    if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("vivo-version-one-single-xmp-complete-video-suffix-no-gainmap-no-unknown-vendor-fields"))) else if (operation == Operation.Create) listOf(Condition(ConditionOperator.Equals, "inputImage", Value.Text("plain-jpeg-no-auxiliary-suffix"))) else if (operation == Operation.SplitClean)
                         listOf(Condition(ConditionOperator.Equals, "auxiliaryDependencies", Value.Text("no-mpf-exif-extended-xmp-relocation"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
@@ -122,12 +122,13 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         val actual = if (target.profile == null && target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus)) target.copy(profile = ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else "jpeg")) else target
         if (actual.protocol == ProtocolIds.Oplus && actual.profile in setOf(ProfileId("jpeg-no-tail"), ProfileId("oneplus-tail-bearing"))) {
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = if (actual.profile == ProfileId("jpeg-no-tail")) setOf(Operation.Create, Operation.SplitClean) else emptySet()
+            val writes = if (actual.profile == ProfileId("jpeg-no-tail")) setOf(Operation.Create, Operation.SplitClean, Operation.SetKey) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> Implementation.Supported; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "imageContent", Value.Text("jpeg")),
                     Condition(ConditionOperator.Equals, "videoContent", Value.Text("validated-mp4")),
-                    Condition(ConditionOperator.Equals, "vendorMarker", Value.Text("standard-exif-usercomment"))) + if (operation in writes)
+                    Condition(ConditionOperator.Equals, "vendorMarker", Value.Text("standard-exif-usercomment"))) + if (operation == Operation.SetKey)
+                    listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("no-tail-no-auxiliary-no-unknown-vendor-fields-current-cover-only-original-primary-time-preserved"))) else if (operation in writes)
                     listOf(Condition(ConditionOperator.Equals, "exifDependencies", Value.Text("verified-safe-subset-no-ordinary-comment-collision"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })

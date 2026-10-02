@@ -97,14 +97,15 @@ class OplusCoreReadTest {
     }
 
     @Test
-    fun dualTimestampsConflictIsReportedAndBothRawValuesRemainVisible(): Unit = runImmediate {
+    fun originalCaptureAndCurrentCoverAreDistinctAndBothRawValuesRemainVisible(): Unit = runImmediate {
         val source = input(OplusFixtures.photo(googleTimestamp = "0", vendorTimestamp = "40000"))
         val inspected = value(core.inspect(ReadRequest(source, context)))
         assertEquals(setOf(Value.Text("0"), Value.Text("40000")), inspected.keyPhoto.rawFields.map { it.rawValue }.toSet())
-        assertTrue((inspected.issues + inspected.keyPhoto.issues).any { it.code == IssueCode("CONFLICTING_METADATA") })
+        assertEquals(Time(0, 1_000_000u), inspected.keyPhoto.position)
+        assertTrue((inspected.issues + inspected.keyPhoto.issues).none { it.code == IssueCode("CONFLICTING_METADATA") })
         val report = value(core.validateProtocol(ValidationRequest(source, target = selector, context = context)))
-        assertEquals(Verdict.Invalid, report.verdict)
-        assertTrue(issues(report).any { it.code == IssueCode("CONFLICTING_METADATA") })
+        assertEquals(Verdict.Valid, report.verdict)
+        assertTrue(issues(report).none { it.code == IssueCode("CONFLICTING_METADATA") })
     }
 
     @Test

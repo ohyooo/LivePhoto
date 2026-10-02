@@ -55,9 +55,10 @@ internal object OplusReader {
             val digits = raw?.removePrefix("-")
             val parsed = if (!digits.isNullOrEmpty() && digits.all { it in '0'..'9' }) raw.toLongOrNull() else null
             if (raw != null && (parsed == null || parsed < -1)) issues += Issue(IssueCode("INVALID_PRESENTATION_TIMESTAMP"), Severity.Error, Layer.Protocol, Location(source = source.id, selector = selector))
-            val position = parsed?.takeIf { it >= 0 }?.let { Time(it, 1_000_000u) }
-            if (position != null && base.key.position != null && position.compareTo(base.key.position) != 0) issues += Issue(IssueCode("CONFLICTING_METADATA"), Severity.Error, Layer.Protocol, Location(source = source.id, selector = selector))
-            val key = KeyPhotoResult(position ?: base.key.position, source = if (position != null || parsed == -1L) KeySource.ProtocolField else base.key.source,
+            // The edit model distinguishes the current cover from the original capture.
+            // PrimaryPresentationTimestampUs is retained as a raw original-photo fact;
+            // a different value is not a conflict and must not override the cover key.
+            val key = KeyPhotoResult(base.key.position, source = base.key.source,
                 rawFields = base.key.rawFields + rawFields, issues = issues.filter { it.code.value in setOf("INVALID_PRESENTATION_TIMESTAMP", "CONFLICTING_METADATA") })
             CarrierBinding(ProtocolIds.Oplus, video, base.padding, base.items, key, frozenList(issues),
                 ProfileId(if (tail == null) "jpeg-no-tail" else "oneplus-tail-bearing"), tail,
