@@ -10,27 +10,40 @@ permissions:
 
 jobs:
   build:
-    name: Build and test (JDK 25)
-    runs-on: ubuntu-24.04
+    name: Portable (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2025
+            architecture: X64
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            architecture: X64
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: ARM64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Check build environment
-        shell: bash
+        shell: pwsh
         run: |
-          criteria="$(find . -type f -name gradle-daemon-jvm.properties -print -quit)"
-          if [[ -n "$criteria" ]]; then
-            echo "::error::Remove $criteria before running Gradle."
-            exit 1
-          fi
-          if [[ -z "${JAVA_HOME_25_X64:-}" || ! -x "$JAVA_HOME_25_X64/bin/javac" ]]; then
-            echo "::error::This runner must provide an existing JDK 25; Java auto-provisioning is disabled."
-            exit 1
-          fi
-          echo "JAVA_HOME=$JAVA_HOME_25_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_25_X64/bin" >> "$GITHUB_PATH"
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
+            throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
+          }
+          if ($env:RUNNER_ARCH -ne '${{ matrix.architecture }}') { throw 'Unexpected runner architecture.' }
+          $jdk = [Environment]::GetEnvironmentVariable('JAVA_HOME_25_${{ matrix.architecture }}')
+          if (-not $jdk) { $jdk = [Environment]::GetEnvironmentVariable('JAVA_HOME_25_X64') }
+          if (-not $jdk -or -not (Test-Path "$jdk/bin/javac$(if ($IsWindows) { '.exe' })")) {
+            throw 'Runner must provide an existing JDK 25. Java installation is prohibited.'
+          }
+          "JAVA_HOME=$jdk" >> $env:GITHUB_ENV
+          "$jdk/bin" >> $env:GITHUB_PATH
 
       - name: Setup Gradle and validate Wrapper
         uses: gradle/actions/setup-gradle@07d1f8453baaff67fb503883367f8b13e6158a54 # v6
@@ -38,16 +51,37 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       - name: Build and test
-        shell: bash
+        shell: pwsh
+        env:
+          LIVEPHOTO_REQUIRE_REFERENCE: 'true'
         run: |
-          mkdir -p ci-output
-          bash ./gradlew build --console=plain --warning-mode=all 2>&1 | tee ci-output/gradle.log
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+          if ($IsWindows) { & .\gradlew.bat build :cli:installDist --console=plain --warning-mode=all 2>&1 | Tee-Object ci-output/gradle.log }
+          else { & bash ./gradlew build :cli:installDist --console=plain --warning-mode=all 2>&1 | Tee-Object ci-output/gradle.log }
+          if ($LASTEXITCODE -ne 0) { throw 'Gradle build failed.' }
+
+      - name: Package and smoke test portable executable
+        shell: pwsh
+        run: |
+          $logPath = Join-Path $env:GITHUB_WORKSPACE 'ci-output/portable.log'
+          ./scripts/package-portable.ps1 -Platform '${{ matrix.platform }}' 2>&1 | Tee-Object $logPath
+
+      - name: Upload portable executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: LivePhoto-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/portable/LivePhoto-*.zip
+            ci-output/portable/LivePhoto-*.tar.gz
+            ci-output/portable/LivePhoto-*.sha256
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload build outputs
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: build-outputs-${{ github.run_id }}-${{ github.run_attempt }}
+          name: build-outputs-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             **/build/libs/
             **/build/distributions/
@@ -58,10 +92,11 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: build-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          name: build-reports-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             **/build/reports/
             **/build/test-results/
             ci-output/gradle.log
+            ci-output/portable.log
           if-no-files-found: warn
           retention-days: 14

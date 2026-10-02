@@ -7,14 +7,15 @@ import livephoto.core.memory.*
 import org.junit.Assume.assumeTrue
 import kotlin.test.*
 
-/** Local-only user generated reference. No phone/device test is performed here. */
+/** User-approved checked-in reference. No phone/device test is performed here. */
 class UserReferenceFixtureTest {
     @Test
     fun generatedReferenceHasSafeExactMovExtractionWithNonCanonicalProtocolReported(): Unit {
         val root = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
             .map { File(it, "reference") }
             .firstOrNull { directory -> listOf("video.mp4", "video.jpg", "livephoto.jpg").all { File(directory, it).isFile } }
-        assumeTrue("Skipped: local user reference fixtures are absent; this is not a device compatibility test", root != null)
+        if (System.getenv("LIVEPHOTO_REQUIRE_REFERENCE") == "true") assertNotNull(root, "Required CI reference fixtures are missing")
+        else assumeTrue("Skipped: user reference fixtures are absent; this is not a device compatibility test", root != null)
         val directory = requireNotNull(root)
         val originalVideo = File(directory, "video.mp4").readBytes()
         val cover = File(directory, "video.jpg").readBytes()

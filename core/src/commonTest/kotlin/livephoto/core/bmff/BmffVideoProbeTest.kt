@@ -101,6 +101,19 @@ class BmffVideoProbeTest {
     }
 
     @Test
+    fun editEndUsesCompositionTimelineAndStillRejectsMissingPresentedContent(): Unit = runImmediate {
+        val composition = GoogleFixtures.fullBox("ctts", GoogleFixtures.u32(1u) + GoogleFixtures.u32(2u) + GoogleFixtures.u32(40u))
+        fun edit(start: UInt) = GoogleFixtures.fullBox("elst", GoogleFixtures.u32(1u) + GoogleFixtures.u32(80u) + GoogleFixtures.u32(start) + byteArrayOf(0, 1, 0, 0))
+        val track = probe(GoogleFixtures.video(editList = edit(40u), composition = composition).bytes).tracks.single()
+        assertEquals(listOf(0L, 40L), track.samples.map { it.presentationTime })
+        assertEquals(80uL, track.duration)
+        assertEquals(Time(80, 1000u), track.presentationDuration)
+        failure("CORRUPTED_CONTAINER", result(GoogleFixtures.video(editList = edit(42u), composition = composition).bytes))
+        failure("CORRUPTED_CONTAINER", result(GoogleFixtures.video(editList = edit(120u), composition = composition).bytes))
+        failure("CORRUPTED_CONTAINER", result(GoogleFixtures.video(editList = edit(40u)).bytes))
+    }
+
+    @Test
     fun leadingEmptyEditShiftsPresentationAndNonUnitRateIsExplicitlyUnsupported(): Unit = runImmediate {
         val entries = GoogleFixtures.u32(2u) + GoogleFixtures.u32(10u) + GoogleFixtures.u32(UInt.MAX_VALUE) + byteArrayOf(0, 1, 0, 0) +
             GoogleFixtures.u32(60u) + GoogleFixtures.u32(20u) + byteArrayOf(0, 1, 0, 0)

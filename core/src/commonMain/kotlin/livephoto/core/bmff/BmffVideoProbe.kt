@@ -97,12 +97,6 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             Time(ticks.toLong(), movieScale)
         }
         if (edit != null) {
-            val start = edit.mediaStart.toULong()
-            if (start > duration) corrupt("Edit begins after the track media duration")
-            val requested = checkedMultiply(edit.segmentDuration, timescale.toULong())
-            val available = checkedMultiply(duration - start, movieScale.toULong())
-            // Movie-duration fields can round the final boundary by one movie tick.
-            if (requested > available && requested - available > timescale.toULong()) corrupt("Edit exceeds the track media duration")
             if (trackDuration != checkedAdd(edit.emptyDuration, edit.segmentDuration)) corrupt("Edit duration disagrees with track header")
         } else {
             val trackProduct = checkedMultiply(trackDuration, timescale.toULong())
@@ -207,6 +201,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         var sampleIndex = 0
         var mapIndex = 0
         var dts = 0uL
+        var mediaPresentationEnd = Long.MIN_VALUE
         for (chunk in 0 until chunks) {
             checkCancelled(reader.context)
             if (mapIndex + 1 < mapCount && (chunk + 1).toUInt() == u32(stsc, 8 + (mapIndex + 1) * 12)) mapIndex++
@@ -232,6 +227,8 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
                 val sampleRange = ByteRange(cursor, size)
                 if (codec != null) validateNalSample(sampleRange, nalWidth, codec)
                 val delta = durations[sampleIndex].toUInt()
+                if (mediaPts > Long.MAX_VALUE - delta.toLong()) fail("INTEGER_OVERFLOW", "Sample presentation end overflows")
+                mediaPresentationEnd = maxOf(mediaPresentationEnd, mediaPts + delta.toLong())
                 val dependencyByte = dependency?.let { u8(it, 4 + sampleIndex).toUInt() }
                 if (dependencyByte != null && ((dependencyByte shr 4) and 3u) == 3u) corrupt("Sample dependency value is reserved")
                 samples.add(VideoSample(sampleRange, dts, pts, delta, sync[sampleIndex], dependencyByte))
@@ -239,6 +236,17 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             }
         }
         if (sampleIndex != n || dts != duration) corrupt("Sample counts/duration disagree with media header")
+        if (edit != null) {
+            // elst media_time is in the composition domain, whereas mdhd duration is
+            // the sum of decoding deltas. Positive ctts (e.g. B-frame delay) can put
+            // the final presented sample beyond mdhd duration. Bound the edit using
+            // verified sample PTS endpoints, never just duration - mediaStart.
+            if (edit.mediaStart >= mediaPresentationEnd) corrupt("Edit begins after the last presented sample")
+            val requested = checkedMultiply(edit.segmentDuration, timescale.toULong())
+            val available = checkedMultiply((mediaPresentationEnd - edit.mediaStart).toULong(), movieScale.toULong())
+            // Movie-duration fields can round the final boundary by one movie tick.
+            if (requested > available && requested - available > timescale.toULong()) corrupt("Edit exceeds the sample presentation duration")
+        }
         return VideoTrack(id, handler, timescale, duration, codec, entry.type, config, samples.toList(), audio, presentationDuration, edit,
             if (handler == "vide") u16(entryBytes, 24).toUInt() else null,
             if (handler == "vide") u16(entryBytes, 26).toUInt() else null,

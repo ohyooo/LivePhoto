@@ -69,7 +69,7 @@ try {
 
     # Only accept reports written during this run. Rerun-tasks prevents old/up-to-date
     # reports from standing in for actual milestone test execution.
-    $testFiles = @(Get-ChildItem core\build\test-results\jvmTest -Filter 'TEST-*.xml' -File -ErrorAction SilentlyContinue |
+    $testFiles = @(Get-ChildItem -Path core\build\test-results\jvmTest, cli\build\test-results\test -Filter 'TEST-*.xml' -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTimeUtc -ge $startedUtc })
     foreach ($file in $testFiles) {
         [xml]$report = Get-Content $file.FullName -Raw
