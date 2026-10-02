@@ -136,7 +136,8 @@ public class DirectoryOutputTransaction(path: Path, private val context: Context
         }
         override suspend fun seek(offset: ULong): CoreResult<Unit> = io(Stage.WriteProtocol) {
             check(state == TransactionState.Open && channel.isOpen)
-            require(offset <= Long.MAX_VALUE.toULong()); channel.position(offset.toLong()); Unit
+            require(offset <= Long.MAX_VALUE.toULong())
+            channel.position(offset.toLong())
         }
         override suspend fun truncate(length: ULong): CoreResult<Unit> = io(Stage.WriteProtocol) {
             check(state == TransactionState.Open && channel.isOpen)

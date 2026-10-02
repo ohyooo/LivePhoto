@@ -110,11 +110,11 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             if (actual.profile !in setOf(ProfileId("jpeg-sef-mpv3"), ProfileId("heic-sef-mpv2"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
             val jpeg = actual.profile == ProfileId("jpeg-sef-mpv3")
-            val writes = if (jpeg) setOf(Operation.Create, Operation.SplitClean) else emptySet()
+            val writes = if (jpeg) setOf(Operation.Create, Operation.SplitClean, Operation.SetKey) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> if (jpeg) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "sefGraph", Value.Text("unique-complete-indexed-records-107"))) +
-                    if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
+                    if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-canonical-live-only-sef-existing-v2-directory-whole-suffix-preserved"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
                         listOf(Condition(ConditionOperator.Equals, "coverage", Value.Text("verified-box-media-ranges-heif-item-graph-not-run"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })

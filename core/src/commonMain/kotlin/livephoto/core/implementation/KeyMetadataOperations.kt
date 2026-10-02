@@ -30,11 +30,12 @@ internal object KeyMetadataOperations {
         val coding = codingDigest(session)
         val metadata = ordinaryDigest(session)
         val videoDigest = sha256Range(session.reader, prepared.video).orThrow()
+        val suffixDigest = sha256Range(session.reader, session.jpeg!!.trailing).orThrow()
         val timestamp = microseconds(prepared.key.position!!)
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
             write = { writer ->
                 JpegRewrite.write(session.reader, writer, session.jpeg!!, prepared.rewrite, request.context).orThrow()
-                copyRange(session.reader, writer, prepared.video, request.context).orThrow()
+                copyRange(session.reader, writer, session.jpeg.trailing, request.context).orThrow()
             },
             verify = { id, reader ->
                 val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, ParseBudget(request.context)).orThrow()
@@ -52,6 +53,8 @@ internal object KeyMetadataOperations {
                 if (reader.readExactly(packet.range.offset, checkedInt(packet.range.length).toUInt()).orThrow() != prepared.rewrite.patches.single().replacement)
                     fail("POSTCONDITION_FAILED", "SetKey changed metadata outside the planned timestamp edit", Stage.Verify)
                 val outputVideo = sha256Range(reader, ranges.single()).orThrow()
+                if (sha256Range(reader, staged.jpeg.trailing).orThrow() != suffixDigest)
+                    fail("POSTCONDITION_FAILED", "SetKey changed the complete media/trailer suffix", Stage.Verify)
                 val outputCoding = codingDigest(staged)
                 val outputMetadata = ordinaryDigest(staged)
                 if (coding != outputCoding || metadata != outputMetadata || videoDigest != outputVideo)
@@ -70,13 +73,22 @@ internal object KeyMetadataOperations {
         RequestValidation.validate(request).orThrow()
         val session = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
         val jpeg = session.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "SetKey currently requires a supported JPEG carrier", Stage.Plan)
-        if (session.readers.size != 1 || session.bindings.isEmpty() || session.bindings.any { it.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.VivoModern, ProtocolIds.Oplus) })
+        if (session.readers.size != 1 || session.bindings.isEmpty() || session.bindings.any { it.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.VivoModern, ProtocolIds.Oplus, ProtocolIds.Samsung) })
             fail("CAPABILITY_UNSUPPORTED", "Vendor key synchronization needs its own metadata writer", Stage.Plan)
         if (session.inspection.issues.any { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT", "UNSUPPORTED_CONTAINER") })
             fail("CAPABILITY_UNSUPPORTED", "SetKey cannot edit an incompletely understood source profile", Stage.Plan)
-        val vendors = session.bindings.filter { it.protocol in setOf(ProtocolIds.VivoModern, ProtocolIds.Oplus) }
+        val vendors = session.bindings.filter { it.protocol in setOf(ProtocolIds.VivoModern, ProtocolIds.Oplus, ProtocolIds.Samsung) }
         if (vendors.size > 1) fail("CAPABILITY_UNSUPPORTED", "Mixed vendor timestamp profiles need explicit interpretation", Stage.Plan)
         val vendor = vendors.singleOrNull()
+        val samsung = vendor?.protocol == ProtocolIds.Samsung
+        if (samsung) {
+            val sef = session.sef ?: fail("CAPABILITY_UNSUPPORTED", "Samsung SetKey needs a verified JPEG SEF graph", Stage.Plan)
+            if (sef.legacyDialect || sef.gaps.isNotEmpty() || sef.records.size != 2 || sef.motionRecord == null || sef.versionRecord == null ||
+                session.bindings.map { it.protocol }.toSet() != setOf(ProtocolIds.Samsung, ProtocolIds.GoogleV2) || vendor.items.size != 2)
+                fail("CAPABILITY_UNSUPPORTED", "Samsung SetKey requires canonical live-only SEF and an existing V2 directory", Stage.Plan)
+        }
+        fun acceptedSamsungSuffix(issue: Issue): Boolean = samsung && issue.code.value == "MOTION_VIDEO_LENGTH_MISMATCH" && issue.layer == Layer.Protocol &&
+            issue.location?.range == session.bindings.single { it.protocol == ProtocolIds.GoogleV2 }.items.lastOrNull()?.range
         fun acceptedVendorPadding(issue: Issue): Boolean = vendor != null &&
             issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Protocol &&
             issue.location?.selector == "{$ITEM_URI}Padding" &&
@@ -84,16 +96,17 @@ internal object KeyMetadataOperations {
             vendor.issues.none { it == issue }
         fun editableKeyIssue(issue: Issue): Boolean = issue.code.value == "INVALID_PRESENTATION_TIMESTAMP" &&
             issue.location?.selector in setOf("{$CAMERA_URI}MicroVideoPresentationTimestampUs", "{$CAMERA_URI}MotionPhotoPresentationTimestampUs")
-        if (session.inspection.issues.any { it.severity == Severity.Error && !editableKeyIssue(it) && !acceptedVendorPadding(it) })
+        if (session.inspection.issues.any { it.severity == Severity.Error && !editableKeyIssue(it) && !acceptedVendorPadding(it) && !acceptedSamsungSuffix(it) })
             fail("UNSAFE_METADATA_REWRITE", "Unrelated source errors cannot be repaired by SetKey", Stage.Plan)
         val ranges = session.bindings.mapNotNull { it.video }.distinct()
-        if (ranges.size != 1 || session.bindings.any { it.protocol !in session.videos || it.padding?.length?.let { n -> n != 0uL } == true || it.items.size > 2 } || ranges.single() != jpeg.trailing || session.gainMaps.isNotEmpty())
+        if (ranges.size != 1 || session.bindings.any { it.protocol !in session.videos || it.padding?.length?.let { n -> n != 0uL && !(samsung && n == 24uL) } == true || it.items.size > 2 } ||
+            (if (samsung) ranges.single() != session.sef?.pureVideoRange || ranges.single().offset != jpeg.primary.endExclusive + 24uL else ranges.single() != jpeg.trailing) || session.gainMaps.isNotEmpty())
             fail("UNSAFE_METADATA_REWRITE", "SetKey needs one complete video suffix with no auxiliary relocation", Stage.Plan)
         val xmp = session.xmp!!
         if (!xmp.rewriteAllowed) fail("UNSAFE_METADATA_REWRITE", "SetKey needs one unambiguous standard XMP packet", Stage.Plan)
         val vendorUri = if (vendor?.protocol == ProtocolIds.Oplus) OPLUS_URI else VIVO_URI
         val vendorFields = if (vendor?.protocol == ProtocolIds.Oplus) OPLUS_FIELDS else VIVO_FIELDS
-        if (vendor != null && xmp.packets.single().descriptions.any { description ->
+        if (vendor != null && !samsung && xmp.packets.single().descriptions.any { description ->
                 (description.attributes.map { it.name.expanded } + description.children.filterIsInstance<XmlElement>().map { it.name.expanded })
                     .any { it.uri == vendorUri && it.local !in vendorFields }
             }) fail("CAPABILITY_UNSUPPORTED", "Unknown vendor fields may change timestamp semantics", Stage.Plan)
