@@ -4,7 +4,10 @@ upstream
 **/build/
 .validation/
 .DS_Store
-# Documentation, specifications and supplied reference assets stay local.
+# Documentation and specifications stay local; only approved test media are tracked.
 *.md
 /docs/
-/reference/
+/reference/*
+!/reference/video.jpg
+!/reference/video.mp4
+!/reference/livephoto.jpg
