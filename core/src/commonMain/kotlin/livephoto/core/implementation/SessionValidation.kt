@@ -24,11 +24,25 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
             if (complete) Coverage.Complete else if (verifiedAuxiliary.isNotEmpty()) Coverage.Partial else Coverage.NotRun, auxiliaryIssues)
     }
     if (Layer.Structure in layers) {
-        checks += CheckResult("jpeg.markers", Layer.Structure, if (session.jpeg == null) Verdict.Warning else Verdict.Valid,
-            if (session.jpeg == null) Coverage.NotRun else Coverage.Complete)
-        val imageIssues = issues.filter { it.layer == Layer.Structure }
-        checks += CheckResult("jpeg.frame", Layer.Structure, if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (imageIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
-            if (session.jpeg == null || imageIssues.any { it.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.NotRun else Coverage.Complete, imageIssues)
+        if (session.heifItems != null) {
+            // A parsed item graph is not a JPEG, and primary NAL framing is a separate media check.
+            checks += CheckResult("heif.item-locations", Layer.Structure, Verdict.Valid, Coverage.Complete)
+            val imageIssues = issues.filter { it.layer == Layer.Structure }
+            checks += CheckResult("heif.item-graph", Layer.Structure,
+                if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (imageIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
+                if (imageIssues.any { it.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.Partial else Coverage.Complete, imageIssues)
+            val metadataIssues = imageIssues.filter { it.location?.selector?.startsWith("heif:item:") == true }
+            val metadataDeclared = session.heifItems.infos.any { it.type in setOf("Exif", "mime") }
+            checks += CheckResult("heif.metadata", Layer.Structure,
+                if (metadataIssues.any { it.severity == Severity.Error }) Verdict.Invalid else Verdict.Warning,
+                if (metadataDeclared) Coverage.Partial else Coverage.NotRun, metadataIssues)
+        } else {
+            checks += CheckResult("jpeg.markers", Layer.Structure, if (session.jpeg == null) Verdict.Warning else Verdict.Valid,
+                if (session.jpeg == null) Coverage.NotRun else Coverage.Complete)
+            val imageIssues = issues.filter { it.layer == Layer.Structure }
+            checks += CheckResult("jpeg.frame", Layer.Structure, if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (imageIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
+                if (session.jpeg == null || imageIssues.any { it.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.NotRun else Coverage.Complete, imageIssues)
+        }
         val binaryIssues = issues.filter { it.layer == Layer.Structure || it.layer == Layer.Media && it.severity == Severity.Error }
         checks += CheckResult("bmff.samples", Layer.Structure, if (binaryIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (binaryIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
             if (session.videos.size == session.bindings.count { it.video != null } && session.videos.isNotEmpty()) Coverage.Complete else if (session.videos.isNotEmpty()) Coverage.Partial else Coverage.NotRun, binaryIssues)
@@ -45,6 +59,14 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
     }
     if (Layer.Media in layers) {
         val mediaIssues = issues.filter { it.layer == Layer.Media }
+        if (session.heifItems != null) {
+            val image = session.inspection.media.firstOrNull()
+            val framed = image?.width != null && image.height != null
+            val imageIssues = session.heifPrimaryIssues
+            checks += CheckResult("heif.primary-framing", Layer.Media,
+                if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (framed) Verdict.Valid else Verdict.Warning,
+                if (framed) Coverage.Complete else Coverage.NotRun, imageIssues)
+        }
         checks += CheckResult("media.structure", Layer.Media, if (mediaIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (mediaIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
             if (session.videos.size == session.bindings.count { it.video != null } && auxiliaryRanges.all { it in verifiedAuxiliary } && (session.videos.isNotEmpty() || auxiliaryRanges.isNotEmpty())) Coverage.Complete else if (session.videos.isNotEmpty() || verifiedAuxiliary.isNotEmpty()) Coverage.Partial else Coverage.NotRun, mediaIssues)
         checks += CheckResult("media.decode", Layer.Media, Verdict.Warning, Coverage.NotRun,

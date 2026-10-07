@@ -32,6 +32,7 @@ internal class SourceSession internal constructor(
     val legacyPair: VivoPairFacts? = null,
     val applePair: ApplePairFacts? = null,
     val heifItems: HeifItemGraph? = null,
+    val heifPrimaryIssues: List<Issue> = emptyList(),
 ) {
     val reader: BinaryReader get() = applePair?.imageReader ?: legacyPair?.imageReader ?: readers.single()
     suspend fun readerFor(source: SourceId): BinaryReader = readers.firstOrNull { it.identity().orThrow().id == source }
@@ -93,13 +94,13 @@ internal class SourceSession internal constructor(
                             regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
                         }
                         val media = listOf(MediaFacts(imageFormat = ImageFormat.Heic, mime = "image/heic", width = heic.codedImage?.declaredWidth, height = heic.codedImage?.declaredHeight,
-                            coverage = Coverage.Partial, issues = binding.issues.filter { it.layer in setOf(Layer.Structure, Layer.Media) })) + listOfNotNull(video?.let(::videoFacts))
+                            coverage = Coverage.Partial, issues = heic.primaryIssues + binding.issues.filter { it.layer == Layer.Structure })) + listOfNotNull(video?.let(::videoFacts))
                         val metadata = mutableListOf(MetadataEntry("samsung:mpv2:pointer-mode", value = heic.pointerMode?.let { Value.Text(it) }, owner = Ownership.SourceProtocol,
                             location = Location(source = identity.id, range = heic.directory.motionRecord!!.payloadRange, selector = "samsung:mpv2:pointer-mode"), origin = FactOrigin.Parsed))
                         if (heif != null) metadata += heif.metadata
                         val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources, heif?.relationships ?: emptyList()), media, metadata, binding.key, issues = binding.issues + (heif?.issues ?: emptyList()))
                         reader.validateIdentity().orThrow()
-                        return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory, heifItems = heic.itemGraph)
+                        return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory, heifItems = heic.itemGraph, heifPrimaryIssues = heic.primaryIssues)
                     }
                     HeifImageSession.open(reader, snapshot, budget).orThrow()?.let { return@attempt it }
                 }

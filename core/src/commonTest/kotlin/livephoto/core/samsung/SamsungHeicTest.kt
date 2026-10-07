@@ -17,6 +17,23 @@ class SamsungHeicTest {
     private data class Fixture(val bytes: ByteArray, val videoStart: Int, val pointerStart: Int, val mpvdStart: Int)
 
     @Test
+    fun videoErrorsDoNotBorrowThePrimaryImageFramingCheck(): Unit = runImmediate {
+        val fixture = fixture()
+        val reader = BinaryReader(MemoryBinarySource(Bytes(fixture.bytes), SourceId("samsung-heic-video-damage")), context)
+        val video = BmffVideoProbe(reader).probe(ByteRange(fixture.videoStart.toULong(), GoogleFixtures.video().bytes.size.toULong())).orThrow()
+        val position = video.tracks.single { it.handler == "vide" }.samples.first().range.offset
+        val damaged = fixture.bytes.copyOf().also { it[position.toInt()] = 0x7f }
+        val inspected = core.inspect(ReadRequest(input(damaged), context)).orThrow()
+        assertEquals(1u, inspected.media.first().width)
+        assertTrue(inspected.issues.any { it.layer == Layer.Media && it.severity == Severity.Error })
+        assertTrue(inspected.media.first().issues.none { it.layer == Layer.Media && it.severity == Severity.Error })
+        val report = core.validateMedia(ValidationRequest(input(damaged), context = context)).orThrow()
+        assertEquals(Verdict.Invalid, report.verdict)
+        assertEquals(Verdict.Valid, report.checks.single { it.id == "heif.primary-framing" }.verdict)
+        assertEquals(Coverage.Complete, report.checks.single { it.id == "heif.primary-framing" }.coverage)
+    }
+
+    @Test
     fun itemInspectionExposesRawCodestreamWithoutClaimingAnIndependentHeicCarrier(): Unit = runImmediate {
         val fixture = fixture()
         val inspected = value(core.inspect(ReadRequest(input(fixture.bytes), context)))

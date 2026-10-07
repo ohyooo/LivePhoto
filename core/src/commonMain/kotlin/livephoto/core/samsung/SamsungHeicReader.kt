@@ -7,7 +7,7 @@ import livephoto.core.implementation.*
 import livephoto.core.heif.*
 
 internal data class SamsungHeicFacts(val binding: CarrierBinding, val video: VideoStructure?, val directory: SefDirectory,
-    val primary: ByteRange, val boxes: List<BmffBox>, val pointerMode: String?, val itemGraph: HeifItemGraph?, val codedImage: HeifCodedItemFacts?)
+    val primary: ByteRange, val boxes: List<BmffBox>, val pointerMode: String?, val itemGraph: HeifItemGraph?, val codedImage: HeifCodedItemFacts?, val primaryIssues: List<Issue>)
 
 /** Establishes complete box/SEF/media ranges. HEIF image-item decoding and rewriting are not claimed. */
 internal object SamsungHeicReader {
@@ -90,6 +90,6 @@ internal object SamsungHeicReader {
             if (directory.legacyDialect) listOf(Issue(IssueCode("SEF_DIRECTORY_INVALID"), Severity.Error, Layer.Protocol)) else emptyList()
         val binding = CarrierBinding(ProtocolIds.Samsung, mediaRange, issues = issues, profile = ProfileId("heic-sef-mpv2"))
         val primaryEnd = minOf(mpvd.range.offset, topSefd.firstOrNull()?.range?.offset ?: mpvd.range.offset)
-        SamsungHeicFacts(binding, video, directory, ByteRange(0uL, primaryEnd), boxes, candidates.values.single().joinToString("|"), graph, codedImage)
+        SamsungHeicFacts(binding, video, directory, ByteRange(0uL, primaryEnd), boxes, candidates.values.single().joinToString("|"), graph, codedImage, frozenList(imageIssues))
     }
 }
