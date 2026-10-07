@@ -48,6 +48,9 @@ internal class JpegProjectionSource private constructor(
             var output = 0uL
             val hash = Sha256()
             for (patch in verified.patches) {
+                patch.appleProof?.let { proof ->
+                    if (proof.sourceIdentity != identity) fail("SOURCE_CHANGED", "Apple projection authorization no longer matches input")
+                }
                 patch.exifProof?.let { proof ->
                     if (proof.sourceIdentity != identity || proof.originalTiffRange != null && sha256Range(session.reader, proof.originalTiffRange).orThrow() != proof.originalTiffDigest)
                         fail("SOURCE_CHANGED", "EXIF projection proof no longer matches the source")
