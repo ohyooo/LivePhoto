@@ -20,9 +20,9 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
             listOf(CapabilityEntry(Operation.Trim, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "trimProfile", Value.Text("bounded-mp4-one-avc1-track-no-audio-no-reorder-idr-source-boundaries-no-hidden-content-no-encode")),
                 Condition(ConditionOperator.Equals, "boundaryRepresentation", Value.Text("exact-integer-microseconds-and-source-movie-timescale"))))) +
-            listOf(Operation.Transcode).map {
-                CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
-            })
+            listOf(CapabilityEntry(Operation.Transcode, Implementation.Experimental, conditions = listOf(
+                Condition(ConditionOperator.Equals, "transcodeProfile", Value.Text("explicit-software-libx264-medium-crf18-bf0-avc-mp4-no-audio-edit-reorder-at-most-64-frames-no-hdr-resize-cfr")),
+                Condition(ConditionOperator.Equals, "verification", Value.Text("whole-source-output-sdr-decode-and-every-vfr-sample-pts-duration-classified-metadata"))))))
 
     override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = attempt {
         val source = (request.media.input as? SourceSet.Single)?.source
@@ -84,6 +84,6 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
     }
     override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = FfmpegTrim.run(executable, job)
     override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = FfmpegRemux.run(executable, job)
-    override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = unsupported(job)
+    override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = FfmpegTranscode.run(executable, job)
     override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = FfmpegFrame.run(executable, job)
 }

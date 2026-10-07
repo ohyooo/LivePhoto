@@ -14,7 +14,7 @@ internal object RemuxVerification {
         }
     }
 
-    suspend fun metadata(reader: BinaryReader, video: VideoStructure, trimDurationsVerifiedSeparately: Boolean = false): Metadata {
+    suspend fun metadata(reader: BinaryReader, video: VideoStructure, trimDurationsVerifiedSeparately: Boolean = false, transcodeAvcConfiguration: Boolean = false): Metadata {
         val budget = ParseBudget(reader.context)
         val boxes = BmffReader(reader, budget)
         val records = mutableListOf<Pair<String, Digest>>()
@@ -100,6 +100,7 @@ internal object RemuxVerification {
                         // All visual/audio entry fields and known extensions must survive byte-for-byte.
                         val entries = boxes.readBoxes(ByteRange(box.payload.offset + 8uL, box.payload.length - 8uL), depth + 1u).orThrow()
                         for (entry in entries) {
+                            if (transcodeAvcConfiguration && entry.type != "avc1") fail("CAPABILITY_UNSUPPORTED", "Only AVC configuration rewrite has a classified transcode profile", Stage.Plan)
                             val prefix = if (entry.type in setOf("avc1", "avc3", "hvc1", "hev1")) 78uL else 28uL
                             if (entry.payload.length < prefix) fail("CORRUPTED_CONTAINER", "Truncated remux sample entry")
                             val extensions = boxes.readBoxes(ByteRange(entry.payload.offset + prefix, entry.payload.length - prefix), depth + 2u).orThrow()
@@ -116,6 +117,7 @@ internal object RemuxVerification {
                             }
                             val hash = Sha256(); hash.update(Bytes(header))
                             for (extension in extensions.sortedBy { it.type }) {
+                                if (transcodeAvcConfiguration && extension.type == "avcC") continue // explicitly requested encoded configuration rewrite, not ordinary metadata
                                 hash.update(Bytes(extension.type.encodeToByteArray()))
                                 hash.update(Bytes(sha256Range(reader, extension.payload).orThrow().value.encodeToByteArray()))
                             }

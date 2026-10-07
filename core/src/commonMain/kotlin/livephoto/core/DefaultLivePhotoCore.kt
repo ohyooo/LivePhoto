@@ -35,7 +35,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> = ReplaceOperations.replace(request, backend)
     override suspend fun trim(request: TrimRequest): CoreResult<TrimResult> = TrimOperations.trim(request, backend)
     override suspend fun remux(request: RemuxRequest): CoreResult<OperationResult> = RemuxOperations.remux(request, backend)
-    override suspend fun transcode(request: TranscodeRequest): CoreResult<OperationResult> = unavailable(request)
+    override suspend fun transcode(request: TranscodeRequest): CoreResult<OperationResult> = TranscodeOperations.transcode(request, backend)
     override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = ProbeOperations.probe(request, backend)
 
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
@@ -149,7 +149,8 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
                 FrameOperations.capability(backend) else CapabilityEntry(Operation.ExtractFrame, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))) +
             listOf(if (backend?.capabilities()?.operations?.any { it.operation == Operation.Trim && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } == true)
                 TrimOperations.capability(backend) else CapabilityEntry(Operation.Trim, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))) +
-            listOf(CapabilityEntry(Operation.Transcode, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))))
+            listOf(if (backend?.capabilities()?.operations?.any { it.operation == Operation.Transcode && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } == true)
+                TranscodeOperations.capability() else CapabilityEntry(Operation.Transcode, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))))
     override suspend fun getOperationCapabilities(request: MutationRequest): CoreResult<CapabilitySet> = when (val result = plan(request)) {
         is CoreResult.Success -> CoreResult.Success(result.value.capabilities)
         is CoreResult.Failure -> if (result.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED")) result
@@ -161,6 +162,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             is TrimRequest -> TrimOperations.plan(request, backend)
             is ReplaceRequest -> ReplaceOperations.plan(request, backend)
             is RemuxRequest -> RemuxOperations.plan(request, backend)
+            is TranscodeRequest -> TranscodeOperations.plan(request, backend)
             is ConvertRequest -> ConvertOperations.plan(request)
             is SetKeyRequest -> KeyMetadataOperations.plan(request)
             is RepairRequest -> RepairOperations.plan(request)

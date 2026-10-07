@@ -95,6 +95,21 @@ try {
             throw 'Portable frame result does not describe the requested derived image.'
         }
         Write-Host 'PORTABLE_FFMPEG_FRAME=SUCCESS'
+        $transcodeFixture = Join-Path $verify 'transcode fixture.mp4'
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 8 -vf "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709" -fps_mode passthrough -c:v libx264 -preset ultrafast -crf 30 -bf 0 -g 3 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $transcodeFixture
+        if ($LASTEXITCODE -ne 0) { throw 'Portable transcode fixture generation failed.' }
+        $transcodeSourceHash = (Get-FileHash $transcodeFixture).Hash
+        $forbiddenJson = & $launcher transcode --input $transcodeFixture --codec Avc --container Mp4 --output-dir (Join-Path $verify 'forbidden transcode')
+        if ($LASTEXITCODE -ne 3 -or ($forbiddenJson | ConvertFrom-Json).error.code.value -ne 'TRANSCODE_NOT_AUTHORIZED') { throw 'Portable default policy authorized encoding.' }
+        $transcodeJson = & $launcher transcode --input $transcodeFixture --codec Avc --container Mp4 --allow-transcode --output-dir (Join-Path $verify 'transcode result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real authorized transcode failed: $transcodeJson" }
+        $transcode = ($transcodeJson | ConvertFrom-Json).result
+        if (-not ($transcode.execution | Where-Object { $_.stage -eq 'Transcode' -and $_.transcoded -and $_.hardwareUsed -eq $false -and -not $_.remuxed }) -or
+            -not ($transcode.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Changed' }) -or
+            $transcodeSourceHash -ne (Get-FileHash $transcodeFixture).Hash) { throw 'Portable transcode misreported encoding or changed its source.' }
+        $transcodeDecode = & $launcher probe --input $transcode.output.assets[0].path --decode-check
+        if ($LASTEXITCODE -ne 0) { throw "Portable encoded video could not be completely decoded: $transcodeDecode" }
+        Write-Host 'PORTABLE_FFMPEG_TRANSCODE=SUCCESS'
         # The freshly derived JPEG has no source EXIF/ICC/auxiliary dependencies.
         # Use Core Create, never a script-side protocol writer, to build the fixture.
         $replaceCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $frameFixture --target google.motionphoto.v2 --output-dir (Join-Path $verify 'replace carrier')
@@ -142,6 +157,9 @@ try {
         $trimJson = & $launcher trim --input $referenceVideo --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim')
         if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trim gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_TRIM=UNAVAILABLE'
+        $transcodeJson = & $launcher transcode --input $referenceVideo --codec Avc --container Mp4 --allow-transcode --output-dir (Join-Path $verify 'disabled transcode')
+        if ($LASTEXITCODE -ne 3 -or ($transcodeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend transcode gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_TRANSCODE=UNAVAILABLE'
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }
