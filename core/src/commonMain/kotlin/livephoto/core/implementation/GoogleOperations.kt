@@ -106,15 +106,16 @@ internal object GoogleOperations {
         if (selected.distinct().size != selected.size) fail("INVALID_ARGUMENT", "Duplicate extraction resource IDs")
         checkResourceAliases(session, selected)
         val assets = mutableListOf<StagedAsset>()
+        val inputs = session.readers.toMutableList()
         for (id in selected) {
             val resource = session.inspection.layout.resources.firstOrNull { it.id == id } ?: fail("INVALID_ARGUMENT", "Resource ID does not belong to current source inspection")
-            if (resource.extents.size != 1) fail("CAPABILITY_UNSUPPORTED", "Selected resource is not a contiguous raw extent")
-            val range = resource.extents.single().range
+            val (inputReader, range) = rawResource(session, resource, budget)
+            if (inputReader !in inputs) inputs.add(inputReader)
             val binding = session.bindings.firstOrNull { videoId(it.protocol) == id }
             val video = binding?.let { session.videos[it.protocol] }
             val role = when (resource.kind) { ResourceKind.Video -> AssetRole.MotionVideo; ResourceKind.PrimaryImage -> AssetRole.PrimaryImage; ResourceKind.GainMap, ResourceKind.Depth, ResourceKind.Thumbnail -> AssetRole.AuxiliaryImage; ResourceKind.Trailer -> AssetRole.VendorTrailer; else -> AssetRole.SidecarMetadata }
             val mime = if (resource.kind == ResourceKind.PrimaryImage) session.inspection.media.firstOrNull()?.mime ?: "application/octet-stream" else if (resource.kind == ResourceKind.GainMap && session.gainMaps.any { it.range == range }) "image/jpeg" else if (video?.container == VideoContainer.Mov) "video/quicktime" else if (video?.container == VideoContainer.Mp4) "video/mp4" else binding?.items?.lastOrNull()?.mime ?: "application/octet-stream"
-            assets += rawAsset(session, range, role, mime, request.context, video?.container, session.readerFor(resource.extents.single().source))
+            assets += rawAsset(session, range, role, mime, request.context, video?.container, inputReader)
         }
         if (request.includeRawCarrier) {
             for (reader in session.readers) {
@@ -123,7 +124,7 @@ internal object GoogleOperations {
             }
         }
         if (assets.isEmpty()) fail("MOTION_VIDEO_MISSING", "No requested embedded resources are available", Stage.Extract)
-        publish(request.output, MutationPolicy(), request.context, session.readers, assets).orThrow()
+        publish(request.output, MutationPolicy(), request.context, inputs, assets).orThrow()
     }
 
     suspend fun split(request: SplitRequest): CoreResult<OperationResult> = attempt {
@@ -234,6 +235,7 @@ internal object GoogleOperations {
             if (request.snapshot != null && request.snapshot != session.snapshot) fail("SOURCE_CHANGED", "Extraction plan snapshot is stale")
             if (request.resources.any { id -> session.inspection.layout.resources.none { it.id == id } }) fail("INVALID_ARGUMENT", "Extraction plan refers to unknown resource")
             checkResourceAliases(session, request.resources)
+            for (resource in session.inspection.layout.resources.filter { it.id in request.resources }) rawResource(session, resource, budget)
         }
         val output = when (request) { is CreateRequest -> request.output; is ExtractRequest -> request.output; is SplitRequest -> request.output }
         val policy = when (request) { is CreateRequest -> request.policy; is SplitRequest -> request.policy; else -> MutationPolicy() }
@@ -260,6 +262,20 @@ internal object GoogleOperations {
                 val imageVerified = if (role == AssetRole.AuxiliaryImage) session.gainMaps.any { it.range == range } else session.inspection.media.firstOrNull()?.width != null && session.inspection.media.firstOrNull()?.height != null
                 AssetVerification(ValidationReport(Verdict.Valid, Coverage.Complete, listOf(check), snapshot = session.snapshot), exactRecords(id, digest, role, metadataSafe, videoVerified, imageVerified))
             })
+    }
+
+    private suspend fun rawResource(session: SourceSession, resource: Resource, budget: ParseBudget): Pair<BinaryReader, ByteRange> {
+        if (resource.extents.size == 1) return session.readerFor(resource.extents.single().source) to resource.extents.single().range
+        val graph = session.heifItems ?: fail("CAPABILITY_UNSUPPORTED", "Selected resource has no implemented extent graph", Stage.Plan)
+        val item = graph.locations.items.singleOrNull { ResourceId("heif:item:${it.id}") == resource.id }
+            ?: fail("CAPABILITY_UNSUPPORTED", "Only a parsed HEIF item can authorize multi-extent extraction", Stage.Plan)
+        if (resource.standalone || resource.kind != ResourceKind.Unknown || resource.extents.any { it.source != graph.locations.identity.id } ||
+            resource.extents.map { it.range } != item.extents.map { it.data }) fail("POSTCONDITION_FAILED", "HEIF resource disagrees with its parsed extent graph", Stage.Plan)
+        val reader = session.readerFor(graph.locations.identity.id)
+        val view = ExtentSource.create(reader, item.extents.map { it.data }, budget).orThrow()
+        val size = view.size().orThrow()
+        if (size > reader.context.limits.maxOutputBytes) fail("RESOURCE_LIMIT_EXCEEDED", "HEIF raw item exceeds output budget", Stage.Plan)
+        return BinaryReader(view, reader.context) to ByteRange(0uL, size)
     }
 }
 

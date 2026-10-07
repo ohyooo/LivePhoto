@@ -3,6 +3,7 @@ package livephoto.core.samsung
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
+import livephoto.core.implementation.ExtentSource
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.memory.*
 import kotlin.test.*
@@ -63,6 +64,53 @@ class SamsungHeicTest {
     }
 
     @Test
+    fun multipleNoncontiguousExtentsExtractOnlyDeclaredItemBytesAndPlanningDoesNotPublish(): Unit = runImmediate {
+        val bytes = fixture(multiple = true).bytes
+        val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+        val item = inspected.layout.resources.single { it.id == ResourceId("heif:item:1") }
+        assertEquals(2, item.extents.size)
+        assertFalse(item.standalone)
+        assertEquals(3uL, item.extents[1].range.offset - item.extents[0].range.endExclusive)
+        val output = MemoryOutputTransaction(context, "heif-multi-raw")
+        val request = ExtractRequest(input(bytes), listOf(item.id), inspected.snapshot, output = output, context = context)
+        value(core.plan(request))
+        assertTrue(output.committedAssets().isEmpty())
+        val result = value(core.extract(request))
+        assertEquals(Bytes(GoogleFixtures.video(hevc = true).samples.first()), output.committedAssets().values.single())
+        assertEquals("application/octet-stream", result.output.assets.single().mime)
+        assertTrue(result.preservation.records.any { it.guarantee == Guarantee.ExactExtraction && it.outcome == GuaranteeOutcome.Verified })
+        assertTrue(result.preservation.records.none { it.guarantee == Guarantee.ImageDataPreserving && it.outcome == GuaranteeOutcome.Verified })
+    }
+
+    @Test
+    fun oversizedMultiExtentItemIsRejectedDuringPlanAndBeforeAnyStaging(): Unit = runImmediate {
+        val bytes = fixture(multiple = true).bytes
+        val limitedContext = context.copy(limits = context.limits.copy(maxOutputBytes = 4uL))
+        val output = MemoryOutputTransaction(limitedContext, "heif-multi-budget")
+        val request = ExtractRequest(input(bytes), listOf(ResourceId("heif:item:1")), output = output, context = limitedContext)
+        assertEquals(IssueCode("RESOURCE_LIMIT_EXCEEDED"), assertIs<CoreResult.Failure>(core.plan(request)).error.code)
+        assertEquals(IssueCode("RESOURCE_LIMIT_EXCEEDED"), assertIs<CoreResult.Failure>(core.extract(request)).error.code)
+        assertTrue(value(output.query()).assetIds.isEmpty())
+    }
+
+    @Test
+    fun stagedReaderCannotAliasTheDerivedMultiExtentInputView(): Unit = runImmediate {
+        val source = input(fixture(multiple = true).bytes)
+        val inspected = value(core.inspect(ReadRequest(source, context)))
+        val item = inspected.layout.resources.single { it.id == ResourceId("heif:item:1") }
+        val alias = ExtentSource.create(BinaryReader(source.source, context), item.extents.map { it.range }).orThrow()
+        val base = MemoryOutputTransaction(context, "heif-derived-alias")
+        val output = object : OutputTransaction by base {
+            override suspend fun openStaged(id: AssetId): CoreResult<BinarySource> = CoreResult.Success(alias)
+        }
+        val result = core.extract(ExtractRequest(source, listOf(item.id), inspected.snapshot, output = output, context = context))
+        assertEquals(IssueCode("OUTPUT_ALIASES_INPUT"), assertIs<CoreResult.Failure>(result).error.code)
+        assertEquals(TransactionState.Aborted, value(base.query()).state)
+        assertTrue(base.committedAssets().isEmpty())
+        assertEquals(source.source.identity().orThrow().size, source.source.size().orThrow())
+    }
+
+    @Test
     fun absoluteAndAbiOnlyRelativePointersExposeExactVideoWithIncompleteImageCoverage(): Unit = runImmediate {
         for (relative in listOf(false, true)) for (nested in listOf(false, true)) {
             val fixture = fixture(relative, nested)
@@ -115,7 +163,7 @@ class SamsungHeicTest {
         assertTrue(transaction.committedAssets().isEmpty())
     }
 
-    private fun fixture(relative: Boolean = false, nested: Boolean = true, shared: Boolean = false): Fixture {
+    private fun fixture(relative: Boolean = false, nested: Boolean = true, shared: Boolean = false, multiple: Boolean = false): Fixture {
         val ftyp = GoogleFixtures.box("ftyp", "heic".encodeToByteArray() + GoogleFixtures.u32(0u) + "heicmif1".encodeToByteArray())
         val codedStill = GoogleFixtures.video(hevc = true).samples.first()
         fun meta(imageOffset: UInt): ByteArray {
@@ -124,13 +172,18 @@ class SamsungHeicTest {
             val item = GoogleFixtures.box("infe", GoogleFixtures.bytes(2, 0, 0, 0, 0, 1, 0, 0) + "hvc1Primary\u0000".encodeToByteArray())
             val secondItem = if (shared) GoogleFixtures.box("infe", GoogleFixtures.bytes(2, 0, 0, 1, 0, 2, 0, 0) + "hvc1Shared\u0000".encodeToByteArray()) else byteArrayOf()
             val info = GoogleFixtures.fullBox("iinf", GoogleFixtures.bytes(0, if (shared) 2 else 1) + item + secondItem)
-            fun location(id: Int) = GoogleFixtures.bytes(0, id, 0, 0, 0, 1) + GoogleFixtures.u32(imageOffset) + GoogleFixtures.u32(codedStill.size.toUInt())
+            fun location(id: Int): ByteArray {
+                val extents = if (multiple) GoogleFixtures.u32(imageOffset) + GoogleFixtures.u32(2u) + GoogleFixtures.u32(imageOffset + 5u) + GoogleFixtures.u32((codedStill.size - 2).toUInt())
+                    else GoogleFixtures.u32(imageOffset) + GoogleFixtures.u32(codedStill.size.toUInt())
+                return GoogleFixtures.bytes(0, id, 0, 0, 0, if (multiple) 2 else 1) + extents
+            }
             val locations = GoogleFixtures.fullBox("iloc", GoogleFixtures.bytes(0x44, 0, 0, if (shared) 2 else 1) + location(1) + if (shared) location(2) else byteArrayOf())
             val properties = GoogleFixtures.box("ipco", GoogleFixtures.fullBox("ispe", GoogleFixtures.u32(1u) + GoogleFixtures.u32(1u)) + GoogleFixtures.box("hvcC", GoogleFixtures.video(hevc = true).configuration))
             val associations = GoogleFixtures.fullBox("ipma", GoogleFixtures.u32(if (shared) 2u else 1u) + GoogleFixtures.bytes(0, 1, 2, 0x81, 0x82) + if (shared) GoogleFixtures.bytes(0, 2, 2, 0x81, 0x82) else byteArrayOf())
             return GoogleFixtures.fullBox("meta", handler + primary + info + locations + GoogleFixtures.box("iprp", properties + associations))
         }
-        val prefix = ftyp + meta((ftyp.size + meta(0u).size + 8).toUInt()) + GoogleFixtures.box("mdat", codedStill)
+        val stillData = if (multiple) codedStill.copyOfRange(0, 2) + GoogleFixtures.bytes(0xa5, 0x5a, 0xff) + codedStill.copyOfRange(2, codedStill.size) else codedStill
+        val prefix = ftyp + meta((ftyp.size + meta(0u).size + 8).toUInt()) + GoogleFixtures.box("mdat", stillData)
         val video = GoogleFixtures.video().bytes
         val pointer = "mpv2".encodeToByteArray() + GoogleFixtures.u32(if (relative) 8u else (prefix.size + 8).toUInt()) + GoogleFixtures.u32(video.size.toUInt())
         val suffix = SamsungFixtures.trailer(listOf(SamsungFixtures.Record(0x0a30, "MotionPhoto_Data", pointer), SamsungFixtures.Record(0x0a31, "MotionPhoto_Version", "mpv3".encodeToByteArray())))

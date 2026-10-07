@@ -14,6 +14,7 @@ import livephoto.core.vivo.*
 import livephoto.core.huawei.*
 import livephoto.core.legacy.*
 import livephoto.core.apple.*
+import livephoto.core.heif.*
 
 /** One operation's immutable, content-derived facts; borrowed input handles remain open. */
 internal class SourceSession internal constructor(
@@ -30,6 +31,7 @@ internal class SourceSession internal constructor(
     val huaweiTail: HuaweiTailFacts? = null,
     val legacyPair: VivoPairFacts? = null,
     val applePair: ApplePairFacts? = null,
+    val heifItems: HeifItemGraph? = null,
 ) {
     val reader: BinaryReader get() = applePair?.imageReader ?: legacyPair?.imageReader ?: readers.single()
     suspend fun readerFor(source: SourceId): BinaryReader = readers.firstOrNull { it.identity().orThrow().id == source }
@@ -122,7 +124,7 @@ internal class SourceSession internal constructor(
                         }
                         val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources), media, metadata, binding.key, issues = binding.issues)
                         reader.validateIdentity().orThrow()
-                        return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory)
+                        return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory, heifItems = heic.itemGraph)
                     }
                 }
                 val detection = DetectionResult(Disposition.Unknown, matches = emptyList(), snapshot = snapshot)

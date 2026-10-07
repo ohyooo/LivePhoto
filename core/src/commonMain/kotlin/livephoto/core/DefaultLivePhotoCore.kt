@@ -116,7 +116,8 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
                 conditions = listOf(Condition(ConditionOperator.Equals, "sefGraph", Value.Text("unique-complete-indexed-records-107"))) +
                     if (operation in setOf(Operation.ConvertFrom, Operation.ConvertTo)) listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("jpeg-mpv3-no-ordinary-sef-suffix-classified-cleanup-and-target-assembly-source-domain-key-and-edits-through-verified-backend-only")))
                     else if (operation == Operation.Repair) listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("unique-legacy-footer-length-only-safe-metadata-mode"))) else if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-canonical-live-only-sef-existing-v2-directory-whole-suffix-preserved"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
-                        listOf(Condition(ConditionOperator.Equals, "coverage", Value.Text("verified-box-media-ranges-heif-item-graph-not-run"))) else emptyList(),
+                        listOf(Condition(ConditionOperator.Equals, "coverage", Value.Text("verified-box-media-ranges-parsed-item-locations-and-links-codec-derived-semantics-decode-not-run"))) +
+                            if (operation == Operation.ExtractRaw) listOf(Condition(ConditionOperator.Equals, "rawScope", Value.Text("verified-motion-range-or-parsed-item-extents-in-declared-order-not-an-independent-heic-carrier"))) else emptyList() else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
         }
