@@ -38,7 +38,7 @@ internal class JpegProjectionSource private constructor(
     override suspend fun close(): Unit = Unit
 
     companion object {
-        suspend fun create(session: SourceSession, plan: JpegRewritePlan): CoreResult<JpegProjectionSource> = attempt {
+        suspend fun create(session: SourceSession, plan: JpegRewritePlan, includeTrailing: Boolean = false): CoreResult<JpegProjectionSource> = attempt {
             val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "JPEG projection requires parsed image content")
             val verified = JpegRewrite.plan(jpeg, plan.patches).orThrow()
             if (verified.outputLength != plan.outputLength) fail("INVALID_ARGUMENT", "Projection length differs from verified rewrite")
@@ -58,9 +58,10 @@ internal class JpegProjectionSource private constructor(
                 hash.update(unsignedBytes(patch.range.offset, 8, Endian.Big)); hash.update(unsignedBytes(patch.range.length, 8, Endian.Big)); hash.update(patch.replacement)
                 position = patch.range.endExclusive
             }
-            val remainder = ByteRange(position, jpeg.primary.endExclusive - position)
+            val remainder = ByteRange(position, (if (includeTrailing) identity.size else jpeg.primary.endExclusive) - position)
             if (remainder.length != 0uL) parts += Part(output, remainder.length, remainder)
-            val view = identity.copy(id = SourceId("${identity.id.value}:jpeg-projection:${hash.finish().value}"), size = verified.outputLength, digest = null)
+            val view = identity.copy(id = SourceId("${identity.id.value}:jpeg-projection:${hash.finish().value}${if (includeTrailing) ":full" else ""}"),
+                size = if (includeTrailing) checkedAdd(verified.outputLength, jpeg.trailing.length) else verified.outputLength, digest = null)
             JpegProjectionSource(session.reader, frozenList(parts), view)
         }
     }

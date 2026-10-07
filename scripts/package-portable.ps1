@@ -203,6 +203,40 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }
     $created = $createdJson | ConvertFrom-Json
     $livePath = $created.result.output.assets[0].path
+    # Negative fixture only: change one decimal digit without changing APP length or media bytes.
+    # The valid original carrier was produced by Core; this is not a script-side protocol writer.
+    $damaged = [IO.File]::ReadAllBytes($livePath)
+    $videoLength = (Get-Item $referenceVideo).Length.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $needle = [Text.Encoding]::UTF8.GetBytes('i:Length="' + $videoLength + '"')
+    $lengthMatches = [Collections.Generic.List[int]]::new()
+    $offset = 0
+    while ($offset -le $damaged.Length - $needle.Length) {
+        $candidate = [Array]::IndexOf($damaged, $needle[0], $offset)
+        if ($candidate -lt 0 -or $candidate -gt $damaged.Length - $needle.Length) { break }
+        $equal = $true
+        for ($j = 0; $j -lt $needle.Length; $j++) { if ($damaged[$candidate + $j] -ne $needle[$j]) { $equal = $false; break } }
+        if ($equal) { $lengthMatches.Add($candidate) }
+        $offset = $candidate + 1
+    }
+    if ($lengthMatches.Count -ne 1) { throw 'Portable repair fixture needs one exact known length literal.' }
+    $digit = $lengthMatches[0] + [Text.Encoding]::UTF8.GetByteCount('i:Length="')
+    $damaged[$digit] = if ($damaged[$digit] -eq [byte][char]'1') { [byte][char]'2' } else { [byte][char]'1' }
+    $damagedPath = Join-Path $verify 'damaged directory length.jpg'
+    [IO.File]::WriteAllBytes($damagedPath, $damaged)
+    $previewJson = & $launcher repair --input $damagedPath
+    if ($LASTEXITCODE -ne 0) { throw "Portable V2 repair preview failed: $previewJson" }
+    $preview = ($previewJson | ConvertFrom-Json).result
+    if ($preview.proposedChanges.Count -ne 1 -or $preview.changesApplied.Count -ne 0 -or $null -ne $preview.operation) { throw 'Portable V2 repair preview wrote output or did not prove exactly one field.' }
+    $repairJson = & $launcher repair --input $damagedPath --apply --strict --output-dir (Join-Path $verify 'repaired directory length')
+    if ($LASTEXITCODE -ne 0) { throw "Portable V2 repair apply failed: $repairJson" }
+    $repair = ($repairJson | ConvertFrom-Json).result
+    if ($repair.changesApplied.Count -ne 1 -or $repair.blocked.Count -ne 0) { throw 'Portable V2 repair did not apply the sole proved change.' }
+    $repairedPath = $repair.operation.output.assets[0].path
+    $repairedExtractJson = & $launcher extract --input $repairedPath --output-dir (Join-Path $verify 'repaired extracted')
+    if ($LASTEXITCODE -ne 0 -or (Get-FileHash $referenceVideo).Hash -ne (Get-FileHash ($repairedExtractJson | ConvertFrom-Json).result.output.assets[0].path).Hash) { throw 'Portable V2 repair changed the complete source video.' }
+    $secondRepairJson = & $launcher repair --input $repairedPath
+    if ($LASTEXITCODE -ne 0 -or ($secondRepairJson | ConvertFrom-Json).result.proposedChanges.Count -ne 0) { throw 'Portable V2 repair is not idempotent.' }
+    Write-Host 'PORTABLE_GOOGLE_V2_REPAIR=SUCCESS'
     & $launcher validate --input $livePath --layers Structure,Protocol
     if ($LASTEXITCODE -ne 0) { throw 'Portable reference validation failed' }
     $extractedJson = & $launcher extract --input $livePath --output-dir (Join-Path $verify 'extracted')

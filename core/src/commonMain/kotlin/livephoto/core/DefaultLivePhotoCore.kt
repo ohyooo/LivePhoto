@@ -133,14 +133,14 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
         val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo, Operation.SetKey, Operation.ReplaceCover)
         return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
-            when { operation in reads -> Implementation.Supported; operation in writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1 -> Implementation.Experimental; else -> Implementation.Planned },
-            conditions = if (operation == Operation.ReplaceCover) ReplaceOperations.capability().conditions else if (operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Condition(ConditionOperator.Equals, "mode", Value.Text("safe-metadata-only")),
-                Condition(ConditionOperator.Equals, "evidence", Value.Text("single-verified-post-jpeg-video-offset-only"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
+            when { operation in reads -> Implementation.Supported; operation in writes || operation == Operation.Repair -> Implementation.Experimental; else -> Implementation.Planned },
+            conditions = if (operation == Operation.ReplaceCover) ReplaceOperations.capability().conditions else if (operation == Operation.Repair) listOf(Condition(ConditionOperator.Equals, "mode", Value.Text("safe-metadata-only")),
+                Condition(ConditionOperator.Equals, "evidence", Value.Text(if (actual.protocol == ProtocolIds.GoogleV1) "single-verified-post-jpeg-video-offset-only" else "unique-inline-primary-motion-directory-length-no-padding-or-auxiliary-resources"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg")),
                 Condition(ConditionOperator.Equals, "videoStructure", Value.Text("unfragmented-single-mdat-one-video-at-most-one-aac")),
                 Condition(ConditionOperator.Equals, "metadataDependencies", Value.Text("verified-plain-resource-directory-no-unsafe-relocation")))
                 else if (operation in reads) listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg"))) else emptyList(),
-            reasons = if (operation in reads + writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
-            verification = if (operation in reads + writes || operation == Operation.Repair && actual.protocol == ProtocolIds.GoogleV1) listOf(Verification.SourceReviewed) else emptyList()) })
+            reasons = if (operation in reads + writes || operation == Operation.Repair) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
+            verification = if (operation in reads + writes || operation == Operation.Repair) listOf(Verification.SourceReviewed) else emptyList()) })
     }
     override fun getMediaCapabilities(): MediaCapabilities = MediaCapabilities(backend?.capabilities()?.backendIds ?: emptyList(),
         listOf(CapabilityEntry(Operation.Probe, Implementation.Experimental,
