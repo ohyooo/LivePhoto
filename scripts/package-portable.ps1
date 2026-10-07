@@ -233,6 +233,23 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }
     $created = $createdJson | ConvertFrom-Json
     $livePath = $created.result.output.assets[0].path
+    foreach ($vendorTarget in @('oplus.olive', 'samsung.motionphoto', 'vivo.motionphoto')) {
+        $vendorJson = & $launcher convert --input $livePath --target $vendorTarget --output-dir (Join-Path $verify "vendor converted $vendorTarget")
+        if ($LASTEXITCODE -ne 0) { throw "Portable reference vendor Convert failed ($vendorTarget): $vendorJson" }
+        $vendor = ($vendorJson | ConvertFrom-Json).result
+        if ($vendor.execution | Where-Object transcoded -eq $true) { throw 'Pure vendor Convert unexpectedly encoded media.' }
+        $vendorPath = $vendor.output.assets[0].path
+        $vendorValidation = & $launcher validate --input $vendorPath --layers Structure,Protocol
+        if ($LASTEXITCODE -ne 0) { throw "Portable vendor validation failed: $vendorValidation" }
+        $vendorVideoJson = & $launcher extract --input $vendorPath --output-dir (Join-Path $verify "vendor extracted $vendorTarget")
+        if ($LASTEXITCODE -ne 0 -or (Get-FileHash $referenceVideo).Hash -ne (Get-FileHash ($vendorVideoJson | ConvertFrom-Json).result.output.assets[0].path).Hash) { throw 'Vendor Convert changed original reference video.' }
+        $vendorBackJson = & $launcher convert --input $vendorPath --target google.motionphoto.v2 --output-dir (Join-Path $verify "vendor back $vendorTarget")
+        if ($LASTEXITCODE -ne 0) { throw "Portable vendor-to-Google conversion failed: $vendorBackJson" }
+        $vendorBack = ($vendorBackJson | ConvertFrom-Json).result
+        if (([decimal]$created.result.keyPhoto.position.value * $vendorBack.keyPhoto.position.timescale) -ne
+            ([decimal]$vendorBack.keyPhoto.position.value * $created.result.keyPhoto.position.timescale)) { throw 'Vendor roundtrip changed known source key.' }
+    }
+    Write-Host 'PORTABLE_VENDOR_CONVERT_ROUNDTRIP=SUCCESS'
     # Negative fixture only: change one decimal digit without changing APP length or media bytes.
     # The valid original carrier was produced by Core; this is not a script-side protocol writer.
     $damaged = [IO.File]::ReadAllBytes($livePath)

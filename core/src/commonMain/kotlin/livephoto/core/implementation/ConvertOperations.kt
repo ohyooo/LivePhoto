@@ -75,7 +75,8 @@ internal object ConvertOperations {
             if (request.edits != null || request.preference != MediaPreference()) fail("INVALID_ARGUMENT", "PreserveAsIs does not apply requested media edits", Stage.Plan)
             return null
         }
-        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) fail("CAPABILITY_UNSUPPORTED", "This conversion batch implements Google JPEG targets", Stage.Plan)
+        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern))
+            fail("CAPABILITY_UNSUPPORTED", "Conversion requires an implemented JPEG target with classified key semantics", Stage.Plan)
         if (request.edits?.trim != null && !allowTrim || request.edits?.replacementFrame != null && !allowReplacement) fail("CAPABILITY_UNSUPPORTED", "Conversion media edits require backend orchestration", Stage.Plan)
         if (session.applePair != null) {
             val clean = AppleClean.prepare(session, budget).orThrow()

@@ -92,11 +92,12 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg")) else target
             if (actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = setOf(Operation.Create, Operation.SplitClean, Operation.SetKey)
+            val writes = setOf(Operation.Create, Operation.SplitClean, Operation.SetKey, Operation.ConvertFrom, Operation.ConvertTo)
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> Implementation.Supported; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "resourceGraph", Value.Text("complete-jpeg-optional-verified-jpeg-gainmap-mp4"))) +
-                    if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("vivo-version-one-single-xmp-complete-video-suffix-no-gainmap-no-unknown-vendor-fields"))) else if (operation == Operation.Create) listOf(Condition(ConditionOperator.Equals, "inputImage", Value.Text("plain-jpeg-no-auxiliary-suffix"))) else if (operation == Operation.SplitClean)
+                    if (operation in setOf(Operation.ConvertFrom, Operation.ConvertTo)) listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("unique-confirmed-source-jpeg-mp4-key-preserved-no-auxiliary-no-media-edits-classified-cleanup-and-target-assembly")))
+                    else if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("vivo-version-one-single-xmp-complete-video-suffix-no-gainmap-no-unknown-vendor-fields"))) else if (operation == Operation.Create) listOf(Condition(ConditionOperator.Equals, "inputImage", Value.Text("plain-jpeg-no-auxiliary-suffix"))) else if (operation == Operation.SplitClean)
                         listOf(Condition(ConditionOperator.Equals, "auxiliaryDependencies", Value.Text("no-mpf-exif-extended-xmp-relocation"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
@@ -106,11 +107,12 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             if (actual.profile !in setOf(ProfileId("jpeg-sef-mpv3"), ProfileId("heic-sef-mpv2"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
             val jpeg = actual.profile == ProfileId("jpeg-sef-mpv3")
-            val writes = if (jpeg) setOf(Operation.Create, Operation.SplitClean, Operation.SetKey, Operation.Repair) else emptySet()
+            val writes = if (jpeg) setOf(Operation.Create, Operation.SplitClean, Operation.SetKey, Operation.Repair, Operation.ConvertFrom, Operation.ConvertTo) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> if (jpeg) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "sefGraph", Value.Text("unique-complete-indexed-records-107"))) +
-                    if (operation == Operation.Repair) listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("unique-legacy-footer-length-only-safe-metadata-mode"))) else if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-canonical-live-only-sef-existing-v2-directory-whole-suffix-preserved"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
+                    if (operation in setOf(Operation.ConvertFrom, Operation.ConvertTo)) listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("jpeg-mpv3-no-ordinary-sef-suffix-no-media-edits-source-key-preserved-classified-cleanup-and-target-assembly")))
+                    else if (operation == Operation.Repair) listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("unique-legacy-footer-length-only-safe-metadata-mode"))) else if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-canonical-live-only-sef-existing-v2-directory-whole-suffix-preserved"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
                         listOf(Condition(ConditionOperator.Equals, "coverage", Value.Text("verified-box-media-ranges-heif-item-graph-not-run"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
@@ -118,7 +120,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         val actual = if (target.profile == null && target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus)) target.copy(profile = ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else "jpeg")) else target
         if (actual.protocol == ProtocolIds.Oplus && actual.profile in setOf(ProfileId("jpeg-no-tail"), ProfileId("oneplus-tail-bearing"))) {
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = if (actual.profile == ProfileId("jpeg-no-tail")) setOf(Operation.Create, Operation.SplitClean, Operation.SetKey) else emptySet()
+            val writes = if (actual.profile == ProfileId("jpeg-no-tail")) setOf(Operation.Create, Operation.SplitClean, Operation.SetKey, Operation.ConvertFrom, Operation.ConvertTo) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> Implementation.Supported; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "imageContent", Value.Text("jpeg")),
