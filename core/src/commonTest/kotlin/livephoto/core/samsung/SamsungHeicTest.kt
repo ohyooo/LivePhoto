@@ -223,9 +223,12 @@ class SamsungHeicTest {
         assertEquals(Bytes(bytes), output.committedAssets().values.single())
         assertEquals(AssetRole.Composite, result.output.assets.single().role)
         assertTrue(result.preservation.records.all { it.outcome in setOf(GuaranteeOutcome.Verified, GuaranteeOutcome.NotApplicable) })
-        val split = MemoryOutputTransaction(context, "plain-heic-clean-not-implemented")
-        assertIs<CoreResult.Failure>(core.split(SplitRequest(input(bytes), output = split, context = context)))
-        assertTrue(split.committedAssets().isEmpty())
+        val split = MemoryOutputTransaction(context, "plain-heic-idempotent-clean")
+        val cleaned = value(core.split(SplitRequest(input(bytes), policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = split, context = context)))
+        assertEquals(AssetRole.PrimaryImage, cleaned.output.assets.single().role)
+        assertEquals(Bytes(bytes), split.committedAssets().values.single())
+        assertTrue(cleaned.preservation.changes.isEmpty())
+        assertTrue(cleaned.preservation.records.all { it.outcome in setOf(GuaranteeOutcome.Verified, GuaranteeOutcome.NotApplicable) })
     }
 
     @Test

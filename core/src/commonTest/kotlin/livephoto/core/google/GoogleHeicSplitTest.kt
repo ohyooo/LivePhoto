@@ -55,6 +55,12 @@ class GoogleHeicSplitTest {
                 core.create(CreateRequest(source(image.toByteArray(), "clean-cover"), source(video.toByteArray(), "clean-video"), target, output = recreating, context = context)).orThrow()
                 assertTrue(result.preservation.records.none { it.outcome == GuaranteeOutcome.Unknown || it.outcome == GuaranteeOutcome.Changed })
                 assertEquals(motion, BinaryReader(input.source, context).readExactly(0uL, motion.size.toUInt()).orThrow())
+                val again = MemoryOutputTransaction(context, "heic-clean-idempotent-$count")
+                val ordinary = SourceSet.Single(source(image.toByteArray(), "already-clean-heic"))
+                val repeated = core.split(SplitRequest(ordinary, policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = again, context = context)).orThrow()
+                assertEquals(1, repeated.output.assets.size)
+                assertEquals(image, again.committedAssets().values.single())
+                assertTrue(repeated.preservation.changes.isEmpty())
             }
         assertEquals(16, count)
     }

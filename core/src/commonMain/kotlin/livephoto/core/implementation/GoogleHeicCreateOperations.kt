@@ -22,7 +22,7 @@ internal object GoogleHeicCreateOperations {
         hash.update(unsignedBytes(image.declaredWidth.toULong(), 4, Endian.Big)); hash.update(unsignedBytes(image.declaredHeight.toULong(), 4, Endian.Big))
         return hash.finish()
     }
-    private suspend fun prepare(request: CreateRequest): Prepared {
+    private suspend fun prepare(request: CreateRequest, inheritedKey: KeyPhotoResult? = null): Prepared {
         RequestValidation.validate(request).orThrow()
         if (!accepts(request.target)) fail("UNSUPPORTED_PROTOCOL", "HEIC assembly only implements Google V2 heic", Stage.Plan)
         if (request.context.limits.maxSources < 2u) fail("RESOURCE_LIMIT_EXCEEDED", "HEIC create requires two sources", Stage.Plan)
@@ -44,7 +44,11 @@ internal object GoogleHeicCreateOperations {
             request.preference.videoCodec?.let { codec -> movie.tracks.filter { it.handler == "vide" }.any { it.codec != codec } } == true ||
             request.preference.audioCodec?.let { codec -> movie.tracks.filter { it.handler == "soun" }.any { it.audioCodec != codec } } == true ||
             request.preference.dynamicRange != DynamicRangePolicy.Preserve) fail("CAPABILITY_UNSUPPORTED", "HEIC assembly refuses preferences requiring a transformation", Stage.Plan)
-        val sourceKey = selectKey(movie, request.edits?.keyPosition)
+        val sourceKey = if (request.edits?.keyPosition != null) selectKey(movie, request.edits.keyPosition) else inheritedKey ?: selectKey(movie, null)
+        sourceKey.position?.let { position ->
+            val duration = movie.tracks.filter { it.handler == "vide" }.maxOf { it.presentationDuration }
+            if (position < Time.Zero || position >= duration) fail("INVALID_PRESENTATION_TIMESTAMP", "Preserved HEIC key is outside the movie presentation timeline", Stage.Plan)
+        }
         val timestamp = sourceKey.position?.let(::microseconds) ?: -1L
         // Time data-class equality includes its timescale: normalize only after exact representability succeeds.
         val key = sourceKey.copy(position = if (timestamp < 0) null else Time(timestamp, 1_000_000u))
@@ -67,15 +71,16 @@ internal object GoogleHeicCreateOperations {
         image.recheck(); video.validateIdentity().orThrow()
         return prepared
     }
-    suspend fun plan(request: CreateRequest): CoreResult<ExecutionPlan> = attempt {
-        val prepared = prepare(request)
+    suspend fun plan(request: CreateRequest, inheritedKey: KeyPhotoResult? = null): CoreResult<ExecutionPlan> = attempt {
+        val prepared = prepare(request, inheritedKey)
         ExecutionPlan(prepared.snapshot, request.target, listOf(
             PlanStep(Stage.WriteProtocol, listOf(Operation.Create), prepared.image.inspection.layout.resources.map { it.id }, "Append owned XMP item/cdsc with fixed-width relocation and final standard mpvd; no encoding"),
             PlanStep(Stage.Verify, listOf(Operation.Validate), emptyList(), "Verify all retained bytes, original coding/configuration, target binding and exact video before atomic publication")),
             PreservationReport(), CapabilitySet(Availability.Conditional, listOf(DefaultLivePhotoCore().getProtocolCapabilities(request.target).operations.single { it.operation == Operation.Create })))
     }
-    suspend fun create(request: CreateRequest): CoreResult<OperationResult> = attempt {
-        val prepared = prepare(request)
+    suspend fun create(request: CreateRequest, originalInputs: List<BinaryReader> = emptyList(), sourceChanges: List<Change> = emptyList(),
+        inheritedKey: KeyPhotoResult? = null): CoreResult<OperationResult> = attempt {
+        val prepared = prepare(request, inheritedKey)
         val identity = prepared.video.identity().orThrow()
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/heic"), ImageFormat.Heic, prepared.movie.container,
             write = { writer ->
@@ -108,6 +113,6 @@ internal object GoogleHeicCreateOperations {
             })
         val changes = listOf(Change("heif:owned-xmp-item", after = Value.Number(prepared.append.itemId.toString()), reason = "Append requested linked motion-photo XMP item", requested = true),
             Change("google:mpvd", after = Value.Number(identity.size.toString()), reason = "Append standard eight-byte mpvd header and byte-identical video", requested = true))
-        publish(request.output, request.policy, request.context, prepared.image.readers + prepared.video, listOf(asset), changes).orThrow()
+        publish(request.output, request.policy, request.context, originalInputs + prepared.image.readers + prepared.video, listOf(asset), sourceChanges + changes).orThrow()
     }
 }

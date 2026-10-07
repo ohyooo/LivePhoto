@@ -109,6 +109,19 @@ class HeifDecodePreservationIntegrationTest {
                     assertEquals(extractedBytes, cleanVideo)
                     val cleanImagePath = directory.resolve("clean primary $index.heic"); owned.add(cleanImagePath); Files.write(cleanImagePath, cleanImage.toByteArray())
                     assertEquals(originalDecode, decode(cleanImagePath))
+                    val normalizedTx = MemoryOutputTransaction(context, "real-heif-public-normalize-$index")
+                    DefaultLivePhotoCore().convert(ConvertRequest(composite,
+                        ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("heic")), sameTarget = SameTargetPolicy.Normalize,
+                        policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = normalizedTx, context = context)).orThrow()
+                    val normalizedBytes = normalizedTx.committedAssets().values.single()
+                    val normalizedPath = directory.resolve("normalized motion $index.heic"); owned.add(normalizedPath); Files.write(normalizedPath, normalizedBytes.toByteArray())
+                    assertEquals(originalDecode, decode(normalizedPath))
+                    val normalized = SourceSet.Single(MemoryBinarySource(normalizedBytes, SourceId("real-normalized-heic-$index")))
+                    assertEquals(DefaultLivePhotoCore().getKeyPhotoPosition(ReadRequest(composite, context)).orThrow().position,
+                        DefaultLivePhotoCore().getKeyPhotoPosition(ReadRequest(normalized, context)).orThrow().position)
+                    val normalizedRaw = MemoryOutputTransaction(context, "real-heif-normalized-extract-$index")
+                    DefaultLivePhotoCore().extract(ExtractRequest(normalized, emptyList(), output = normalizedRaw, context = context)).orThrow()
+                    assertEquals(extractedBytes, normalizedRaw.committedAssets().values.single())
                 } finally { motionSource.close() }
                 val stagedDecode = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(result, SourceId("heif-expanded-decode-$index")))), true, context)).orThrow()
                 assertTrue(stagedDecode.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })

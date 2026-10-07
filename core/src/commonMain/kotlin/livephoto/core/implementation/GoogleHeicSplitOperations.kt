@@ -5,10 +5,14 @@ import livephoto.core.binary.*
 import livephoto.core.heif.*
 
 internal object GoogleHeicSplitOperations {
-    suspend fun preflight(request: SplitRequest, session: SourceSession, budget: ParseBudget): HeifMotionCleanup {
-        val cleanup = HeifMotionCleanup.prepare(session, budget).orThrow()
-        val video = session.bindings.single().video!!
-        if (checkedAdd(cleanup.byteLength, video.length) > request.context.limits.maxOutputBytes)
+    suspend fun preflight(request: SplitRequest, session: SourceSession, budget: ParseBudget): HeifMotionCleanup? {
+        val cleanup = if (session.bindings.isEmpty()) {
+            // SPL-01: an already-clean classified HEIC remains unchanged. Unknown/mixed metadata is not inferred clean.
+            HeifCodedCarrier.read(session.reader, budget, Stage.Plan).orThrow()
+            null
+        } else HeifMotionCleanup.prepare(session, budget).orThrow()
+        val bytes = if (cleanup == null) session.reader.identity().orThrow().size else checkedAdd(cleanup.byteLength, session.bindings.single().video!!.length)
+        if (bytes > request.context.limits.maxOutputBytes)
             fail("RESOURCE_LIMIT_EXCEEDED", "HEIC clean image/video set exceeds output budget", Stage.Plan)
         val caps = request.output.capabilities()
         if (!caps.canReadStaged || request.policy.atomicity == Atomicity.AssetSetRequired && !caps.assetSetAtomic ||
@@ -19,6 +23,24 @@ internal object GoogleHeicSplitOperations {
     }
     suspend fun split(request: SplitRequest, session: SourceSession, budget: ParseBudget): CoreResult<OperationResult> = attempt {
         val cleanup = preflight(request, session, budget)
+        if (cleanup == null) {
+            val identity = session.reader.identity().orThrow()
+            val digest = sha256Range(session.reader, ByteRange(0uL, identity.size)).orThrow()
+            val unchanged = StagedAsset(OutputAssetSpec(AssetRole.PrimaryImage, mime = "image/heic"), ImageFormat.Heic,
+                write = { writer -> copyRange(session.reader, writer, ByteRange(0uL, identity.size), request.context).orThrow() },
+                verify = { id, reader ->
+                    if (reader.identity().orThrow().size != identity.size || sha256Range(reader, ByteRange(0uL, identity.size)).orThrow() != digest)
+                        fail("POSTCONDITION_FAILED", "Idempotent clean HEIC is not byte-identical", Stage.Verify)
+                    HeifCodedCarrier.read(reader, ParseBudget(request.context), Stage.Validate).orThrow()
+                    val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, ParseBudget(request.context)).orThrow()
+                    AssetVerification(validateSession(staged, listOf(Layer.Structure)).orThrow(), listOf(
+                        GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.Verified, digest, digest),
+                        GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.NotApplicable),
+                        GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.Verified, digest, digest, "Already-clean classified image file unchanged"),
+                        GuaranteeRecord(id, Guarantee.MetadataPreserving, GuaranteeOutcome.Verified, digest, digest, "Every metadata/container byte unchanged")))
+                })
+            return@attempt publish(request.output, request.policy, request.context, session.readers, listOf(unchanged)).orThrow()
+        }
         val image = StagedAsset(OutputAssetSpec(AssetRole.PrimaryImage, mime = "image/heic"), ImageFormat.Heic,
             write = { writer -> cleanup.write(session.reader, writer).orThrow() }, verify = { id, reader ->
                 cleanup.verify(session.reader, reader).orThrow()

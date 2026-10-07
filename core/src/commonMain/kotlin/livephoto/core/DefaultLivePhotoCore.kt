@@ -33,7 +33,8 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
     override suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = GoogleOperations.extract(request)
     override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
-    override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = ConvertOperations.convert(request, backend)
+    override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> =
+        if (GoogleHeicCreateOperations.accepts(request.target)) GoogleHeicConvertOperations.convert(request) else ConvertOperations.convert(request, backend)
     override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairOperations.repair(request)
     override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = KeyMetadataOperations.set(request)
     override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = FrameOperations.extract(request, backend)
@@ -139,7 +140,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         }
         if (actual.protocol == ProtocolIds.GoogleV2 && actual.profile == ProfileId("heic")) {
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = setOf(Operation.Create, Operation.SplitClean)
+            val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo)
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 if (operation in reads + writes) Implementation.Experimental else Implementation.Planned,
                 conditions = if (operation in reads) listOf(
@@ -150,7 +151,9 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
                     Condition(ConditionOperator.Equals, "assembly", Value.Text("fixed-table-width-owned-xmp-cdsc-and-standard-mpvd-unchanged-mp4-no-trim-replacement-or-encoding")),
                     Condition(ConditionOperator.Equals, "verification", Value.Text("retained-byte-and-primary-coding-and-exact-video-independent-staged-proof-partial-decode-not-run"))) else if (operation == Operation.SplitClean) listOf(
                     Condition(ConditionOperator.Equals, "cleanup", Value.Text("single-classified-hvc1-and-complete-canonical-owned-hidden-xmp-item-single-cdsc-and-isolated-metadata-mdat-standard-final-mpvd")),
-                    Condition(ConditionOperator.Equals, "preservation", Value.Text("fixed-width-relocation-retained-byte-proof-no-mixed-private-auxiliary-metadata-independent-atomic-image-movie-publication"))) else emptyList(),
+                    Condition(ConditionOperator.Equals, "preservation", Value.Text("fixed-width-relocation-retained-byte-proof-no-mixed-private-auxiliary-metadata-independent-atomic-image-movie-publication"))) else if (operation in setOf(Operation.ConvertFrom, Operation.ConvertTo)) listOf(
+                    Condition(ConditionOperator.Equals, "conversionScope", Value.Text("same-google-v2-heic-profile-only-no-cross-image-format-encoding")),
+                    Condition(ConditionOperator.Equals, "sameTarget", Value.Text("exact-PreserveAsIs-without-edits-or-explicit-Normalize-through-classified-cleanup-views-source-key-preserved-unless-explicitly-edited"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
         }
@@ -192,7 +195,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             is ReplaceRequest -> ReplaceOperations.plan(request, backend)
             is RemuxRequest -> RemuxOperations.plan(request, backend)
             is TranscodeRequest -> TranscodeOperations.plan(request, backend)
-            is ConvertRequest -> ConvertOperations.plan(request, backend)
+            is ConvertRequest -> if (GoogleHeicCreateOperations.accepts(request.target)) GoogleHeicConvertOperations.plan(request) else ConvertOperations.plan(request, backend)
             is CreateRequest -> when {
                 GoogleHeicCreateOperations.accepts(request.target) -> GoogleHeicCreateOperations.plan(request)
                 request.edits?.replacementFrame != null -> CreateReplacementOperations.plan(request, backend)

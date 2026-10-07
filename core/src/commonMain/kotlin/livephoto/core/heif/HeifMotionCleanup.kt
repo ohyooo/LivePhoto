@@ -14,6 +14,13 @@ internal class HeifMotionCleanup private constructor(private val identity: Sourc
             ?: fail("POSTCONDITION_FAILED", "HEIF retained range has no complete cleanup mapping", Stage.Verify)
         return ByteRange(move.destination + range.offset - move.original.offset, range.length)
     }
+    suspend fun view(reader: BinaryReader, budget: ParseBudget): CoreResult<BinarySource> = attempt {
+        if (reader.identity().orThrow() != identity) fail("SOURCE_CHANGED", "HEIF cleanup view belongs to another source", Stage.Plan)
+        val patched = BinaryReader(FixedPatchSource.create(reader, patches).orThrow(), reader.context)
+        val source = ExtentSource.create(patched, moves.map { it.original }, budget).orThrow()
+        verify(reader, BinaryReader(source, reader.context)).orThrow()
+        source // Borrowed, immutable view; no intermediate output transaction or public asset.
+    }
     suspend fun write(reader: BinaryReader, writer: BinaryWriter): CoreResult<Unit> = attempt {
         if (reader.identity().orThrow() != identity) fail("SOURCE_CHANGED", "HEIF cleanup belongs to another source", Stage.WriteProtocol)
         writer.budget.checkCapacity(byteLength)
@@ -95,7 +102,7 @@ internal class HeifMotionCleanup private constructor(private val identity: Sourc
             if (item.construction != 0u || item.extents.size != 1) fail("CAPABILITY_UNSUPPORTED", "HEIF cleanup requires one isolated owned XMP extent", Stage.Plan)
             val extent = item.extents.single().data
             val timestamp = binding.key.position?.let(::microseconds) ?: -1L
-            val canonical = GoogleDirectoryWriter.heic(binding.video!!.length, timestamp, reader.context)
+            val canonical = GoogleDirectoryWriter.heic(binding.video.length, timestamp, reader.context)
             if (extent.length != canonical.size.toULong() || sha256Range(reader, extent).orThrow() != Sha256().also { it.update(canonical) }.finish())
                 fail("UNSAFE_METADATA_REWRITE", "HEIF cleanup only owns the complete canonical motion packet; ordinary XMP must remain", Stage.Plan)
             val parser = BmffReader(reader, budget)
