@@ -32,9 +32,9 @@ internal object ConvertOperations {
         ExecutionPlan(session.snapshot, request.target,
             listOf(PlanStep(Stage.Clean, listOf(Operation.ConvertFrom), session.inspection.layout.resources.map { it.id },
                 if (prepared == null) "Copy unchanged same-target carriers" else "Remove confirmed source bindings through bounded read-only views")) + targetPlan?.steps.orEmpty(),
-            PreservationReport(), CapabilitySet(Availability.Conditional, listOf(CapabilityEntry(Operation.ConvertFrom, Implementation.Experimental,
+            targetPlan?.predictedPreservation ?: PreservationReport(), CapabilitySet(Availability.Conditional, listOf(CapabilityEntry(Operation.ConvertFrom, Implementation.Experimental,
                 lifecycle = if (session.legacyPair != null || session.bindings.any { it.protocol == ProtocolIds.Fusion }) Lifecycle.Legacy else Lifecycle.Active,
-                verification = listOf(Verification.SourceReviewed)))))
+                verification = listOf(Verification.SourceReviewed))) + targetPlan?.capabilities?.operations.orEmpty().filter { it.operation != Operation.ConvertFrom }))
     }
 
     suspend fun convert(request: ConvertRequest, backend: MediaBackend? = null): CoreResult<OperationResult> = attempt {

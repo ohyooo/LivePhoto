@@ -117,4 +117,20 @@ class CreateReplacementOperationsTest {
         assertEquals(1, frame.calls); assertEquals(1, trim.calls)
         assertEquals(TransactionState.Open, tx.query().orThrow().state); assertTrue(tx.committedAssets().isEmpty())
     }
+    @Test fun convertPlanRetainsPredictedEditsAndRequiredMediaCapabilitiesWithoutExecuting(): Unit = runImmediate {
+        val frame = ReplaceOperationsTest.FrameBackend(); val trim = CreateTrimOperationsTest.Backend()
+        val backend = object : MediaBackend by frame {
+            override fun capabilities(): MediaCapabilities = MediaCapabilities(frame.capabilities().backendIds + trim.capabilities().backendIds, frame.capabilities().operations + trim.capabilities().operations)
+            override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = trim.trim(job)
+        }
+        val input = SourceSet.Single(source(GoogleFixtures.v1Photo(CreateTrimOperationsTest().fourSampleVideo(), "120000"), "conversion-media-plan"))
+        val tx = MemoryOutputTransaction(context, "conversion-media-plan-public")
+        val plan = DefaultLivePhotoCore(backend).plan(ConvertRequest(input, ProtocolSelector(ProtocolIds.GoogleV2),
+            edits = EditSpec(trim = TrimSpec(TimeRange(Time(80, 1000u), Time(160, 1000u)), TrimMode.LosslessOnly), replacementFrame = CoverPosition.FrameIndex(1uL)), output = tx, context = context)).orThrow()
+        assertTrue(plan.predictedPreservation.changes.any { it.selector == "primaryImage" })
+        assertTrue(plan.predictedPreservation.changes.any { it.selector == "videoTrim" })
+        assertTrue(plan.capabilities.operations.map { it.operation }.containsAll(listOf(Operation.ConvertFrom, Operation.Trim, Operation.ExtractFrame)))
+        assertTrue(plan.steps.any { it.stage == Stage.DecodeFrame }); assertTrue(plan.steps.any { it.stage == Stage.Trim })
+        assertEquals(0, frame.calls); assertEquals(0, trim.calls); assertEquals(TransactionState.Open, tx.query().orThrow().state)
+    }
 }
