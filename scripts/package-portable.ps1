@@ -185,6 +185,39 @@ try {
         }
         Write-Host 'PORTABLE_APPLE_PAIR_ROUNDTRIP=SUCCESS'
         Write-Host 'PORTABLE_APPLE_CREATE_SETKEY=SUCCESS scope=bounded-jpeg-mp4-not-device-compatibility'
+        $movSource = $remux.output.assets[0].path
+        $movSourceHash = (Get-FileHash $movSource).Hash
+        $movCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $movSource --target apple.livephoto --profile jpeg-mov --frame-index 0 --strict --output-dir (Join-Path $verify 'Apple direct MOV create')
+        if ($LASTEXITCODE -ne 0) { throw "Portable Apple MOV Create failed: $movCreateJson" }
+        $movCreate = ($movCreateJson | ConvertFrom-Json).result
+        if ($movCreate.output.assets.Count -ne 2 -or $movCreate.output.assets[1].videoContainer -ne 'Mov' -or $movCreate.output.assets[1].mime -ne 'video/quicktime' -or
+            ($movCreate.execution | Where-Object { $_.transcoded -or $_.remuxed })) { throw 'Portable Apple MOV Create changed the input container or did not publish a complete pair.' }
+        $movImage = $movCreate.output.assets[0].path; $movMovie = $movCreate.output.assets[1].path
+        $movImageHash = (Get-FileHash $movImage).Hash; $movMovieHash = (Get-FileHash $movMovie).Hash
+        $movInspectJson = & $launcher inspect --input $movImage --pair-video $movMovie
+        if ($LASTEXITCODE -ne 0) { throw 'Portable Apple MOV initial pair inspect failed.' }
+        $movPairing = ($movInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress
+        foreach ($keyIndex in @(1, 0)) {
+            $movSetJson = & $launcher set-key --input $movImage --pair-video $movMovie --frame-index $keyIndex --strict --output-dir (Join-Path $verify "Apple MOV key $keyIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable Apple MOV SetKey failed: $movSetJson" }
+            $movSet = ($movSetJson | ConvertFrom-Json).result
+            if ($movSet.output.assets.Count -ne 2 -or $movSet.output.assets[1].videoContainer -ne 'Mov' -or
+                ($movSet.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or
+                ($movSet.preservation.records | Where-Object { $_.outcome -notin @('Verified','NotApplicable') })) { throw 'Portable Apple MOV SetKey lacks exact owned-patch preservation.' }
+            $movImage = $movSet.output.assets[0].path; $movMovie = $movSet.output.assets[1].path
+            $movKeyJson = & $launcher get-key --input $movImage --pair-video $movMovie
+            if ($LASTEXITCODE -ne 0) { throw 'Portable Apple MOV independent key read failed.' }
+            $movPosition = ($movKeyJson | ConvertFrom-Json).result.position
+            if (-not $movPosition -or ([decimal]$movPosition.value * 1000000 / $movPosition.timescale) -ne ($keyIndex * 40000)) { throw 'Portable Apple MOV key PTS is not exact.' }
+            $movInspectJson = & $launcher inspect --input $movImage --pair-video $movMovie
+            if ($LASTEXITCODE -ne 0 -or (($movInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress) -ne $movPairing -or (Get-FileHash $movImage).Hash -ne $movImageHash) { throw 'Portable Apple MOV SetKey changed the original primary or CID.' }
+            $movValidateJson = & $launcher validate --input $movImage --pair-video $movMovie --layers Structure,Protocol
+            if ($LASTEXITCODE -ne 0 -or ($movValidateJson | ConvertFrom-Json).result.verdict -ne 'Valid' -or ($movValidateJson | ConvertFrom-Json).result.coverage -ne 'Complete') { throw 'Portable Apple MOV pair validation failed.' }
+            & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $movMovie -map 0:v -map '0:a?' -sn -dn -f null -
+            if ($LASTEXITCODE -ne 0) { throw 'Portable Apple MOV SetKey movie failed complete decoding.' }
+        }
+        if ((Get-FileHash $movMovie).Hash -ne $movMovieHash -or (Get-FileHash $movSource).Hash -ne $movSourceHash) { throw 'Portable Apple MOV exact key roundtrip changed unrequested or source bytes.' }
+        Write-Host 'PORTABLE_APPLE_MOV_CREATE_SETKEY=SUCCESS scope=bounded-classified-mov-not-device-compatibility'
         $transcodeFixture = Join-Path $verify 'transcode fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 8 -vf "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709" -fps_mode passthrough -c:v libx264 -preset ultrafast -crf 30 -bf 0 -g 3 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $transcodeFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable transcode fixture generation failed.' }
