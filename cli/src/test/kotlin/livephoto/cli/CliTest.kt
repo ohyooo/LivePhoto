@@ -15,6 +15,34 @@ class CliTest {
         assertFalse(json.contains("private-adapter-reference"))
     }
     private val failure = CoreResult.Failure(CoreError(IssueCode("TEST_SENTINEL"), Stage.Plan, "test"))
+    @Test fun pairKeyCommandsForwardPairAndPositionWithoutInspectingOrOpeningInputs() = blocking {
+        var read: ReadRequest? = null; var set: SetKeyRequest? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun getKeyPhotoPosition(request: ReadRequest): CoreResult<KeyPhotoResult> { read = request; return failure }
+            override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> { set = request; return failure }
+        }
+        val pair = listOf("--input", "unopened pair image", "--pair-video", "unopened pair movie")
+        assertEquals(3, Cli(core).run(listOf("get-key") + pair) {})
+        assertIs<SourceSet.Pair>(assertNotNull(read).input)
+        assertEquals(3, Cli(core).run(listOf("set-key") + pair + listOf("--frame-index", "0", "--track-id", "1", "--strict", "--output-dir", "not-created")) {})
+        val received = assertNotNull(set)
+        assertIs<SourceSet.Pair>(received.input)
+        assertEquals(CoverPosition.FrameIndex(0uL, TrackId("1")), received.position)
+        assertEquals(PreservationPolicy.Strict, received.policy.preservation)
+        assertEquals(TranscodePolicy.Forbid, received.policy.transcode)
+    }
+    @Test fun appleCreateForwardsExplicitProfileThroughIndependentCreateEntrance() = blocking {
+        var received: CreateRequest? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun create(request: CreateRequest): CoreResult<OperationResult> { received = request; return failure }
+        }
+        assertEquals(3, Cli(core).run(listOf("create", "--image", "unopened image", "--video", "unopened movie", "--target", "apple.livephoto", "--profile", "jpeg-mp4", "--frame-index", "0", "--strict", "--output-dir", "not-created")) {})
+        val request = assertNotNull(received)
+        assertEquals(ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4")), request.target)
+        assertEquals(CoverPosition.FrameIndex(0uL), request.edits!!.keyPosition)
+        assertEquals(SourceBindingPolicy.RejectAlreadyLive, request.sourceBindings)
+        assertEquals(TranscodePolicy.Forbid, request.policy.transcode)
+    }
     @Test fun helpVersionAndCapabilitiesWorkWithoutFiles() = blocking {
         for (args in listOf(listOf("--help"), listOf("--version"), listOf("capabilities", "--target", "google.microvideo.v1"), listOf("media-capabilities"))) {
             val lines = mutableListOf<String>()

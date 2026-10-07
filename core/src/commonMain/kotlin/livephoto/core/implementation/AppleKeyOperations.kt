@@ -10,7 +10,8 @@ internal object AppleKeyOperations {
     private data class Prepared(val fixed: BinaryReader, val expected: Digest, val key: Time, val changes: List<Change>)
     private suspend fun prepare(request: SetKeyRequest, session: SourceSession): Prepared {
         val pair = session.applePair ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey needs a complete pair", Stage.Plan)
-        val media = session.videos.getValue(ProtocolIds.Apple)
+        val media = session.videos[ProtocolIds.Apple]
+            ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey requires an independently parsed compatible movie", Stage.Plan)
         if (media.container != VideoContainer.Mp4 || session.inspection.issues.any { it.severity == Severity.Error })
             fail("CAPABILITY_UNSUPPORTED", "Apple SetKey only implements a valid JPEG/MP4 pair", Stage.Plan)
         val budget = ParseBudget(request.context)
@@ -92,7 +93,8 @@ internal object AppleKeyOperations {
                     val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol)).orThrow()
                     if (report.verdict != Verdict.Valid || report.coverage != Coverage.Complete || staged.inspection.pairing != session.inspection.pairing ||
                         staged.inspection.keyPhoto.position?.compareTo(prepared.key) != 0 ||
-                        staged.videos.getValue(ProtocolIds.Apple).tracks.filter { it.handler != "meta" } != session.videos.getValue(ProtocolIds.Apple).tracks.filter { it.handler != "meta" })
+                        staged.videos[ProtocolIds.Apple] == null ||
+                        staged.videos[ProtocolIds.Apple]?.tracks?.filter { it.handler != "meta" } != session.videos[ProtocolIds.Apple]?.tracks?.filter { it.handler != "meta" })
                         fail("POSTCONDITION_FAILED", "Apple SetKey changed CID, retained media or failed pair/key validation", Stage.Verify)
                     AssetVerification(report, listOf(
                         GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable),

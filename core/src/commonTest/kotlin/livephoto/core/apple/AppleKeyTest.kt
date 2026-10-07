@@ -101,4 +101,92 @@ class AppleKeyTest {
         assertEquals(IssueCode("SOURCE_CHANGED"), assertIs<CoreResult.Failure>(result).error.code)
         assertEquals(TransactionState.Aborted, base.query().orThrow().state); assertFalse(original.closed)
     }
+    @Test fun timestampSelectionUsesPresentationFramesExplicitToleranceAndEarlierTie(): Unit = runImmediate {
+        val input = pair()
+        val originalImage = bytes(input.image)
+        val cases = listOf(
+            CoverPosition.Timestamp(Time(20, 1000u), Selection.Nearest, Time(20, 1000u)) to Time.Zero,
+            CoverPosition.Timestamp(Time(60, 1000u), Selection.AtOrBefore, Time(20, 1000u)) to Time(40, 1000u),
+            CoverPosition.Timestamp(Time(40, 1000u), Selection.Exact) to Time(40, 1000u),
+            CoverPosition.FrameIndex(1uL, TrackId("1")) to Time(40, 1000u))
+        for ((index, case) in cases.withIndex()) {
+            val result = core.setKeyPhotoPosition(SetKeyRequest(input, case.first,
+                output = MemoryOutputTransaction(context, "apple-selection-$index"), context = context)).orThrow()
+            assertEquals(originalImage, bytes(result.output.assets[0].readableSource!!))
+            val read = core.getKeyPhotoPosition(ReadRequest(SourceSet.Pair(result.output.assets[0].readableSource!!, result.output.assets[1].readableSource!!), context)).orThrow()
+            assertEquals(0, read.position!!.compareTo(case.second))
+        }
+        for ((index, position) in listOf(
+            CoverPosition.Timestamp(Time(20, 1000u), Selection.Exact),
+            CoverPosition.Timestamp(Time(20, 1000u), Selection.Nearest),
+            CoverPosition.Timestamp(Time(80, 1000u), Selection.Exact),
+            CoverPosition.FrameIndex(0uL, TrackId("2"))).withIndex()) {
+            val tx = MemoryOutputTransaction(context, "apple-selection-reject-$index")
+            assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(input, position, output = tx, context = context)))
+            assertTrue(tx.query().orThrow().assetIds.isEmpty())
+        }
+    }
+    @Test fun unclassifiedOrNonzeroPaddingAndZeroDurationCannotAuthorizeSetKey(): Unit = runImmediate {
+        val input = pair()
+        val original = bytes(input.video)
+        val reader = BinaryReader(input.video, context)
+        val facts = BmffVideoProbe(reader, allowTimedMetadata = true).probe(ByteRange(0uL, original.size.toULong())).orThrow()
+        val metadataId = facts.tracks.single { it.handler == "meta" }.trackId
+        val parser = BmffReader(reader)
+        val movie = parser.readBoxes(ByteRange(0uL, original.size.toULong())).orThrow().single { it.type == "moov" }
+        val track = parser.readBoxes(movie.payload).orThrow().filter { it.type == "trak" }.single { trak ->
+            val tkhd = parser.readBoxes(trak.payload).orThrow().single { it.type == "tkhd" }
+            reader.readU32(tkhd.payload.offset + 12uL).orThrow() == metadataId
+        }
+        val edts = parser.readBoxes(track.payload).orThrow().single { it.type == "edts" }
+        val padding = parser.readBoxes(edts.payload).orThrow().single { it.type == "free" }
+        for (variant in 0..3) {
+            val changed = original.toByteArray()
+            when (variant) {
+                0 -> changed[padding.payload.offset.toInt()] = 1
+                1 -> ByteArray(4).copyInto(changed, padding.range.offset.toInt()) // Parent-extending size zero is not the owned explicit envelope.
+                2 -> "uuid".encodeToByteArray().copyInto(changed, padding.range.offset.toInt() + 4)
+                3 -> ByteArray(4).copyInto(changed, edts.payload.offset.toInt() + 16) // Media edit duration must not be zero.
+            }
+            val corrupted = source(Bytes(changed), "apple-malformed-edit-$variant")
+            assertIs<CoreResult.Failure>(BmffVideoProbe(BinaryReader(corrupted, context), allowTimedMetadata = true).probe(ByteRange(0uL, changed.size.toULong())))
+            val tx = MemoryOutputTransaction(context, "apple-malformed-edit-output-$variant")
+            assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Pair(input.image, corrupted), CoverPosition.FrameIndex(1uL), output = tx, context = context)))
+            assertTrue(tx.query().orThrow().assetIds.isEmpty())
+            assertEquals(Bytes(changed), bytes(corrupted))
+        }
+        assertEquals(original, bytes(input.video))
+    }
+    @Test fun pairWideExactRequirementAndSharedOutputBudgetFailBeforeStaging(): Unit = runImmediate {
+        val input = pair()
+        val exact = MemoryOutputTransaction(context, "apple-key-exact-rejected")
+        val request = SetKeyRequest(input, CoverPosition.FrameIndex(1uL), policy = MutationPolicy(requiredGuarantees = listOf(Guarantee.ExactExtraction)), output = exact, context = context)
+        assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.plan(request)).error.code)
+        assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(request)).error.code)
+        assertTrue(exact.query().orThrow().assetIds.isEmpty())
+        val total = input.image.size().orThrow() + input.video.size().orThrow()
+        val limited = context.copy(limits = context.limits.copy(maxOutputBytes = total - 1uL))
+        val tx = MemoryOutputTransaction(limited, "apple-key-budget-rejected")
+        val budgetRequest = SetKeyRequest(input, CoverPosition.FrameIndex(1uL), output = tx, context = limited)
+        assertEquals(IssueCode("RESOURCE_LIMIT_EXCEEDED"), assertIs<CoreResult.Failure>(core.plan(budgetRequest)).error.code)
+        assertEquals(IssueCode("RESOURCE_LIMIT_EXCEEDED"), assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(budgetRequest)).error.code)
+        assertTrue(tx.query().orThrow().assetIds.isEmpty())
+    }
+    @Test fun cancellationAfterStagingAbortsBothAssetsAndNeverCommits(): Unit = runImmediate {
+        val input = pair(); val imageBefore = bytes(input.image); val movieBefore = bytes(input.video)
+        var cancelled = false; var commits = 0
+        val cancellable = context.copy(cancellation = Cancellation { cancelled })
+        val base = MemoryOutputTransaction(cancellable, "apple-key-cancelled")
+        val output = object : OutputTransaction by base {
+            override suspend fun prepare(): CoreResult<Unit> {
+                val result = base.prepare(); cancelled = true; return result
+            }
+            override suspend fun commit(): CoreResult<Receipt> { commits++; return base.commit() }
+        }
+        val result = core.setKeyPhotoPosition(SetKeyRequest(input, CoverPosition.FrameIndex(1uL), output = output, context = cancellable))
+        assertEquals(IssueCode("CANCELLED"), assertIs<CoreResult.Failure>(result).error.code)
+        assertEquals(0, commits); assertEquals(TransactionState.Aborted, base.query().orThrow().state)
+        assertTrue(base.committedAssets().isEmpty())
+        assertEquals(imageBefore, bytes(input.image)); assertEquals(movieBefore, bytes(input.video))
+    }
 }
