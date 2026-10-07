@@ -25,7 +25,11 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun validateProtocol(request: ValidationRequest): CoreResult<ValidationReport> = validate(ValidationRequest(request.input, listOf(Layer.Protocol), request.requiredChecks, request.target, request.context))
     override suspend fun validateMedia(request: ValidationRequest): CoreResult<ValidationReport> = validate(ValidationRequest(request.input, listOf(Layer.Media), request.requiredChecks, request.target, request.context))
 
-    override suspend fun create(request: CreateRequest): CoreResult<OperationResult> = if (request.edits?.trim != null) CreateTrimOperations.create(request, backend) else GoogleOperations.create(request)
+    override suspend fun create(request: CreateRequest): CoreResult<OperationResult> = when {
+        request.edits?.replacementFrame != null -> CreateReplacementOperations.create(request, backend)
+        request.edits?.trim != null -> CreateTrimOperations.create(request, backend)
+        else -> GoogleOperations.create(request)
+    }
     override suspend fun extract(request: ExtractRequest): CoreResult<OperationResult> = GoogleOperations.extract(request)
     override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
     override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = ConvertOperations.convert(request, backend)
@@ -164,7 +168,11 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             is RemuxRequest -> RemuxOperations.plan(request, backend)
             is TranscodeRequest -> TranscodeOperations.plan(request, backend)
             is ConvertRequest -> ConvertOperations.plan(request, backend)
-            is CreateRequest -> if (request.edits?.trim != null) CreateTrimOperations.plan(request, backend) else GoogleOperations.plan(request)
+            is CreateRequest -> when {
+                request.edits?.replacementFrame != null -> CreateReplacementOperations.plan(request, backend)
+                request.edits?.trim != null -> CreateTrimOperations.plan(request, backend)
+                else -> GoogleOperations.plan(request)
+            }
             is SetKeyRequest -> KeyMetadataOperations.plan(request)
             is RepairRequest -> RepairOperations.plan(request)
             else -> GoogleOperations.plan(request)

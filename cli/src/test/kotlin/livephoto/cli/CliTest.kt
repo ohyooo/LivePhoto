@@ -151,4 +151,20 @@ class CliTest {
         assertEquals(3, cli.run(args) {}); assertEquals(1, calls); assertEquals(0, discoveries)
         assertEquals(2, cli.run(args + listOf("--start-us", "0")) {}); assertEquals(1, calls)
     }
+    @Test fun replacementAndKeyPositionsRemainSeparateForCreateAndConvert() = blocking {
+        var edits: EditSpec? = null; var calls = 0
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun create(request: CreateRequest): CoreResult<OperationResult> { edits = request.edits; calls++; return failure }
+            override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> { edits = request.edits; calls++; return failure }
+        }
+        val cli = Cli(core)
+        val common = listOf("--target", "google.motionphoto.v2", "--output-dir", "not-created", "--replacement-frame-index", "0", "--replacement-track-id", "2", "--time-us", "80000")
+        assertEquals(3, cli.run(listOf("create", "--image", "not-opened", "--video", "not-opened-video") + common) {})
+        assertEquals(CoverPosition.FrameIndex(0uL, TrackId("2")), assertNotNull(edits).replacementFrame)
+        assertEquals(CoverPosition.Timestamp(Time(80000, 1_000_000u)), assertNotNull(edits).keyPosition)
+        assertEquals(3, cli.run(listOf("convert", "--input", "not-opened") + common) {})
+        assertEquals(CoverPosition.FrameIndex(0uL, TrackId("2")), assertNotNull(edits).replacementFrame)
+        assertEquals(2, cli.run(listOf("create", "--image", "not-opened", "--video", "not-opened-video") + common + listOf("--replacement-time-us", "0")) {})
+        assertEquals(2, calls)
+    }
 }

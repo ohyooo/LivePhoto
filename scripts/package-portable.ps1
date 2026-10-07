@@ -158,6 +158,18 @@ try {
             throw 'Portable Create/Convert did not embed the same verified derived video.'
         }
         Write-Host 'PORTABLE_FFMPEG_CREATE_CONVERT_TRIM=SUCCESS'
+        $replacementCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $transcodeFixture --target google.motionphoto.v2 --replacement-frame-index 5 --frame-index 0 --start-us 0 --end-us 120000 --mode LosslessOnly --output-dir (Join-Path $verify 'replacement trim create')
+        if ($LASTEXITCODE -ne 0) { throw "Portable combined frame replacement and trim Create failed: $replacementCreateJson" }
+        $replacementCreate = ($replacementCreateJson | ConvertFrom-Json).result
+        if (([decimal]$replacementCreate.keyPhoto.position.value) -ne 0 -or
+            -not ($replacementCreate.preservation.records | Where-Object { $_.guarantee -eq 'ImageDataPreserving' -and $_.outcome -eq 'Changed' }) -or
+            -not ($replacementCreate.execution | Where-Object stage -eq 'Trim') -or ($replacementCreate.execution | Where-Object transcoded -eq $true)) { throw 'Portable replacement/trim conflated source frame with key or video encoding.' }
+        $replacementConvertJson = & $launcher convert --input $replaceCarrier --target google.microvideo.v1 --replacement-frame-index 1 --output-dir (Join-Path $verify 'replacement convert')
+        if ($LASTEXITCODE -ne 0) { throw "Portable replacement Convert failed: $replacementConvertJson" }
+        $replacementConvert = ($replacementConvertJson | ConvertFrom-Json).result
+        if (([decimal]$replacementConvert.keyPhoto.position.value * 1000000 / $replacementConvert.keyPhoto.position.timescale) -ne 80000 -or
+            -not ($replacementConvert.execution | Where-Object stage -eq 'EncodeImage')) { throw 'Portable replacement Convert lost the inherited key.' }
+        Write-Host 'PORTABLE_FFMPEG_CREATE_CONVERT_REPLACEMENT=SUCCESS'
     } else {
         if ($LASTEXITCODE -ne 3 -or ($probeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
             throw "Portable missing-backend gate failed: $probeJson"
@@ -183,6 +195,9 @@ try {
         $trimCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.microvideo.v1 --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim create')
         if ($LASTEXITCODE -ne 3 -or ($trimCreateJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trimmed Create gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_CREATE_TRIM=UNAVAILABLE'
+        $replacementCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --replacement-frame-index 0 --output-dir (Join-Path $verify 'disabled replacement create')
+        if ($LASTEXITCODE -ne 3 -or ($replacementCreateJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend replacement Create gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_CREATE_REPLACEMENT=UNAVAILABLE'
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }

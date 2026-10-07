@@ -19,6 +19,7 @@ Create: --image FILE --video FILE --target PROTOCOL
 Write: --output-dir NEW_DIRECTORY (assets published together under assets/)
 Convert: --target PROTOCOL [--profile PROFILE]
 Create/convert edits: [--start-us N --end-us N --mode LosslessPreferred] [--frame-index N | --time-us N]
+Derived image: [--replacement-frame-index N | --replacement-time-us N] [--replacement-track-id ID]; independent of key
 Convert: [--same-target PreserveAsIs|Normalize]; trim [--key-outside Reject|ClampExplicitly|ClearIfSupported]
 Extract: [--resources ID,ID] [--raw-carrier]
 Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
@@ -71,14 +72,15 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             val common = setOf("max-bytes")
             val inputKeys = setOf("input", "pair-video")
             val positionKeys = setOf("frame-index", "time-us", "track-id")
+            val replacementKeys = positionKeys.map { "replacement-$it" }.toSet()
             val targetKeys = setOf("target", "profile")
             val trimKeys = setOf("start-us", "end-us", "mode", "key-outside")
             val mediaCommands = setOf("probe", "media-capabilities", "extract-frame", "replace-cover", "trim", "remux", "transcode")
             val allowed = common + (if (command in mediaCommands + setOf("create", "convert")) setOf("ffmpeg") else emptySet()) + when (command) {
                 "capabilities" -> targetKeys
                 "media-capabilities" -> emptySet()
-                "create" -> setOf("image", "video", "output-dir", "strict") + targetKeys + trimKeys + positionKeys
-                "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target") + trimKeys + positionKeys
+                "create" -> setOf("image", "video", "output-dir", "strict") + targetKeys + trimKeys + positionKeys + replacementKeys
+                "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target") + trimKeys + positionKeys + replacementKeys
                 "extract" -> inputKeys + setOf("output-dir", "resources", "raw-carrier")
                 "split" -> inputKeys + setOf("output-dir", "strict")
                 "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues")
@@ -94,7 +96,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             }
             require(options.keys.all { it in allowed }) { "Unknown or inapplicable option: ${options.keys.first { it !in allowed }}" }
             val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
-                command in setOf("create", "convert") && (options.keys.any { it in trimKeys } || "ffmpeg" in options)
+                command in setOf("create", "convert") && (options.keys.any { it in trimKeys + replacementKeys } || "ffmpeg" in options)
             val discovery = if (providedCore == null && needsBackend) discover(options["ffmpeg"]?.let(Path::of)) else null
             val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
             fun required(name: String): String = options[name] ?: errorArgument("Missing --$name")
@@ -105,18 +107,19 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             fun source(): SourceSet = if (options.containsKey("pair-video")) SourceSet.Pair(file("input"), file("pair-video")) else SourceSet.Single(file("input"))
             fun target() = ProtocolSelector(ProtocolId(required("target")), options["profile"]?.let(::ProfileId))
             fun destination(): OutputTransaction = DirectoryOutputTransaction(Path.of(required("output-dir")), context).also { output = it }
-            fun position(): CoverPosition {
-                require(options.containsKey("frame-index") xor options.containsKey("time-us")) { "Choose exactly one of --frame-index or --time-us" }
-                require(!options.containsKey("track-id") || options.containsKey("frame-index")) { "--track-id requires --frame-index" }
-                return options["frame-index"]?.let { CoverPosition.FrameIndex(it.toULong(), options["track-id"]?.let(::TrackId)) }
-                    ?: CoverPosition.Timestamp(Time(required("time-us").toLong(), 1_000_000u))
+            fun position(prefix: String = ""): CoverPosition {
+                require(options.containsKey("${prefix}frame-index") xor options.containsKey("${prefix}time-us")) { "Choose exactly one of --${prefix}frame-index or --${prefix}time-us" }
+                require(!options.containsKey("${prefix}track-id") || options.containsKey("${prefix}frame-index")) { "--${prefix}track-id requires --${prefix}frame-index" }
+                return options["${prefix}frame-index"]?.let { CoverPosition.FrameIndex(it.toULong(), options["${prefix}track-id"]?.let(::TrackId)) }
+                    ?: CoverPosition.Timestamp(Time(required("${prefix}time-us").toLong(), 1_000_000u))
             }
             fun edits(): EditSpec? {
                 val trim = if (options.keys.any { it in trimKeys }) TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)),
                     mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred,
                     keyOutside = options["key-outside"]?.let(KeyOutsidePolicy::valueOf) ?: KeyOutsidePolicy.Reject) else null
                 val key = if (options.keys.any { it in positionKeys }) position() else null
-                return if (trim == null && key == null) null else EditSpec(trim = trim, keyPosition = key)
+                val replacement = if (options.keys.any { it in replacementKeys }) position("replacement-") else null
+                return if (trim == null && key == null && replacement == null) null else EditSpec(trim = trim, keyPosition = key, replacementFrame = replacement)
             }
             val policy = MutationPolicy(preservation = if (options.containsKey("strict")) PreservationPolicy.Strict else PreservationPolicy.BestEffortWithReport,
                 transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid)

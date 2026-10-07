@@ -98,12 +98,13 @@ class CreateTrimOperationsTest {
         val tx = MemoryOutputTransaction(context, "create-trim-gates")
         assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore().create(request(tx))).error.code.value)
         val backend = Backend(); val core = DefaultLivePhotoCore(backend)
-        for (req in listOf(request(tx).copy(target = ProtocolSelector(ProtocolIds.Samsung)), request(tx).copy(edits = EditSpec(spec, replacementFrame = CoverPosition.FrameIndex(0uL)))))
-            assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.create(req)).error.code.value)
+        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.create(request(tx).copy(target = ProtocolSelector(ProtocolIds.Samsung)))).error.code.value)
+        // Replacement is now implemented, but strict image preservation still rejects before decoding.
+        assertEquals("PRESERVATION_REQUIREMENT_FAILED", assertIs<CoreResult.Failure>(core.create(request(tx).copy(edits = EditSpec(spec, replacementFrame = CoverPosition.FrameIndex(0uL))))).error.code.value)
         assertEquals(0, backend.calls)
     }
     /** Independently reconstruct four samples by extending the existing two-sample fixture's tables. */
-    private suspend fun fourSampleVideo(): ByteArray {
+    internal suspend fun fourSampleVideo(): ByteArray {
         val original = GoogleFixtures.video(); val source = input(original.bytes, "four-sample-builder"); val reader = BinaryReader(source, context); val boxes = BmffReader(reader)
         val roots = boxes.readBoxes(ByteRange(0uL, original.bytes.size.toULong())).orThrow()
         suspend fun rebuild(box: BmffBox, sampleOffset: UInt): ByteArray {
@@ -125,7 +126,7 @@ class CreateTrimOperationsTest {
         source.close()
         return ftyp + moov + GoogleFixtures.box("mdat", original.samples.fold(byteArrayOf()) { bytes, sample -> bytes + sample }.let { it + it })
     }
-    private class Backend(val failure: Boolean = false, val after: () -> Unit = {}) : MediaBackend {
+    internal class Backend(val failure: Boolean = false, val after: () -> Unit = {}) : MediaBackend {
         var calls = 0
         override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("synthetic-create-trim"), listOf(CapabilityEntry(Operation.Trim, Implementation.Experimental)))
         override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = attempt {

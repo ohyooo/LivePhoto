@@ -110,7 +110,7 @@ class ReplaceOperationsTest {
         assertEquals("IO_WRITE_FAILED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore(backend).replacePrimaryImageFromFrame(request(failing))).error.code.value)
         assertEquals(1, backend.calls); assertEquals(TransactionState.Aborted, output.query().orThrow().state); assertTrue(output.committedAssets().isEmpty())
     }
-    private class FrameBackend(val failDecode: Boolean = false, val after: () -> Unit = {}, val jfif: ByteArray? = null) : MediaBackend {
+    internal class FrameBackend(val failDecode: Boolean = false, val after: () -> Unit = {}, val jfif: ByteArray? = null) : MediaBackend {
         var calls = 0
         override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("synthetic-replace"), listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental)))
         override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = attempt {

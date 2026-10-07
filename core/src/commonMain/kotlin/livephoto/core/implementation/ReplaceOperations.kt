@@ -99,7 +99,7 @@ internal object ReplaceOperations {
                 issues = frame.operation.issues + created.issues)
         } finally { frame.operation.output.assets.forEach { it.readableSource?.close() } }
     }
-    private suspend fun canonicalJfif(session: SourceSession): JpegSegment? {
+    internal suspend fun canonicalJfif(session: SourceSession): JpegSegment? {
         val segment = session.jpeg!!.segments.singleOrNull { it.marker == 0xe0 } ?: return null
         val payload = segment.payload ?: return null
         val canonical = Bytes(byteArrayOf(0x4a, 0x46, 0x49, 0x46, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0))
