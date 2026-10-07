@@ -26,7 +26,9 @@ New-Item -ItemType Directory -Path $imageParent -Force | Out-Null
 $packageArgs = @('--type', 'app-image', '--name', 'LivePhoto', '--app-version', '0.1.0',
     '--input', $inputLib, '--main-jar', 'livephoto-cli.jar', '--main-class', 'livephoto.cli.MainKt',
     '--add-modules', 'java.base,java.desktop', '--java-options', '-Djava.awt.headless=true', '--dest', $imageParent)
-if ($IsWindows) { $packageArgs += '--win-console' }
+if ($IsWindows) {
+    $packageArgs += @('--win-console', '--add-launcher', "WindowsMediaHelper=$(Join-Path $PSScriptRoot 'windows-media-worker.properties')")
+}
 & "$env:JAVA_HOME/bin/jpackage" @packageArgs
 if ($LASTEXITCODE -ne 0) { throw 'jpackage failed' }
 $name = if ($IsMacOS) { 'LivePhoto.app' } else { 'LivePhoto' }
@@ -48,6 +50,20 @@ else {
 $launcher = Join-Path $verify $(if ($IsWindows) { 'LivePhoto/LivePhoto.exe' } elseif ($IsMacOS) { 'LivePhoto.app/Contents/MacOS/LivePhoto' } else { 'LivePhoto/bin/LivePhoto' })
 Push-Location $verify
 try {
+    if ($IsWindows) {
+        # Independent launcher uses the bundled runtime. Native access is restricted to this worker,
+        # not granted to the primary CLI; bootstrap does not advertise a media decode capability.
+        $mediaWorker = Join-Path $verify 'LivePhoto/WindowsMediaHelper.exe'
+        if (-not (Test-Path $mediaWorker)) { throw 'Portable isolated Windows worker launcher is missing.' }
+        $workerJson = & $mediaWorker --preflight
+        $workerExit = $LASTEXITCODE
+        if (($workerExit -eq 0 -and "$workerJson" -notmatch 'WINDOWS_MEDIA_API_PREFLIGHT=SUCCESS scope=runtime-bootstrap-not-media-decode') -or
+            ($workerExit -eq 3 -and "$workerJson" -notmatch 'WINDOWS_MEDIA_API_PREFLIGHT=UNAVAILABLE') -or $workerExit -notin @(0, 3)) {
+            throw "Portable Windows worker bootstrap failed: $workerJson"
+        }
+        if ($env:LIVEPHOTO_REQUIRE_WINDOWS_MEDIA -eq 'true' -and $workerExit -ne 0) { throw 'Required Windows system API bootstrap is unavailable in the portable worker.' }
+        Write-Host "PORTABLE_WINDOWS_API_BOOTSTRAP=$(if ($workerExit -eq 0) { 'SUCCESS' } else { 'UNAVAILABLE' }) scope=runtime-not-decode"
+    }
     & $launcher --version
     if ($LASTEXITCODE -ne 0) { throw 'Portable version smoke test failed' }
     & $launcher --help
