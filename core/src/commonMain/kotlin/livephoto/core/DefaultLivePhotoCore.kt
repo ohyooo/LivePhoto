@@ -139,17 +139,20 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
         }
         if (actual.protocol == ProtocolIds.GoogleV2 && actual.profile == ProfileId("heic")) {
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            val writes = setOf(Operation.Create, Operation.SplitClean)
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
-                if (operation in reads || operation == Operation.Create) Implementation.Experimental else Implementation.Planned,
+                if (operation in reads + writes) Implementation.Experimental else Implementation.Planned,
                 conditions = if (operation in reads) listOf(
                     Condition(ConditionOperator.Equals, "authority", Value.Text("parsed-mime-xmp-item-cdsc-linked-to-hvc1-or-hev1-primary")),
                     Condition(ConditionOperator.Equals, "motionScope", Value.Text("unique-final-explicit-eight-byte-mpvd-header-video-payload")),
                     Condition(ConditionOperator.Equals, "coverage", Value.Text("partial-item-graph-and-coded-framing-not-decode-preservation-or-device-proof"))) else if (operation == Operation.Create) listOf(
                     Condition(ConditionOperator.Equals, "inputImage", Value.Text("closed-single-hvc1-known-ispe-hvcc-no-existing-metadata-derived-auxiliary-private-sei-or-unknown-dependencies")),
                     Condition(ConditionOperator.Equals, "assembly", Value.Text("fixed-table-width-owned-xmp-cdsc-and-standard-mpvd-unchanged-mp4-no-trim-replacement-or-encoding")),
-                    Condition(ConditionOperator.Equals, "verification", Value.Text("retained-byte-and-primary-coding-and-exact-video-independent-staged-proof-partial-decode-not-run"))) else emptyList(),
-                reasons = if (operation in reads || operation == Operation.Create) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
-                verification = if (operation in reads || operation == Operation.Create) listOf(Verification.SourceReviewed) else emptyList()) })
+                    Condition(ConditionOperator.Equals, "verification", Value.Text("retained-byte-and-primary-coding-and-exact-video-independent-staged-proof-partial-decode-not-run"))) else if (operation == Operation.SplitClean) listOf(
+                    Condition(ConditionOperator.Equals, "cleanup", Value.Text("single-classified-hvc1-and-complete-canonical-owned-hidden-xmp-item-single-cdsc-and-isolated-metadata-mdat-standard-final-mpvd")),
+                    Condition(ConditionOperator.Equals, "preservation", Value.Text("fixed-width-relocation-retained-byte-proof-no-mixed-private-auxiliary-metadata-independent-atomic-image-movie-publication"))) else emptyList(),
+                reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
+                verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
         }
         if (actual.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
         val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)

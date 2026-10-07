@@ -102,6 +102,13 @@ class HeifDecodePreservationIntegrationTest {
                     assertContentEquals(Files.readAllBytes(movie), extractedBytes.toByteArray())
                     val extractedPath = directory.resolve("raw motion $index.mp4"); owned.add(extractedPath); Files.write(extractedPath, extractedBytes.toByteArray())
                     assertEquals(originalDecode, decode(extractedPath))
+                    val split = MemoryOutputTransaction(context, "real-heif-public-clean-$index")
+                    val clean = DefaultLivePhotoCore().split(SplitRequest(composite, output = split, context = context)).orThrow()
+                    val cleanImage = split.committedAssets().getValue(clean.output.assets.single { it.role == AssetRole.PrimaryImage }.id)
+                    val cleanVideo = split.committedAssets().getValue(clean.output.assets.single { it.role == AssetRole.MotionVideo }.id)
+                    assertEquals(extractedBytes, cleanVideo)
+                    val cleanImagePath = directory.resolve("clean primary $index.heic"); owned.add(cleanImagePath); Files.write(cleanImagePath, cleanImage.toByteArray())
+                    assertEquals(originalDecode, decode(cleanImagePath))
                 } finally { motionSource.close() }
                 val stagedDecode = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(result, SourceId("heif-expanded-decode-$index")))), true, context)).orThrow()
                 assertTrue(stagedDecode.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })

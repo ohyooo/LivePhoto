@@ -23,6 +23,17 @@ internal class HeifCodedCarrier private constructor(val identity: SourceIdentity
                 graph.references.isNotEmpty() || graph.unknownMeta.any { it.type != "free" } || graph.unknownPropertyContainers.isNotEmpty() ||
                 graph.properties.any { it.type !in setOf("ispe", "hvcC") })
                 fail(unsafe, "HEIF operation requires a completely classified single coded item profile", stage)
+            val image = classifiedPrimary(reader, graph, budget, stage).orThrow()
+            reader.validateIdentity().orThrow()
+            HeifCodedCarrier(identity, graph, image, roots.single { it.type == "meta" })
+        }
+
+        /** Caller separately classifies every non-primary item/reference/root before mutation. */
+        suspend fun classifiedPrimary(reader: BinaryReader, graph: HeifItemGraph, budget: ParseBudget, stage: Stage): CoreResult<HeifCodedItemFacts> = attempt {
+            val unsafe = if (stage == Stage.Plan) "UNSAFE_METADATA_REWRITE" else "CAPABILITY_UNSUPPORTED"
+            val info = graph.infos.single { it.id == graph.primary }
+            if (info.hidden || info.protection != 0u || graph.unknownPropertyContainers.isNotEmpty() || graph.properties.any { it.type !in setOf("ispe", "hvcC") })
+                fail(unsafe, "HEIF primary properties are not completely classified", stage)
             val image = HeifCodedItemProbe.primary(reader, graph, budget).orThrow()
             if (image.nalTypes.any { it !in 0..9 && it !in 16..21 && it !in 32..34 })
                 fail(unsafe, "Unknown/reserved/SEI metadata NAL units are outside the finite HEIF profile", stage)
@@ -30,7 +41,7 @@ internal class HeifCodedCarrier private constructor(val identity: SourceIdentity
             hevcConfig(reader.readExactly(image.configuration.offset, checkedInt(image.configuration.length).toUInt()).orThrow(), budget,
                 allowedArrayTypes = setOf(32, 33, 34))
             reader.validateIdentity().orThrow()
-            HeifCodedCarrier(identity, graph, image, roots.single { it.type == "meta" })
+            image
         }
     }
 }

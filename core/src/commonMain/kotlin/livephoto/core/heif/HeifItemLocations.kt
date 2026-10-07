@@ -15,10 +15,13 @@ internal class HeifItemLocations private constructor(
     val identity: SourceIdentity, val items: List<HeifItemLocation>, private val idat: ByteRange?,
 ) {
     /** Fixed-width relocation only. Caller must separately prove all graph dependencies and copied bytes. */
-    suspend fun relocation(reader: BinaryReader, moves: List<HeifMovedRange>, outputSize: ULong): CoreResult<List<HeifOffsetPatch>> = attempt {
+    suspend fun relocation(reader: BinaryReader, moves: List<HeifMovedRange>, outputSize: ULong,
+        retainedItemIds: Set<UInt>? = null): CoreResult<List<HeifOffsetPatch>> = attempt {
         if (reader.identity().orThrow() != identity) fail("SOURCE_CHANGED", "HEIF location plan belongs to a different source", Stage.Plan)
         if (outputSize > reader.context.limits.maxOutputBytes) fail("RESOURCE_LIMIT_EXCEEDED", "HEIF relocation exceeds output budget", Stage.Plan)
         val budget = ParseBudget(reader.context)
+        if (retainedItemIds?.any { id -> items.none { it.id == id } } == true)
+            fail("INVALID_ARGUMENT", "HEIF retained item selection contains an absent ID", Stage.Plan)
         for (move in moves) {
             budget.item(); budget.retain(48uL)
             checkedRange(move.original.offset, move.original.length, identity.size)
@@ -57,6 +60,8 @@ internal class HeifItemLocations private constructor(
         }
         for (item in items) {
             budget.poll()
+            // Selection is relocation arithmetic only; caller independently proves deletion ownership.
+            if (retainedItemIds != null && item.id !in retainedItemIds) continue
             // Even unchanged encoded fields must survive the move: no silently discarded iloc.
             if (item.base.field.length != 0uL) mapped(item.base.field)
             for (extent in item.extents) for (integer in listOf(extent.index, extent.offset, extent.length))
