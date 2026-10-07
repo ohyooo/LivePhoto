@@ -19,6 +19,17 @@ internal object SamsungHeicReader {
         val topSefd = boxes.filter { it.type == "sefd" }
         if (mpvds.isEmpty() && topSefd.isEmpty()) return@attempt null
         val mpvd = mpvds.singleOrNull() ?: fail("AMBIGUOUS_LAYOUT", "Samsung HEIC needs one mpvd box")
+        // mpvd alone is also the official Google HEIF container: it does not establish Samsung authority.
+        val childrenResult = parser.readBoxes(mpvd.payload, 1u)
+        val children = when (childrenResult) {
+            is CoreResult.Success -> childrenResult.value
+            is CoreResult.Failure -> {
+                if (topSefd.isNotEmpty() || childrenResult.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "UNEXPECTED_EOF", "RESOURCE_LIMIT_EXCEEDED")) throw CoreFault(childrenResult.error)
+                return@attempt null
+            }
+        }
+        val nested = children.filter { it.type == "sefd" }
+        if (topSefd.isEmpty() && nested.isEmpty()) return@attempt null
         val ftyp = boxes.singleOrNull { it.type == "ftyp" } ?: fail("CORRUPTED_CONTAINER", "HEIC has no unique ftyp")
         val brands = parser.readFileType(ftyp).orThrow().let { it.compatibleBrands + it.majorBrand }
         if (brands.none { it in setOf("heic", "heix", "hevc", "hevx", "heim", "heis") }) fail("UNSUPPORTED_CONTAINER", "Samsung HEIC carrier brand is outside the implemented scope")
@@ -47,8 +58,6 @@ internal object SamsungHeicReader {
                 if (imageResult.error.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER")) Severity.Warning else Severity.Error,
                 Layer.Media, imageResult.error.location ?: Location(source = identity.id, range = meta.range)))
         } else emptyList()
-        val children = parser.readBoxes(mpvd.payload, 1u).orThrow()
-        val nested = children.filter { it.type == "sefd" }
         val sefd = (topSefd + nested).singleOrNull() ?: fail("AMBIGUOUS_LAYOUT", "Samsung HEIC has no unique sefd")
         if (nested.isNotEmpty() && sefd.range.endExclusive != mpvd.range.endExclusive) fail("SEF_DIRECTORY_INVALID", "Nested sefd must end the mpvd payload")
         val mediaEnd = if (nested.isEmpty()) mpvd.payload.endExclusive else sefd.range.offset

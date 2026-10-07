@@ -8,7 +8,8 @@ internal data class HeifInspectionFragment(val regions: List<Region>, val resour
     val metadata: List<MetadataEntry>, val relationships: List<Relationship>, val issues: List<Issue>)
 
 /** Item bytes are never mislabeled as independent image carriers; string payloads are not logged. */
-internal suspend fun inspectHeifItems(reader: BinaryReader, graph: HeifItemGraph, budget: ParseBudget): HeifInspectionFragment {
+internal suspend fun inspectHeifItems(reader: BinaryReader, graph: HeifItemGraph, budget: ParseBudget,
+    metadataFacts: HeifMetadataFacts? = null): HeifInspectionFragment {
     val identity = reader.identity().orThrow()
     if (identity != graph.locations.identity) fail("SOURCE_CHANGED", "HEIF inspection graph belongs to a different source")
     val regions = mutableListOf<Region>()
@@ -56,7 +57,7 @@ internal suspend fun inspectHeifItems(reader: BinaryReader, graph: HeifItemGraph
             relationships += Relationship(kind, itemId(reference.from), itemId(destination), mapOf("heifReferenceType" to Value.Text(reference.type)))
         }
     }
-    val facts = HeifMetadataReader.read(reader, graph, budget).orThrow()
+    val facts = metadataFacts ?: HeifMetadataReader.read(reader, graph, budget).orThrow()
     for (item in facts.items) {
         budget.item(); budget.retain(256uL)
         val selector = "heif:item:${item.id}:metadata-format"

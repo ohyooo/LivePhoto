@@ -136,6 +136,17 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })
         }
+        if (actual.protocol == ProtocolIds.GoogleV2 && actual.profile == ProfileId("heic")) {
+            val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
+            return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                if (operation in reads) Implementation.Experimental else Implementation.Planned,
+                conditions = if (operation in reads) listOf(
+                    Condition(ConditionOperator.Equals, "authority", Value.Text("parsed-mime-xmp-item-cdsc-linked-to-hvc1-or-hev1-primary")),
+                    Condition(ConditionOperator.Equals, "motionScope", Value.Text("unique-final-explicit-eight-byte-mpvd-header-video-payload")),
+                    Condition(ConditionOperator.Equals, "coverage", Value.Text("partial-item-graph-and-coded-framing-not-decode-preservation-or-device-proof"))) else emptyList(),
+                reasons = if (operation in reads) emptyList() else listOf(IssueCode("CAPABILITY_PLANNED")),
+                verification = if (operation in reads) listOf(Verification.SourceReviewed) else emptyList()) })
+        }
         if (actual.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || actual.profile != ProfileId("jpeg")) return ProtocolRegistry.planned().capabilities(actual)
         val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
         val writes = setOf(Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo, Operation.SetKey, Operation.ReplaceCover)

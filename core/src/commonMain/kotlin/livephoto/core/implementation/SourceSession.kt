@@ -74,6 +74,7 @@ internal class SourceSession internal constructor(
                     ApplePairSession.open(input, readers, snapshot, budget).orThrow()?.let { return@attempt it }
                 }
                 if (content.kind == ContentKind.IsoBmff && BmffBrandHint.Heic in content.brandHints) {
+                    GoogleHeicSession.open(reader, snapshot, budget, probeEmbeddedVideo).orThrow()?.let { return@attempt it }
                     val heic = SamsungHeicReader.read(reader, budget).orThrow()
                     if (heic != null) {
                         val binding = heic.binding
