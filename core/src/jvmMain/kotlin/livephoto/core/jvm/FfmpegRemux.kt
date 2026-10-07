@@ -29,6 +29,7 @@ internal object FfmpegRemux {
         if (before.movieTimescale > Int.MAX_VALUE.toUInt() || before.tracks.any { it.timescale > Int.MAX_VALUE.toUInt() || it.trackId > Int.MAX_VALUE.toUInt() })
             fail("CAPABILITY_UNSUPPORTED", "FFmpeg muxer timescale domain cannot represent the source", Stage.Plan)
         val metadata = RemuxVerification.metadata(reader, before)
+        FfmpegAacRemuxProfile.validate(before, metadata)
         for (track in audio) if (validateEsds(track.codecConfiguration, ParseBudget(job.context)).esDescriptorFlags != 0)
             fail("CAPABILITY_UNSUPPORTED", "AAC remux cannot rewrite referenced/URL/OCR ES descriptors", Stage.Plan)
         if (identity.size >= job.context.limits.maxSpoolBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Remux input leaves no temporary output budget", Stage.Plan)
