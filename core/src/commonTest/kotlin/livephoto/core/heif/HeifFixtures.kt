@@ -7,13 +7,14 @@ import livephoto.core.google.GoogleFixtures
 internal object HeifFixtures {
     fun plain(metaLast: Boolean = false, extended: Boolean = false, multiple: Boolean = false, idat: Boolean = false,
               baseWidth: Int = 0, offsetWidth: Int = 4, unknownProperty: Boolean = false, hidden: Boolean = false,
-              extraSampleNal: ByteArray = byteArrayOf(), extraConfigArray: ByteArray = byteArrayOf()): ByteArray {
+              extraSampleNal: ByteArray = byteArrayOf(), extraConfigArray: ByteArray = byteArrayOf(),
+              codedSample: ByteArray? = null, codecConfiguration: ByteArray? = null, width: UInt = 1u, height: UInt = 1u): ByteArray {
         fun integer(value: ULong, width: Int) = if (width == 0) byteArrayOf() else unsignedBytes(value, width, Endian.Big).toByteArray()
         fun box(type: String, payload: ByteArray, large: Boolean = false): ByteArray = if (!large) GoogleFixtures.box(type, payload)
             else GoogleFixtures.u32(1u) + type.encodeToByteArray() + integer(payload.size.toULong() + 16uL, 8) + payload
         fun full(type: String, payload: ByteArray, version: Int = 0, flags: Int = 0, large: Boolean = false) = box(type, byteArrayOf(version.toByte(), 0, 0, flags.toByte()) + payload, large)
-        val sample = GoogleFixtures.video(hevc = true).samples.first() + extraSampleNal
-        val configuration = GoogleFixtures.video(hevc = true).configuration.let { bytes ->
+        val sample = (codedSample ?: GoogleFixtures.video(hevc = true).samples.first()) + extraSampleNal
+        val configuration = (codecConfiguration ?: GoogleFixtures.video(hevc = true).configuration).let { bytes ->
             if (extraConfigArray.isEmpty()) bytes else bytes.copyOf().also { it[22] = (it[22].toInt() + 1).toByte() } + extraConfigArray
         }
         val data = if (multiple) sample.copyOfRange(0, 2) + byteArrayOf(0xa5.toByte(), 0x5a, 0xff.toByte()) + sample.copyOfRange(2, sample.size) else sample
@@ -29,7 +30,7 @@ internal object HeifFixtures {
             if (multiple) location += integer(start + 5uL, offsetWidth) + integer((sample.size - 2).toULong(), 4)
             val handler = full("hdlr", integer(0uL, 4) + "pict".encodeToByteArray() + ByteArray(12) + byteArrayOf(0))
             val info = full("iinf", integer(1uL, 2) + full("infe", integer(1uL, 2) + integer(0uL, 2) + "hvc1Primary\u0000".encodeToByteArray(), 2, if (hidden) 1 else 0))
-            val properties = box("ipco", full("ispe", integer(1uL, 4) + integer(1uL, 4)) + box("hvcC", configuration) + if (unknownProperty) box("priv", byteArrayOf(4, 5, 6)) else byteArrayOf())
+            val properties = box("ipco", full("ispe", integer(width.toULong(), 4) + integer(height.toULong(), 4)) + box("hvcC", configuration) + if (unknownProperty) box("priv", byteArrayOf(4, 5, 6)) else byteArrayOf())
             val iprp = box("iprp", properties + full("ipma", integer(1uL, 4) + byteArrayOf(0, 1, 2, 0x81.toByte(), 0x82.toByte())))
             return full("meta", handler + full("pitm", integer(1uL, 2)) + info + full("iloc", location, if (idat) 1 else 0) + iprp +
                 if (idat) box("idat", data) else byteArrayOf(), large = extended)
