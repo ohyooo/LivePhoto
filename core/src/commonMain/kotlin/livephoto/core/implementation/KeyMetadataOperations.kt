@@ -14,7 +14,10 @@ internal object KeyMetadataOperations {
     private data class Prepared(val session: SourceSession, val rewrite: JpegRewritePlan, val key: KeyPhotoResult, val changes: List<Change>, val video: ByteRange)
 
     suspend fun plan(request: SetKeyRequest): CoreResult<ExecutionPlan> = attempt {
-        val prepared = prepare(request)
+        RequestValidation.validate(request).orThrow()
+        val session = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
+        if (session.heifItems != null) return@attempt GoogleHeicKeyOperations.plan(request, session).orThrow()
+        val prepared = prepare(request, session)
         val caps = request.output.capabilities()
         if (!caps.canReadStaged || request.policy.atomicity == Atomicity.AssetSetRequired && !caps.assetSetAtomic || request.policy.existingOutput == ExistingOutput.Replace && !caps.replacesAtomically)
             fail("ATOMIC_PUBLICATION_UNAVAILABLE", "SetKey requires verified atomic publication", Stage.Plan)
@@ -25,7 +28,10 @@ internal object KeyMetadataOperations {
     }
 
     suspend fun set(request: SetKeyRequest): CoreResult<OperationResult> = attempt {
-        val prepared = prepare(request)
+        RequestValidation.validate(request).orThrow()
+        val source = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
+        if (source.heifItems != null) return@attempt GoogleHeicKeyOperations.set(request, source).orThrow()
+        val prepared = prepare(request, source)
         val session = prepared.session
         val coding = codingDigest(session)
         val metadata = ordinaryDigest(session)
@@ -69,9 +75,7 @@ internal object KeyMetadataOperations {
         publish(request.output, request.policy, request.context, session.readers, listOf(asset), prepared.changes).orThrow()
     }
 
-    private suspend fun prepare(request: SetKeyRequest): Prepared {
-        RequestValidation.validate(request).orThrow()
-        val session = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
+    private suspend fun prepare(request: SetKeyRequest, session: SourceSession): Prepared {
         val jpeg = session.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "SetKey currently requires a supported JPEG carrier", Stage.Plan)
         if (session.readers.size != 1 || session.bindings.isEmpty() || session.bindings.any { it.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.VivoModern, ProtocolIds.Oplus, ProtocolIds.Samsung) })
             fail("CAPABILITY_UNSUPPORTED", "Vendor key synchronization needs its own metadata writer", Stage.Plan)

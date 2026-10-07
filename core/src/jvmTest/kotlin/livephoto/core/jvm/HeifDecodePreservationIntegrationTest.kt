@@ -122,6 +122,17 @@ class HeifDecodePreservationIntegrationTest {
                     val normalizedRaw = MemoryOutputTransaction(context, "real-heif-normalized-extract-$index")
                     DefaultLivePhotoCore().extract(ExtractRequest(normalized, emptyList(), output = normalizedRaw, context = context)).orThrow()
                     assertEquals(extractedBytes, normalizedRaw.committedAssets().values.single())
+                    val keyTx = MemoryOutputTransaction(context, "real-heif-public-set-key-$index")
+                    val keyResult = DefaultLivePhotoCore().setKeyPhotoPosition(SetKeyRequest(composite, CoverPosition.FrameIndex(0uL),
+                        policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = keyTx, context = context)).orThrow()
+                    assertEquals(Time(0, 1_000_000u), keyResult.keyPhoto?.position)
+                    val keyBytes = keyTx.committedAssets().values.single()
+                    val keyPath = directory.resolve("updated key $index.heic"); owned.add(keyPath); Files.write(keyPath, keyBytes.toByteArray())
+                    assertEquals(originalDecode, decode(keyPath))
+                    val keyRaw = MemoryOutputTransaction(context, "real-heif-key-extract-$index")
+                    DefaultLivePhotoCore().extract(ExtractRequest(SourceSet.Single(MemoryBinarySource(keyBytes, SourceId("real-key-heic-$index"))),
+                        emptyList(), output = keyRaw, context = context)).orThrow()
+                    assertEquals(extractedBytes, keyRaw.committedAssets().values.single())
                 } finally { motionSource.close() }
                 val stagedDecode = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(result, SourceId("heif-expanded-decode-$index")))), true, context)).orThrow()
                 assertTrue(stagedDecode.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })
