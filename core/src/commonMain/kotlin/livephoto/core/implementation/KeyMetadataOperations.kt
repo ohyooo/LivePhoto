@@ -34,7 +34,7 @@ internal object KeyMetadataOperations {
         val timestamp = microseconds(prepared.key.position!!)
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
             write = { writer ->
-                JpegRewrite.write(session.reader, writer, session.jpeg!!, prepared.rewrite, request.context).orThrow()
+                JpegRewrite.write(session.reader, writer, session.jpeg, prepared.rewrite, request.context).orThrow()
                 copyRange(session.reader, writer, session.jpeg.trailing, request.context).orThrow()
             },
             verify = { id, reader ->

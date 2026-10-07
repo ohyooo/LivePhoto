@@ -80,7 +80,7 @@ internal fun hevcConfig(bytes: Bytes, budget: ParseBudget? = null, inBand: Boole
     return width
 }
 
-internal data class AacConfiguration(val actualSampleRate: UInt, val channelCount: UInt)
+internal data class AacConfiguration(val actualSampleRate: UInt, val channelCount: UInt, val descriptorHintsOffset: Int, val esDescriptorFlags: Int)
 
 internal fun validateEsds(bytes: Bytes, budget: ParseBudget? = null): AacConfiguration {
     val cursor = ConfigCursor(bytes)
@@ -113,6 +113,7 @@ internal fun validateEsds(bytes: Bytes, budget: ParseBudget? = null): AacConfigu
     if (cursor.byte() != 0x40) unsupported("Only MPEG-4 AAC audio is implemented")
     val stream = cursor.byte()
     if (stream shr 2 != 5 || stream and 1 != 1 || stream and 2 != 0) unsupported("Audio ESDS stream type is not implemented")
+    val descriptorHintsOffset = cursor.index
     cursor.skip(11)
     val specific = descriptor(decoder.end)
     if (specific.tag != 5 || specific.end - cursor.index < 2) corrupt("AAC decoder-specific config is absent")
@@ -142,5 +143,5 @@ internal fun validateEsds(bytes: Bytes, budget: ParseBudget? = null): AacConfigu
     if (sl.tag != 6 || sl.end - cursor.index != 1 || cursor.byte() != 2) unsupported("Audio SL configuration is not implemented")
     if (cursor.index != es.end) unsupported("Additional ES descriptors are not implemented")
     cursor.end()
-    return AacConfiguration(actualSampleRate, channelCount)
+    return AacConfiguration(actualSampleRate, channelCount, descriptorHintsOffset, flags)
 }

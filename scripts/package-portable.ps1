@@ -84,6 +84,25 @@ try {
             throw 'Portable remux did not return verified no-encoding evidence.'
         }
         Write-Host 'PORTABLE_FFMPEG_REMUX=SUCCESS'
+        # Explicit synthetic AAC encode + fixture mux, separate from the forbidden-encoding Core remux.
+        $aacElementary = Join-Path $verify 'encoded AAC fixture.aac'
+        $aacFixture = Join-Path $verify 'audio first MP4 fixture.mp4'
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=0.16' -c:a aac -b:a 96k -ac 2 -flags:a +bitexact -f adts $aacElementary
+        if ($LASTEXITCODE -ne 0) { throw 'Portable AAC fixture encode failed.' }
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -i $remuxFixture -i $aacElementary -map 1:a:0 -map 0:v:0 -streamid 0:4 -streamid 1:17 -c copy -bsf:a aac_adtstoasc -map_metadata -1 -metadata:s:v 'encoder=' -fflags +bitexact -write_btrt 0 -use_stream_ids_as_track_ids 1 $aacFixture
+        if ($LASTEXITCODE -ne 0) { throw 'Portable AAC fixture mux failed.' }
+        $aacHash = (Get-FileHash $aacFixture).Hash
+        $aacJson = & $launcher remux --input $aacFixture --container Mp4 --strict --output-dir (Join-Path $verify 'AAC remux result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable AAC remux failed: $aacJson" }
+        $aacResult = ($aacJson | ConvertFrom-Json).result
+        if (($aacResult.execution | Where-Object transcoded -eq $true) -or -not ($aacResult.execution | Where-Object remuxed -eq $true) -or
+            ($aacResult.preservation.records | Where-Object { $_.guarantee -in @('BitstreamPreserving', 'MetadataPreserving') -and $_.outcome -ne 'Verified' }) -or
+            $aacHash -ne (Get-FileHash $aacFixture).Hash) { throw 'Portable AAC remux did not preserve both tracks/configuration/metadata/source.' }
+        $aacDecode = & $launcher probe --input $aacResult.output.assets[0].path --decode-check
+        if ($LASTEXITCODE -ne 0 -or -not (($aacDecode | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Portable AAC remux output did not completely decode.' }
+        $aacMov = & $launcher remux --input $aacFixture --container Mov --output-dir (Join-Path $verify 'unsupported AAC MOV')
+        if ($LASTEXITCODE -ne 3 -or ($aacMov | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable unimplemented AAC MOV remux gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_AAC_REMUX=SUCCESS'
         $frameFixture = Join-Path $verify 'frame fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 4 -vf 'setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709' -c:v libx264 -preset medium -bf 2 -g 4 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $frameFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable frame fixture generation failed.' }

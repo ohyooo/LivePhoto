@@ -22,9 +22,10 @@ internal object RemuxVerification {
             "moov" to setOf("mvhd", "trak", "udta"), "trak" to setOf("tkhd", "edts", "mdia"),
             "edts" to setOf("elst"), "mdia" to setOf("mdhd", "hdlr", "minf"),
             "minf" to setOf("vmhd", "smhd", "hdlr", "dinf", "stbl"), "dinf" to setOf("dref"),
-            "stbl" to setOf("stsd", "stts", "ctts", "stsc", "stsz", "stco", "co64", "stss", "sdtp"))
+            "stbl" to setOf("stsd", "stts", "ctts", "stsc", "stsz", "stco", "co64", "stss", "sdtp", "sgpd", "sbgp"))
         suspend fun visit(parent: ByteRange, type: String, path: String, depth: UInt) {
             val children = boxes.readBoxes(parent, depth).orThrow()
+            if (type == "stbl") RemuxRollGroups.validate(reader, boxes, children, depth)
             val counts = mutableMapOf<String, Int>()
             for (box in children) {
                 checkCancelled(reader.context)
@@ -178,7 +179,17 @@ internal object RemuxVerification {
         for ((left, right) in before.tracks.zip(after.tracks)) {
             checkCancelled(input.context)
             unchanged(left.handler == right.handler && left.codec == right.codec && left.audioCodec == right.audioCodec && left.sampleEntry == right.sampleEntry, "trackCodec")
-            unchanged(left.codecConfiguration == right.codecConfiguration, "decoderConfiguration")
+            if (left.codecConfiguration != right.codecConfiguration) {
+                val offset = (0 until minOf(left.codecConfiguration.size, right.codecConfiguration.size)).firstOrNull {
+                    left.codecConfiguration[it] != right.codecConfiguration[it]
+                }
+                throw CoreFault(CoreError(IssueCode("POSTCONDITION_FAILED"), Stage.Verify, "Remux changed unrequested decoder configuration",
+                    Location(selector = "decoderConfiguration"), details = mapOf("trackId" to Value.Number(left.trackId.toString()),
+                        "beforeSize" to Value.Number(left.codecConfiguration.size.toString()), "afterSize" to Value.Number(right.codecConfiguration.size.toString())) +
+                        (offset?.let { mapOf("firstDifference" to Value.Number(it.toString()),
+                            "beforeByte" to Value.Number((left.codecConfiguration[it].toInt() and 255).toString()),
+                            "afterByte" to Value.Number((right.codecConfiguration[it].toInt() and 255).toString())) } ?: emptyMap())))
+            }
             unchanged(left.width == right.width && left.height == right.height && left.transform == right.transform && left.displayWidthFixed == right.displayWidthFixed && left.displayHeightFixed == right.displayHeightFixed, "displayTransform")
             unchanged(left.audioChannels == right.audioChannels && left.audioSampleRateFixed == right.audioSampleRateFixed && left.audioSampleSize == right.audioSampleSize, "audioConfiguration")
             unchanged(left.presentationDuration.compareTo(right.presentationDuration) == 0, "presentationDuration")

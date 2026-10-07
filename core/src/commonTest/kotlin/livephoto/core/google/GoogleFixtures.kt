@@ -14,7 +14,8 @@ internal object GoogleFixtures {
             segment(0xc4, dcTable + acTable) + segment(0xda, scanHeader) + bytes(0x3f, 0xff, 0xd9)
     }
 
-    fun video(editList: ByteArray? = null, composition: ByteArray? = null, trackDuration: UInt = 80u, hevc: Boolean = false, co64: Boolean = false, aac: Boolean = false, audioConfig: ByteArray = bytes(0x11, 0x90), sampleDurations: Pair<UInt, UInt>? = null): Video {
+    fun video(editList: ByteArray? = null, composition: ByteArray? = null, trackDuration: UInt = 80u, hevc: Boolean = false, co64: Boolean = false, aac: Boolean = false, audioConfig: ByteArray = bytes(0x11, 0x90), sampleDurations: Pair<UInt, UInt>? = null, audioGroups: ByteArray = byteArrayOf(), audioSampleCount: UInt = 1u): Video {
+        require(audioSampleCount in 1u..16u)
         val samples = if (hevc) listOf(bytes(0, 0, 0, 2, 0x26, 1), bytes(0, 0, 0, 3, 2, 1, 0x22))
             else listOf(bytes(0, 0, 0, 2, 0x65, 0x88), bytes(0, 0, 0, 3, 0x41, 0x9a, 0x22))
         val configuration = if (hevc) {
@@ -71,17 +72,17 @@ internal object GoogleFixtures {
                 // Independent ES_Descriptor -> DecoderConfig -> AAC-LC ASC, then SLConfig.
                 val es = bytes(3, 25, 0, 2, 0, 4, 17, 0x40, 0x15) + ByteArray(11) + bytes(5, 2) + audioConfig + bytes(6, 1, 2)
                 val audioStsd = fullBox("stsd", u32(1u) + box("mp4a", header + fullBox("esds", es)))
-                val audioStts = fullBox("stts", u32(1u) + u32(1u) + u32(1024u))
-                val audioStsc = fullBox("stsc", u32(1u) + u32(1u) + u32(1u) + u32(1u))
-                val audioStsz = fullBox("stsz", u32(4u) + u32(1u))
+                val audioStts = fullBox("stts", u32(1u) + u32(audioSampleCount) + u32(1024u))
+                val audioStsc = fullBox("stsc", u32(1u) + u32(1u) + u32(audioSampleCount) + u32(1u))
+                val audioStsz = fullBox("stsz", u32(4u) + u32(audioSampleCount))
                 val audioStco = fullBox("stco", u32(1u) + u32(chunkOffset + 13u))
-                val audioStbl = box("stbl", audioStsd + audioStts + audioStsc + audioStsz + audioStco)
+                val audioStbl = box("stbl", audioStsd + audioStts + audioStsc + audioStsz + audioStco + audioGroups)
                 val audioMinf = box("minf", fullBox("smhd", ByteArray(4)) + box("dinf", dref) + audioStbl)
                 val audioMdhd = mdhd.copyOf()
-                put32(audioMdhd, 12, 48000u); put32(audioMdhd, 16, 1024u)
+                put32(audioMdhd, 12, 48000u); put32(audioMdhd, 16, 1024u * audioSampleCount)
                 val audioHdlr = fullBox("hdlr", u32(0u) + "soun".encodeToByteArray() + ByteArray(12) + "Audio\u0000".encodeToByteArray())
                 val audioTkhd = tkhd.copyOf()
-                put32(audioTkhd, 12, 2u); put32(audioTkhd, 20, 21u)
+                put32(audioTkhd, 12, 2u); put32(audioTkhd, 20, 1024u * audioSampleCount / 48u)
                 put16(audioTkhd, 36, 0x100); put32(audioTkhd, 76, 0u); put32(audioTkhd, 80, 0u)
                 box("trak", box("tkhd", audioTkhd) + box("mdia", box("mdhd", audioMdhd) + audioHdlr + audioMinf))
             }
@@ -89,7 +90,7 @@ internal object GoogleFixtures {
         }
         val ftyp = box("ftyp", "isom".encodeToByteArray() + u32(0u) + "isommp42avc1".encodeToByteArray())
         val offset = ftyp.size + moov(0u).size + 8
-        val payload = samples.fold(byteArrayOf()) { result, sample -> result + sample } + if (aac) bytes(0x21, 0x10, 4, 0x60) else byteArrayOf()
+        val payload = samples.fold(byteArrayOf()) { result, sample -> result + sample } + if (aac) (0 until audioSampleCount.toInt()).fold(byteArrayOf()) { result, _ -> result + bytes(0x21, 0x10, 4, 0x60) } else byteArrayOf()
         return Video(ftyp + moov(offset.toUInt()) + box("mdat", payload), offset.toULong(), samples, configuration)
     }
 
