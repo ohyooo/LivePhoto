@@ -7,6 +7,7 @@ import livephoto.core.google.*
 import livephoto.core.xml.*
 import livephoto.core.xmp.*
 import livephoto.core.jpeg.*
+import livephoto.core.vivo.*
 
 /** Empty issue filters allow every proven-safe repair; dryRun remains independently enforced. */
 internal object RepairOperations {
@@ -56,8 +57,10 @@ internal object RepairOperations {
                 if (outVideo != videoHash || outImage != imageHash || outMetadata != metadataHash)
                     fail("POSTCONDITION_FAILED", "Repair changed media bytes or ordinary metadata", Stage.Verify)
                 val originalIssues = result.issuesBefore.map { Triple(it.code, it.layer, it.severity) }.toSet()
-                if (staged.inspection.issues.any { Triple(it.code, it.layer, it.severity) !in originalIssues })
-                    fail("POSTCONDITION_FAILED", "Repair introduced a new inspection issue", Stage.Verify)
+                val introduced = staged.inspection.issues.firstOrNull { Triple(it.code, it.layer, it.severity) !in originalIssues }
+                if (introduced != null) throw CoreFault(CoreError(IssueCode("POSTCONDITION_FAILED"), Stage.Verify,
+                    "Repair introduced a new inspection issue", introduced.location, details = mapOf("issueCode" to Value.Text(introduced.code.value),
+                        "layer" to Value.Text(introduced.layer.name), "severity" to Value.Text(introduced.severity.name))))
                 after = staged.inspection.issues
                 AssetVerification(report, listOf(
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable),
@@ -85,6 +88,7 @@ internal object RepairOperations {
                     conditions = listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text(when (prepared.protocol) {
                         ProtocolIds.Samsung -> "unique-sef-legacy-footer-length"
                         ProtocolIds.GoogleV2 -> "unique-inline-primary-motion-directory-length-no-padding-or-auxiliary-resources"
+                        ProtocolIds.VivoModern -> "vivo-version-one-inline-primary-motion-length-explicit-zero-padding-no-auxiliary-resources"
                         else -> "unique-google-v1-offset"
                     }))), reasons = blocked.map { it.code })), blocked))
     }
@@ -98,6 +102,8 @@ internal object RepairOperations {
         val session = SourceSession.open(request.input, request.context, budget, probeEmbeddedVideo = false).orThrow()
         val jpeg = session.jpeg ?: fail("REPAIR_NOT_POSSIBLE", "Offset preview requires a parsed JPEG", Stage.Plan)
         if (session.bindings.any { it.protocol == ProtocolIds.Samsung }) return prepareSamsung(request)
+        if (session.bindings.map { it.protocol }.toSet() == setOf(ProtocolIds.GoogleV2, ProtocolIds.VivoModern) && session.bindings.size == 2)
+            return prepareGoogleV2(request, session, budget, ProtocolIds.VivoModern)
         if (session.bindings.size == 1 && session.bindings.single().protocol == ProtocolIds.GoogleV2) return prepareGoogleV2(request, session, budget)
         if (session.bindings.size != 1 || session.bindings.single().protocol != ProtocolIds.GoogleV1 || session.gainMaps.isNotEmpty())
             fail("REPAIR_AMBIGUOUS", "Preview requires only the Google V1 authority and no auxiliary resource graph", Stage.Plan)
@@ -153,11 +159,19 @@ internal object RepairOperations {
         return Prepared(session, RepairResult(before, listOf(change), emptyList(), before), rewrite)
     }
 
-    private suspend fun prepareGoogleV2(request: RepairRequest, session: SourceSession, budget: ParseBudget): Prepared {
+    private suspend fun prepareGoogleV2(request: RepairRequest, session: SourceSession, budget: ParseBudget, protocol: ProtocolId = ProtocolIds.GoogleV2): Prepared {
         val jpeg = session.jpeg!!; val xmp = session.xmp!!
+        val vivo = protocol == ProtocolIds.VivoModern
         if (!xmp.rewriteAllowed || session.gainMaps.isNotEmpty() || xmp.scalar(CAMERA_URI, "MotionPhoto").orThrow() != "1" || xmp.scalar(CAMERA_URI, "MotionPhotoVersion").orThrow() != "1")
             fail("REPAIR_AMBIGUOUS", "V2 length repair requires one known standard authority without auxiliary dependencies", Stage.Plan)
         val packet = xmp.packets.single()
+        if (vivo) {
+            val known = mapOf("VMotionPhotoVersion" to "1", "VMotionPhotoSource" to "1", "VMediaKitVersion" to "1.0.0.9")
+            if (known.any { (field, value) -> xmp.scalar(VIVO_URI, field).orThrow() != value } ||
+                packet.descriptions.any { description -> description.attributes.any { it.name.expanded.uri == VIVO_URI && it.name.expanded.local !in VIVO_FIELDS } ||
+                    description.children.filterIsInstance<XmlElement>().any { it.name.expanded.uri == VIVO_URI && it.name.expanded.local !in VIVO_FIELDS } })
+                fail("REPAIR_AMBIGUOUS", "Vivo repair requires the known minimal version-one profile; unknown vendor fields cannot authorize a rewrite", Stage.Plan)
+        }
         val directory = packet.properties(CONTAINER_URI, "Directory").singleOrNull()?.element
             ?: fail("REPAIR_AMBIGUOUS", "V2 length repair requires exactly one inline directory", Stage.Plan)
         fun inline(element: XmlElement, allowed: Set<ExpandedName> = emptySet()) {
@@ -185,15 +199,31 @@ internal object RepairOperations {
         val primary = items.first(); val motion = items.last()
         if (primary.attribute(ITEM_URI, "Semantic") != "Primary" || primary.attribute(ITEM_URI, "Mime") != "image/jpeg" ||
             primary.attribute(ITEM_URI, "Length") !in setOf(null, "0") || primary.attribute(ITEM_URI, "Padding") !in setOf(null, "0") ||
-            motion.attribute(ITEM_URI, "Semantic") != "MotionPhoto" || motion.attribute(ITEM_URI, "Mime") !in setOf("video/mp4", "video/quicktime") || motion.attribute(ITEM_URI, "Padding") != null)
+            motion.attribute(ITEM_URI, "Semantic") != "MotionPhoto" || motion.attribute(ITEM_URI, "Mime") !in setOf("video/mp4", "video/quicktime") ||
+            motion.attribute(ITEM_URI, "Padding") != (if (vivo) "0" else null) ||
+            vivo && (primary.attribute(ITEM_URI, "Length") != null || primary.attribute(ITEM_URI, "Padding") != null || motion.attribute(ITEM_URI, "Mime") != "video/mp4"))
             fail("REPAIR_AMBIGUOUS", "Only zero-padding ordinary JPEG plus a final sole video is repairable", Stage.Plan)
         val old = motion.attribute(ITEM_URI, "Length")
         if (old != null && (old.isEmpty() || old.any { it !in '0'..'9' } || old.toULongOrNull() == null))
             fail("REPAIR_AMBIGUOUS", "Unknown length lexical/overflow semantics are outside this repair profile", Stage.Plan)
-        val before = session.inspection.issues
+        // A failed directory parse may not yet emit its compatibility warning. The
+        // fully checked original inline graph above already proves the zero-padding
+        // dialect, so report that existing fact in the preview, not as a new issue
+        // caused by the length repair. Keep the publication regression guard intact.
+        val dialect = if (vivo) listOf(
+            Issue(IssueCode("MALFORMED_XMP"), Severity.Warning, Layer.Compatibility,
+                Location(source = session.snapshot.identities.single().id, selector = "{$ITEM_URI}Padding")),
+            Issue(IssueCode("MALFORMED_XMP"), Severity.Error, Layer.Protocol,
+                Location(source = session.snapshot.identities.single().id, selector = "{$ITEM_URI}Padding"))) else emptyList()
+        val before = (session.inspection.issues + dialect).distinct()
         val fixable = setOf("MOTION_VIDEO_LENGTH_MISMATCH", "OFFSET_OUT_OF_BOUNDS", "MISSING_REQUIRED_XMP")
-        val unrelated = before.filter { it.severity == Severity.Error && it.code.value !in fixable || it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT", "CONFLICTING_METADATA") }
-        if (unrelated.isNotEmpty()) return Prepared(session, RepairResult(before, emptyList(), emptyList(), before, blocked = unrelated), protocol = ProtocolIds.GoogleV2)
+        // The checked vivo dialect explicitly requires zero Motion Padding. Do not suppress
+        // any other malformed-XMP error or apply this exception to a generic Google carrier.
+        val unrelated = before.filter { issue ->
+            val knownPaddingDialect = vivo && issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Protocol && issue.location?.selector == "{$ITEM_URI}Padding"
+            issue.severity == Severity.Error && issue.code.value !in fixable && !knownPaddingDialect || issue.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT", "CONFLICTING_METADATA")
+        }
+        if (unrelated.isNotEmpty()) return Prepared(session, RepairResult(before, emptyList(), emptyList(), before, blocked = unrelated), protocol = protocol)
         if (jpeg.trailing.length == 0uL) fail("REPAIR_NOT_POSSIBLE", "No complete post-JPEG video extent", Stage.Plan)
         val candidate = when (val value = BmffVideoProbe(session.reader, budget).probe(jpeg.trailing)) {
             is CoreResult.Success -> value.value
@@ -202,23 +232,23 @@ internal object RepairOperations {
                 fail("REPAIR_NOT_POSSIBLE", "The complete physical suffix is not one verified video", Stage.Plan)
             }
         }
-        if (googleVideoIssues(candidate, session.bindings.single().selector, false).isNotEmpty() || videoFacts(candidate).mime != motion.attribute(ITEM_URI, "Mime"))
+        if (googleVideoIssues(candidate, session.bindings.single { it.protocol == protocol }.selector, false).isNotEmpty() || videoFacts(candidate).mime != motion.attribute(ITEM_URI, "Mime"))
             fail("REPAIR_NOT_POSSIBLE", "Physical suffix conflicts with the declared target container/profile", Stage.Plan)
         val key = xmp.scalar(CAMERA_URI, "MotionPhotoPresentationTimestampUs").orThrow()
         if (key != null && key != "-1") {
             val ticks = key.takeIf { it.isNotEmpty() && it.all { character -> character in '0'..'9' } }?.toLongOrNull()
             if (ticks == null || Time(ticks, 1_000_000u) >= candidate.tracks.filter { it.handler == "vide" }.maxOf { it.presentationDuration }) {
                 val issue = Issue(IssueCode("INVALID_PRESENTATION_TIMESTAMP"), Severity.Error, Layer.Protocol, Location(selector = "{$CAMERA_URI}MotionPhotoPresentationTimestampUs"), observed = Value.Text(key))
-                return Prepared(session, RepairResult(before + issue, emptyList(), emptyList(), before + issue, blocked = listOf(issue)), protocol = ProtocolIds.GoogleV2)
+                return Prepared(session, RepairResult(before + issue, emptyList(), emptyList(), before + issue, blocked = listOf(issue)), protocol = protocol)
             }
         }
         val target = jpeg.trailing.length.toString()
-        if (old == target) return Prepared(session, RepairResult(before, emptyList(), emptyList(), before), protocol = ProtocolIds.GoogleV2)
+        if (old == target) return Prepared(session, RepairResult(before, emptyList(), emptyList(), before), protocol = protocol)
         val selector = "{$CONTAINER_URI}Directory/MotionPhoto/{$ITEM_URI}Length"
         val issue = Issue(IssueCode(if (old == null) "MISSING_REQUIRED_XMP" else "MOTION_VIDEO_LENGTH_MISMATCH"), Severity.Error, Layer.Protocol,
             Location(source = session.snapshot.identities.single().id, range = jpeg.trailing, selector = selector), expected = Value.Text(target), observed = old?.let(Value::Text), repairability = Repairability.Safe)
         if (request.allowedIssueCodes.isNotEmpty() && (before.map { it.code.value } + issue.code.value).none { it in fixable && IssueCode(it) in request.allowedIssueCodes })
-            return Prepared(session, RepairResult(before + issue, emptyList(), emptyList(), before + issue, blocked = listOf(issue)), protocol = ProtocolIds.GoogleV2)
+            return Prepared(session, RepairResult(before + issue, emptyList(), emptyList(), before + issue, blocked = listOf(issue)), protocol = protocol)
         val semantic = motion.attributes.single { it.name.expanded == ExpandedName(ITEM_URI, "Semantic") }
         val lengthName = motion.attributes.singleOrNull { it.name.expanded == ExpandedName(ITEM_URI, "Length") }?.name
             ?: XmlName(semantic.name.raw.substringBefore(':') + ":Length", ExpandedName(ITEM_URI, "Length"))
@@ -233,7 +263,7 @@ internal object RepairOperations {
         if (report.verdict == Verdict.Invalid || report.coverage != Coverage.Complete) fail("REPAIR_NOT_POSSIBLE", "The sole length patch does not fully repair the carrier", Stage.Plan)
         session.recheck()
         return Prepared(session, RepairResult(before + issue, listOf(Change(selector, old?.let(Value::Text), Value.Text(target),
-            "Unique inline Primary + MotionPhoto graph and independently verified complete physical suffix prove video length", true)), emptyList(), before + issue), rewrite, protocol = ProtocolIds.GoogleV2)
+            "Unique inline Primary + MotionPhoto graph and independently verified complete physical suffix prove video length", true)), emptyList(), before + issue), rewrite, protocol = protocol)
     }
 
     private suspend fun prepareSamsung(request: RepairRequest): Prepared {

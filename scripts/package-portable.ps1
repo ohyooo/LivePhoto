@@ -265,6 +265,32 @@ try {
         $vendorBack = ($vendorBackJson | ConvertFrom-Json).result
         if (([decimal]$created.result.keyPhoto.position.value * $vendorBack.keyPhoto.position.timescale) -ne
             ([decimal]$vendorBack.keyPhoto.position.value * $created.result.keyPhoto.position.timescale)) { throw 'Vendor roundtrip changed known source key.' }
+        if ($vendorTarget -eq 'vivo.motionphoto') {
+            # Negative fixture: corrupt only the known Length literal in a Core-created carrier.
+            $vendorDamaged = [IO.File]::ReadAllBytes($vendorPath)
+            $literal = 'i:Length="' + (Get-Item $referenceVideo).Length.ToString([Globalization.CultureInfo]::InvariantCulture) + '"'
+            $text = [Text.Encoding]::Latin1.GetString($vendorDamaged)
+            $position = $text.IndexOf($literal, [StringComparison]::Ordinal)
+            if ($position -lt 0 -or $text.IndexOf($literal, $position + 1, [StringComparison]::Ordinal) -ge 0) { throw 'Vivo repair fixture needs one exact known Length literal.' }
+            $digit = $position + 'i:Length="'.Length
+            $vendorDamaged[$digit] = if ($vendorDamaged[$digit] -eq [byte][char]'1') { [byte][char]'2' } else { [byte][char]'1' }
+            $damagedVivo = Join-Path $verify 'damaged vivo length.jpg'
+            [IO.File]::WriteAllBytes($damagedVivo, $vendorDamaged)
+            $previewJson = & $launcher repair --input $damagedVivo
+            if ($LASTEXITCODE -ne 0) { throw "Portable vivo Repair preview failed: $previewJson" }
+            $preview = ($previewJson | ConvertFrom-Json).result
+            if ($preview.proposedChanges.Count -ne 1 -or $preview.changesApplied.Count -ne 0 -or $null -ne $preview.operation) { throw 'Vivo Repair preview was not read-only.' }
+            $repairJson = & $launcher repair --input $damagedVivo --apply --strict --output-dir (Join-Path $verify 'repaired vivo length')
+            if ($LASTEXITCODE -ne 0) { throw "Portable vivo Repair apply failed: $repairJson" }
+            $repair = ($repairJson | ConvertFrom-Json).result
+            if ($repair.changesApplied.Count -ne 1 -or $repair.blocked.Count -ne 0) { throw 'Vivo Repair did not apply the sole proved length patch.' }
+            $vivoRepaired = $repair.operation.output.assets[0].path
+            $extractJson = & $launcher extract --input $vivoRepaired --output-dir (Join-Path $verify 'repaired vivo extracted')
+            if ($LASTEXITCODE -ne 0 -or (Get-FileHash $referenceVideo).Hash -ne (Get-FileHash ($extractJson | ConvertFrom-Json).result.output.assets[0].path).Hash) { throw 'Vivo Repair changed source video.' }
+            $secondJson = & $launcher repair --input $vivoRepaired
+            if ($LASTEXITCODE -ne 0 -or ($secondJson | ConvertFrom-Json).result.proposedChanges.Count -ne 0) { throw 'Vivo Repair is not idempotent.' }
+            Write-Host 'PORTABLE_VIVO_REPAIR=SUCCESS'
+        }
     }
     Write-Host 'PORTABLE_VENDOR_CONVERT_ROUNDTRIP=SUCCESS'
     # Negative fixture only: change one decimal digit without changing APP length or media bytes.
