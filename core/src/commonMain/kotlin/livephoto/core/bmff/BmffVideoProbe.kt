@@ -312,23 +312,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
     }
 
     private suspend fun validateNalSample(range: ByteRange, width: Int, codec: VideoCodec) {
-        var cursor = range.offset
-        var vcl = false
-        while (cursor < range.endExclusive) {
-            budget.item(7u)
-            checkedRange(cursor, width.toULong(), range.endExclusive)
-            val length = readUnsigned(reader.readBuffer(cursor, width.toUInt()).orThrow(), Endian.Big)
-            cursor = checkedAdd(cursor, width.toULong())
-            if (length < if (codec == VideoCodec.Hevc) 2uL else 1uL) corrupt("NAL unit is empty or truncated")
-            checkedRange(cursor, length, range.endExclusive)
-            val header = reader.readBuffer(cursor, if (codec == VideoCodec.Hevc) 2u else 1u).orThrow()
-            if (u8(header, 0) and 128 != 0) corrupt("NAL forbidden bit is set")
-            val type = if (codec == VideoCodec.Hevc) (u8(header, 0) shr 1) and 63 else u8(header, 0) and 31
-            if (codec == VideoCodec.Hevc) { if (u8(header, 1) and 7 == 0) corrupt("HEVC temporal_id_plus1 is zero"); if (type <= 31) vcl = true }
-            else { if (type == 0 || type >= 24) corrupt("Invalid AVC NAL type"); if (type in 1..5) vcl = true }
-            cursor = checkedAdd(cursor, length)
-        }
-        if (!vcl) corrupt("Video sample has no VCL NAL unit")
+        validateNalFraming(reader, range, width, codec, budget, 7u).orThrow()
     }
 
     private suspend fun children(box: BmffBox, depth: UInt): List<BmffBox> = boxes.readBoxes(box.payload, depth).orThrow()

@@ -7,7 +7,7 @@ import livephoto.core.implementation.*
 import livephoto.core.heif.*
 
 internal data class SamsungHeicFacts(val binding: CarrierBinding, val video: VideoStructure?, val directory: SefDirectory,
-    val primary: ByteRange, val boxes: List<BmffBox>, val pointerMode: String?, val itemGraph: HeifItemGraph?)
+    val primary: ByteRange, val boxes: List<BmffBox>, val pointerMode: String?, val itemGraph: HeifItemGraph?, val codedImage: HeifCodedItemFacts?)
 
 /** Establishes complete box/SEF/media ranges. HEIF image-item decoding and rewriting are not claimed. */
 internal object SamsungHeicReader {
@@ -39,6 +39,14 @@ internal object SamsungHeicReader {
         val graphIssues = if (graphResult is CoreResult.Failure) listOf(Issue(graphResult.error.code,
             if (graphResult.error.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER")) Severity.Warning else Severity.Error,
             Layer.Structure, graphResult.error.location ?: Location(source = identity.id, range = meta.range))) else emptyList()
+        val imageResult = graph?.let { HeifCodedItemProbe.primary(reader, it, budget) }
+        val codedImage = (imageResult as? CoreResult.Success)?.value
+        val imageIssues = if (imageResult is CoreResult.Failure) {
+            if (imageResult.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED", "UNEXPECTED_EOF")) throw CoreFault(imageResult.error)
+            listOf(Issue(imageResult.error.code,
+                if (imageResult.error.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER")) Severity.Warning else Severity.Error,
+                Layer.Media, imageResult.error.location ?: Location(source = identity.id, range = meta.range)))
+        } else emptyList()
         val children = parser.readBoxes(mpvd.payload, 1u).orThrow()
         val nested = children.filter { it.type == "sefd" }
         val sefd = (topSefd + nested).singleOrNull() ?: fail("AMBIGUOUS_LAYOUT", "Samsung HEIC has no unique sefd")
@@ -77,11 +85,11 @@ internal object SamsungHeicReader {
             if (videoResult.error.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "VIDEO_CODEC_NOT_SUPPORTED", "AUDIO_CODEC_NOT_SUPPORTED")) Severity.Warning else Severity.Error,
             Layer.Media, videoResult.error.location)) else emptyList()
         val issues = listOf(Issue(IssueCode("CAPABILITY_UNSUPPORTED"), Severity.Warning, Layer.Structure,
-            Location(source = identity.id, range = meta.range), observed = Value.Text("HEIF codec/derived item interpretation and decode checks are not implemented"))) +
-            graphIssues + mediaIssues + (if (directory.version != 107u || "absolute" !in candidates.values.single()) listOf(Issue(IssueCode("UNKNOWN_PROTOCOL_VARIANT"), Severity.Warning, Layer.Protocol)) else emptyList()) +
+            Location(source = identity.id, range = meta.range), observed = Value.Text("HEIF SPS/display/derived item interpretation and decode checks are not implemented"))) +
+            graphIssues + imageIssues + mediaIssues + (if (directory.version != 107u || "absolute" !in candidates.values.single()) listOf(Issue(IssueCode("UNKNOWN_PROTOCOL_VARIANT"), Severity.Warning, Layer.Protocol)) else emptyList()) +
             if (directory.legacyDialect) listOf(Issue(IssueCode("SEF_DIRECTORY_INVALID"), Severity.Error, Layer.Protocol)) else emptyList()
         val binding = CarrierBinding(ProtocolIds.Samsung, mediaRange, issues = issues, profile = ProfileId("heic-sef-mpv2"))
         val primaryEnd = minOf(mpvd.range.offset, topSefd.firstOrNull()?.range?.offset ?: mpvd.range.offset)
-        SamsungHeicFacts(binding, video, directory, ByteRange(0uL, primaryEnd), boxes, candidates.values.single().joinToString("|"), graph)
+        SamsungHeicFacts(binding, video, directory, ByteRange(0uL, primaryEnd), boxes, candidates.values.single().joinToString("|"), graph, codedImage)
     }
 }

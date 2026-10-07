@@ -111,7 +111,8 @@ internal class SourceSession internal constructor(
                                 if (record.type in setOf(0x0a30.toUShort(), 0x0a31.toUShort())) ProtocolIds.Samsung else null)
                             regions += region; resources += Resource(region.id, region.kind, listOf(region), false)
                         }
-                        val media = listOf(MediaFacts(imageFormat = ImageFormat.Heic, mime = "image/heic", coverage = Coverage.Partial, issues = binding.issues.filter { it.layer == Layer.Structure })) + listOfNotNull(video?.let(::videoFacts))
+                        val media = listOf(MediaFacts(imageFormat = ImageFormat.Heic, mime = "image/heic", width = heic.codedImage?.declaredWidth, height = heic.codedImage?.declaredHeight,
+                            coverage = Coverage.Partial, issues = binding.issues.filter { it.layer in setOf(Layer.Structure, Layer.Media) })) + listOfNotNull(video?.let(::videoFacts))
                         val metadata = mutableListOf(MetadataEntry("samsung:mpv2:pointer-mode", value = heic.pointerMode?.let { Value.Text(it) }, owner = Ownership.SourceProtocol,
                             location = Location(source = identity.id, range = heic.directory.motionRecord!!.payloadRange, selector = "samsung:mpv2:pointer-mode"), origin = FactOrigin.Parsed))
                         heic.itemGraph?.let { graph ->

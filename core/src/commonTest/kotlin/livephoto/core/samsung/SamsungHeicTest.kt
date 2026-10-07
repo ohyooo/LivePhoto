@@ -111,6 +111,55 @@ class SamsungHeicTest {
     }
 
     @Test
+    fun codedPrimaryReportsDeclaredDimensionsButNotCompleteDecodeOrImageGraphCoverage(): Unit = runImmediate {
+        for (multiple in listOf(false, true)) for (shared in listOf(false, true)) {
+            val inspected = value(core.inspect(ReadRequest(input(fixture(multiple = multiple, shared = shared).bytes), context)))
+            assertEquals(1u, inspected.media.first().width)
+            assertEquals(1u, inspected.media.first().height)
+            assertEquals(Coverage.Partial, inspected.media.first().coverage)
+            assertTrue(inspected.detection.matches.none { it.strength == MatchStrength.Strong })
+            assertTrue(inspected.issues.any { it.code == IssueCode("CAPABILITY_UNSUPPORTED") && it.layer == Layer.Structure })
+        }
+    }
+
+    @Test
+    fun corruptPrimaryNalAndDimensionsAreReportedWhileRawItemRemainsByteExact(): Unit = runImmediate {
+        val fixture = fixture()
+        val reader = BinaryReader(MemoryBinarySource(Bytes(fixture.bytes), SourceId("heif-coded-corruption")), context)
+        val roots = BmffReader(reader).readBoxes(ByteRange(0uL, fixture.bytes.size.toULong())).orThrow()
+        val graph = livephoto.core.heif.HeifItemGraphReader.read(reader, roots).orThrow()
+        val sample = graph.locations.items.single().extents.single().data
+        val dimensions = graph.properties.single { it.type == "ispe" }.payload
+        val cases = listOf(
+            fixture.bytes.copyOf().also { GoogleFixtures.u32(0u).copyInto(it, dimensions.offset.toInt() + 4) },
+            fixture.bytes.copyOf().also { it[sample.offset.toInt() + 4] = 0x80.toByte() },
+            fixture.bytes.copyOf().also { it[sample.offset.toInt() + 5] = 0 },
+            fixture.bytes.copyOf().also { GoogleFixtures.u32(9u).copyInto(it, sample.offset.toInt()) })
+        for ((index, bytes) in cases.withIndex()) {
+            val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+            assertNull(inspected.media.first().width)
+            assertTrue(inspected.issues.any { it.layer == Layer.Media && it.severity == Severity.Error })
+            val raw = MemoryOutputTransaction(context, "heif-coded-invalid-$index")
+            value(core.extract(ExtractRequest(input(bytes), listOf(ResourceId("heif:item:1")), inspected.snapshot, output = raw, context = context)))
+            assertEquals(Bytes(bytes.copyOfRange(sample.offset.toInt(), sample.endExclusive.toInt())), raw.committedAssets().values.single())
+        }
+    }
+
+    @Test
+    fun unimplementedConfigurationVersionDoesNotBecomeDecodedDimensions(): Unit = runImmediate {
+        val fixture = fixture()
+        val reader = BinaryReader(MemoryBinarySource(Bytes(fixture.bytes), SourceId("heif-coded-version")), context)
+        val roots = BmffReader(reader).readBoxes(ByteRange(0uL, fixture.bytes.size.toULong())).orThrow()
+        val graph = livephoto.core.heif.HeifItemGraphReader.read(reader, roots).orThrow()
+        val configuration = graph.properties.single { it.type == "hvcC" }.payload
+        val bytes = fixture.bytes.copyOf().also { it[configuration.offset.toInt()] = 2 }
+        val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+        assertNull(inspected.media.first().width)
+        assertEquals(Coverage.Partial, inspected.media.first().coverage)
+        assertTrue(inspected.issues.any { it.code == IssueCode("UNSUPPORTED_CONTAINER") && it.layer == Layer.Media && it.severity == Severity.Warning })
+    }
+
+    @Test
     fun absoluteAndAbiOnlyRelativePointersExposeExactVideoWithIncompleteImageCoverage(): Unit = runImmediate {
         for (relative in listOf(false, true)) for (nested in listOf(false, true)) {
             val fixture = fixture(relative, nested)
