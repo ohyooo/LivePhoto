@@ -16,6 +16,7 @@ internal object KeyMetadataOperations {
     suspend fun plan(request: SetKeyRequest): CoreResult<ExecutionPlan> = attempt {
         RequestValidation.validate(request).orThrow()
         val session = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
+        if (session.applePair != null) return@attempt AppleKeyOperations.plan(request, session).orThrow()
         if (session.heifItems != null) return@attempt GoogleHeicKeyOperations.plan(request, session).orThrow()
         val prepared = prepare(request, session)
         val caps = request.output.capabilities()
@@ -30,6 +31,7 @@ internal object KeyMetadataOperations {
     suspend fun set(request: SetKeyRequest): CoreResult<OperationResult> = attempt {
         RequestValidation.validate(request).orThrow()
         val source = SourceSession.open(request.input, request.context, ParseBudget(request.context)).orThrow()
+        if (source.applePair != null) return@attempt AppleKeyOperations.set(request, source).orThrow()
         if (source.heifItems != null) return@attempt GoogleHeicKeyOperations.set(request, source).orThrow()
         val prepared = prepare(request, source)
         val session = prepared.session

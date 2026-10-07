@@ -99,7 +99,7 @@ internal object AppleClean {
     private fun overlap(a: ByteRange, b: ByteRange): Boolean = a.offset < b.endExclusive && b.offset < a.endExclusive
     private suspend fun verifyDedicatedTrack(parser: BmffReader, track: BmffBox) {
         val schemas = mapOf(
-            "trak" to setOf("tkhd", "edts", "mdia"), "edts" to setOf("elst"),
+            "trak" to setOf("tkhd", "edts", "mdia"), "edts" to setOf("elst", "free"),
             "mdia" to setOf("mdhd", "hdlr", "minf"), "minf" to setOf("gmhd", "hdlr", "dinf", "stbl"),
             "gmhd" to setOf("gmin"), "dinf" to setOf("dref"),
             "stbl" to setOf("stsd", "stts", "ctts", "stsc", "stsz", "stco", "co64", "stss", "sdtp"),

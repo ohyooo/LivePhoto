@@ -68,6 +68,21 @@ class AppleConvertIntegrationTest {
                             val createdPair = SourceSet.Pair(createdApple.output.assets[0].readableSource!!, createdMovie.source)
                             assertEquals(0, core.inspect(ReadRequest(createdPair, context)).orThrow().keyPhoto.position!!.compareTo(Time(40, 1000u)))
                             assertTrue(createdApple.execution.none { it.transcoded || it.remuxed })
+                            val changedKey = core.setKeyPhotoPosition(SetKeyRequest(createdPair, CoverPosition.FrameIndex(0uL),
+                                policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-key-$index"), context = context)).orThrow()
+                            try {
+                                val keyMovie = BinaryReader(changedKey.output.assets[1].readableSource!!, context)
+                                val keyFacts = BmffVideoProbe(keyMovie, allowTimedMetadata = true).probe(ByteRange(0uL, keyMovie.identity().orThrow().size)).orThrow()
+                                RemuxVerification.verify(original, originalFacts, keyMovie, keyFacts.copy(tracks = keyFacts.tracks.filter { it.handler != "meta" }))
+                                val keyPath = directory.resolve("apple changed key $index.mp4"); owned.add(keyPath)
+                                save(keyMovie.source, keyPath); decode(keyPath)
+                                val keyPair = SourceSet.Pair(changedKey.output.assets[0].readableSource!!, keyMovie.source)
+                                assertEquals(0, core.inspect(ReadRequest(keyPair, context)).orThrow().keyPhoto.position!!.compareTo(Time.Zero))
+                                val imageReader = BinaryReader(createdPair.image, context)
+                                val outputImage = BinaryReader(keyPair.image, context)
+                                assertEquals(sha256Range(imageReader, ByteRange(0uL, imageReader.identity().orThrow().size)).orThrow(),
+                                    sha256Range(outputImage, ByteRange(0uL, outputImage.identity().orThrow().size)).orThrow())
+                            } finally { changedKey.output.assets.forEach { it.readableSource?.close() } }
                         } finally { createdApple.output.assets.forEach { it.readableSource?.close() } }
                         val carrier = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, input, ProtocolSelector(ProtocolIds.GoogleV2),
                             edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)), policy = MutationPolicy(preservation = PreservationPolicy.Strict),

@@ -118,9 +118,7 @@ internal object AppleMovieAssembler {
                 box("dinf", full("dref", u32(1uL) + box("alis", u32(1uL)))) + stbl)
             val tkhd = ByteArray(84).also { u32(nextId).copyInto(it, 12); u32(delay + 1uL).copyInto(it, 20); matrix(it, 40) }
             val mdhd = ByteArray(24).also { u32(media.movieTimescale.toULong()).copyInto(it, 12); u32(1uL).copyInto(it, 16) }
-            val edits = box("edts", full("elst", u32(if (delay == 0uL) 1uL else 2uL) +
-                (if (delay == 0uL) byteArrayOf() else u32(delay) + u32(UInt.MAX_VALUE.toULong()) + u32(0x10000uL)) +
-                u32(1uL) + u32(0uL) + u32(0x10000uL)))
+            val edits = box("edts", AppleKeyEditTable.bytes(delay).toByteArray())
             return box("trak", box("tkhd", tkhd) + edits + box("mdia", box("mdhd", mdhd) +
                 full("hdlr", u32(0uL) + "meta".encodeToByteArray() + ByteArray(12)) + minf))
         }

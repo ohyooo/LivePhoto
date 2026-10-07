@@ -89,7 +89,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             exact(mediaHeader, 12uL)
             if (u32(mediaHeader, 0) != 1u) unsupported("Video media header version/flags are not implemented")
         } else { fullVersion(mediaHeader, setOf(0)); exact(mediaHeader, if (metadata) 16uL else 8uL) }
-        val edit = optional(children, "edts")?.let { parseEdit(it, movieScale) }
+        val edit = optional(children, "edts")?.let { parseEdit(it, movieScale, metadata) }
         val emptyTicks = if (edit == null) 0uL else convertTicks(edit.emptyDuration, movieScale, timescale)
         val presentationDuration = if (edit == null) Time(duration.toLong(), timescale) else {
             val ticks = checkedAdd(edit.emptyDuration, edit.segmentDuration)
@@ -277,9 +277,12 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         return values
     }
 
-    private suspend fun parseEdit(edts: BmffBox, movieScale: UInt): VideoEdit {
+    private suspend fun parseEdit(edts: BmffBox, movieScale: UInt, metadata: Boolean): VideoEdit {
         val edits = children(edts, 3u)
-        if (edits.any { it.type != "elst" }) unsupported("Additional edit metadata is not implemented")
+        if (edits.any { it.type != "elst" && !(metadata && it.type == "free") }) unsupported("Additional edit metadata is not implemented")
+        val padding = edits.filter { it.type == "free" }
+        if (padding.size > 1 || padding.any { it.headerLength != 8uL || it.extendsToParentEnd || it.payload.length != 4uL || reader.readU32(it.payload.offset).orThrow() != 0u })
+            unsupported("Only one explicit zero-filled 12-byte timed edit padding box is implemented")
         val table = bytes(one(edits, "elst")); fullVersion(table, setOf(0, 1)); need(table, 8)
         val count = u32(table, 4)
         if (count !in 1u..2u) unsupported("Multiple media edit segments are not implemented")
