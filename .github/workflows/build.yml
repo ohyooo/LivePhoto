@@ -63,7 +63,7 @@ jobs:
         shell: pwsh
         run: |
           $logPath = Join-Path $env:GITHUB_WORKSPACE 'ci-output/portable.log'
-          ./scripts/package-portable.ps1 -Platform '${{ matrix.platform }}' 2>&1 | Tee-Object $logPath
+          ./scripts/package-portable.ps1 -Platform '${{ matrix.platform }}' *>&1 | Tee-Object $logPath
 
       - name: Upload portable executable
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

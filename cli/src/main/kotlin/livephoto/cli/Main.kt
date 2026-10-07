@@ -79,8 +79,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             val allowed = common + (if (command in mediaCommands + setOf("create", "convert")) setOf("ffmpeg") else emptySet()) + when (command) {
                 "capabilities" -> targetKeys
                 "media-capabilities" -> emptySet()
-                "create" -> setOf("image", "video", "output-dir", "strict") + targetKeys + trimKeys + positionKeys + replacementKeys
-                "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target") + trimKeys + positionKeys + replacementKeys
+                "create" -> setOf("image", "video", "output-dir", "strict", "allow-transcode") + targetKeys + trimKeys + positionKeys + replacementKeys
+                "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target", "allow-transcode") + trimKeys + positionKeys + replacementKeys
                 "extract" -> inputKeys + setOf("output-dir", "resources", "raw-carrier")
                 "split" -> inputKeys + setOf("output-dir", "strict")
                 "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues")

@@ -3,6 +3,9 @@ package livephoto.core.jvm
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
+import livephoto.core.google.GoogleFixtures
+import livephoto.core.implementation.*
+import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.memory.MemoryOutputTransaction
 import java.nio.file.Files
 import java.nio.file.Path
@@ -48,6 +51,26 @@ class FfmpegTrimIntegrationTest {
                     assertEquals(6, after.tracks.single().samples.size); assertTrue(after.tracks.single().samples.first().isSync)
                     assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(asset.readableSource)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
                 } finally { result.operation.output.assets.forEach { it.readableSource?.close() } }
+                val image = MemoryBinarySource(Bytes(GoogleFixtures.jpeg()), SourceId("exact-composite-image"))
+                val live = MemoryBinarySource(Bytes(GoogleFixtures.v1Photo(Files.readAllBytes(file), timestamp = "160000")), SourceId("exact-composite-live"))
+                for (target in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) for (convert in listOf(false, true)) for (replacement in listOf(false, true)) {
+                    val tx = MemoryOutputTransaction(context, "real-exact-composite-$target-$convert-$replacement")
+                    val edits = EditSpec(trim = spec, keyPosition = if (convert) null else CoverPosition.FrameIndex(4uL),
+                        replacementFrame = if (replacement) CoverPosition.FrameIndex(10uL) else null)
+                    val policy = MutationPolicy(transcode = TranscodePolicy.Explicit)
+                    val created = if (convert) core.convert(ConvertRequest(SourceSet.Single(live), ProtocolSelector(target), edits = edits, sameTarget = SameTargetPolicy.Normalize, policy = policy, output = tx, context = context))
+                        else core.create(CreateRequest(image, input, ProtocolSelector(target), edits = edits, policy = policy, output = tx, context = context))
+                    val composite = assertIs<CoreResult.Success<OperationResult>>(created, created.toString()).value
+                    try {
+                        assertEquals(0, composite.keyPhoto!!.position!!.compareTo(Time(120, 1000u)))
+                        assertEquals(GuaranteeOutcome.Changed, composite.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
+                        assertEquals(GuaranteeOutcome.Unknown, composite.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
+                        if (replacement) assertEquals(GuaranteeOutcome.Changed, composite.preservation.records.single { it.guarantee == Guarantee.ImageDataPreserving }.outcome)
+                        val source = SourceSet.Single(composite.output.assets.single().readableSource!!)
+                        assertEquals(Verdict.Valid, core.validate(ValidationRequest(source, layers = listOf(Layer.Structure, Layer.Protocol), context = context)).orThrow().verdict)
+                        assertTrue(core.probe(ProbeRequest(ResourceRef(source, videoId(target)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                    } finally { composite.output.assets.forEach { it.readableSource?.close() } }
+                }
                 assertEquals(hash, sha256Range(reader, range).orThrow())
             } finally { input.close() }
         } finally { Files.deleteIfExists(file); Files.delete(directory) }

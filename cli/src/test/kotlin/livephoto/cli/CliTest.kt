@@ -51,6 +51,20 @@ class CliTest {
         assertEquals(3, Cli(core).run(args + "--allow-transcode") {})
         assertEquals(TranscodePolicy.Explicit, assertNotNull(received).policy.transcode)
     }
+    @Test fun exactTrimAndCompositeEditsForwardExplicitAuthorizationOnly() = blocking {
+        var policy: MutationPolicy? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun trim(request: TrimRequest): CoreResult<TrimResult> { policy = request.policy; assertEquals(TrimMode.Exact, request.spec.mode); return failure }
+            override suspend fun create(request: CreateRequest): CoreResult<OperationResult> { policy = request.policy; assertEquals(TrimMode.Exact, request.edits!!.trim!!.mode); return failure }
+            override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> { policy = request.policy; assertEquals(TrimMode.Exact, request.edits!!.trim!!.mode); return failure }
+        }
+        val common = listOf("--start-us", "40000", "--end-us", "120000", "--mode", "Exact", "--output-dir", "not-created")
+        for (base in listOf(listOf("trim", "--input", "not-opened"), listOf("create", "--image", "not-opened", "--video", "not-opened", "--target", "google.microvideo.v1"),
+            listOf("convert", "--input", "not-opened", "--target", "google.motionphoto.v2"))) {
+            assertEquals(3, Cli(core).run(base + common) {}); assertEquals(TranscodePolicy.Forbid, assertNotNull(policy).transcode)
+            assertEquals(3, Cli(core).run(base + common + "--allow-transcode") {}); assertEquals(TranscodePolicy.Explicit, assertNotNull(policy).transcode)
+        }
+    }
     @Test fun jsonEscapesControlsAndPreservesExactUnsignedRanges() {
         assertEquals("\"a\\n\\\"\\\\\"", Json.encode("a\n\"\\"))
         assertTrue(Json.encode(ByteRange(ULong.MAX_VALUE, 0uL)).contains("18446744073709551615"))

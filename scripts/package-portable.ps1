@@ -150,6 +150,24 @@ try {
         $exactDecode = & $launcher probe --input $exact.operation.output.assets[0].path --decode-check
         if ($LASTEXITCODE -ne 0) { throw "Portable Exact output failed full decoding: $exactDecode" }
         Write-Host 'PORTABLE_FFMPEG_EXACT_TRIM=SUCCESS'
+        $exactCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $transcodeFixture --target google.microvideo.v1 --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --frame-index 2 --replacement-frame-index 7 --output-dir (Join-Path $verify 'exact replacement create')
+        if ($LASTEXITCODE -ne 0) { throw "Portable Exact replacement Create failed: $exactCreateJson" }
+        $exactCreate = ($exactCreateJson | ConvertFrom-Json).result
+        if (([decimal]$exactCreate.keyPhoto.position.value * 1000000 / $exactCreate.keyPhoto.position.timescale) -ne 40000 -or
+            -not ($exactCreate.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Changed' }) -or
+            -not ($exactCreate.preservation.records | Where-Object { $_.guarantee -eq 'ImageDataPreserving' -and $_.outcome -eq 'Changed' })) { throw 'Portable Exact replacement Create falsely claimed original media preservation or conflated key/replacement frame.' }
+        $exactCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $transcodeFixture --target google.microvideo.v1 --frame-index 2 --output-dir (Join-Path $verify 'exact original carrier')
+        if ($LASTEXITCODE -ne 0) { throw "Portable Exact source carrier failed: $exactCarrierJson" }
+        $exactConvertJson = & $launcher convert --input ($exactCarrierJson | ConvertFrom-Json).result.output.assets[0].path --target google.motionphoto.v2 --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --output-dir (Join-Path $verify 'exact convert result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable Exact Convert failed: $exactConvertJson" }
+        $exactConvert = ($exactConvertJson | ConvertFrom-Json).result
+        if (([decimal]$exactConvert.keyPhoto.position.value * 1000000 / $exactConvert.keyPhoto.position.timescale) -ne 40000 -or
+            -not ($exactConvert.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Changed' })) { throw 'Portable Exact Convert lost source-domain key or coding change.' }
+        $exactConvertedVideo = & $launcher extract --input $exactConvert.output.assets[0].path --output-dir (Join-Path $verify 'exact converted extracted')
+        if ($LASTEXITCODE -ne 0) { throw 'Portable Exact Convert extraction failed.' }
+        $exactCompositeDecode = & $launcher probe --input ($exactConvertedVideo | ConvertFrom-Json).result.output.assets[0].path --decode-check
+        if ($LASTEXITCODE -ne 0) { throw "Portable Exact Convert derived video failed decoding: $exactCompositeDecode" }
+        Write-Host 'PORTABLE_FFMPEG_EXACT_CREATE_CONVERT=SUCCESS'
         $trimCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $remuxFixture --target google.microvideo.v1 --start-us 80000 --end-us 160000 --mode LosslessOnly --frame-index 3 --output-dir (Join-Path $verify 'trim create result')
         if ($LASTEXITCODE -ne 0) { throw "Portable real trim Create failed: $trimCreateJson" }
         $trimCreate = ($trimCreateJson | ConvertFrom-Json).result

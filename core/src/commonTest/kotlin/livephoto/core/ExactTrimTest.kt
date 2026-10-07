@@ -59,6 +59,32 @@ class ExactTrimTest {
             }
         }
     }
+    @Test fun createConvertTransferChangedCodingProofAndMapSourceKeyOnlyOnce(): Unit = runImmediate {
+        val bytes = CreateTrimOperationsTest().fourSampleVideo()
+        val image = MemoryBinarySource(Bytes(GoogleFixtures.jpeg()), SourceId("exact-create-image"))
+        val video = MemoryBinarySource(Bytes(bytes), SourceId("exact-create-video"))
+        val live = MemoryBinarySource(Bytes(GoogleFixtures.v1Photo(bytes, timestamp = "80000")), SourceId("exact-convert-live"))
+        val spec = exact.copy(range = TimeRange(Time(40, 1000u), Time(120, 1000u)))
+        val policy = MutationPolicy(transcode = TranscodePolicy.Explicit)
+        for (target in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) for (convert in listOf(false, true)) {
+            val output = MemoryOutputTransaction(context, "exact-composite-$target-$convert")
+            val backend = EncodedBackend("") {}; val core = DefaultLivePhotoCore(backend)
+            val request = CreateRequest(image, video, ProtocolSelector(target), edits = EditSpec(spec, CoverPosition.FrameIndex(2uL)), policy = policy, output = output, context = context)
+            val conversion = ConvertRequest(SourceSet.Single(live), ProtocolSelector(target), edits = EditSpec(trim = spec), sameTarget = SameTargetPolicy.Normalize, policy = policy, output = output, context = context)
+            if (convert) core.plan(conversion).orThrow() else core.plan(request).orThrow()
+            assertEquals(0, backend.calls); assertEquals(TransactionState.Open, output.query().orThrow().state)
+            val result = (if (convert) core.convert(conversion) else core.create(request)).orThrow()
+            try {
+                assertEquals(0, result.keyPhoto!!.position!!.compareTo(Time(40, 1000u)))
+                assertTrue(result.execution.any { it.stage == Stage.Trim && it.transcoded })
+                assertEquals(GuaranteeOutcome.Changed, result.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
+                assertEquals(GuaranteeOutcome.Unknown, result.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
+                assertEquals(Value.BooleanValue(true), (result.preservation.changes.single { it.selector == "videoTrim" }.after as Value.ObjectValue).entries["wasTranscoded"])
+                val source = SourceSet.Single(result.output.assets.single().readableSource!!)
+                assertEquals(Verdict.Valid, core.validate(ValidationRequest(source, layers = listOf(Layer.Structure, Layer.Protocol), context = context)).orThrow().verdict)
+            } finally { result.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
     private class EncodedBackend(val wrong: String, val after: () -> Unit) : MediaBackend {
         var calls = 0
         override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("synthetic-exact"), listOf(CapabilityEntry(Operation.Trim, Implementation.Experimental)))
