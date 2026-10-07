@@ -22,6 +22,10 @@ internal object Json {
         is BinarySource, is GenerationToken -> quote("redacted")
         is Bytes -> encode(mapOf("byteLength" to value.size))
         is Time -> encode(mapOf("value" to value.value, "timescale" to value.timescale))
+        is CoverPosition.Timestamp -> encode(mapOf("kind" to "Timestamp", "time" to value.time,
+            "selection" to value.selection, "tolerance" to value.tolerance), output)
+        is CoverPosition.FrameIndex -> encode(mapOf("kind" to "FrameIndex", "index" to value.index,
+            "trackId" to value.trackId), output)
         is ByteRange -> encode(mapOf("offset" to value.offset, "length" to value.length))
         is SourceIdentity -> encode(mapOf("size" to value.size, "digest" to value.digest), output)
         is Snapshot -> encode(mapOf("sources" to value.identities), output)

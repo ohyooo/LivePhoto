@@ -93,6 +93,23 @@ class CliTest {
         assertEquals("{\"value\":\"1\",\"timescale\":90000}", Json.encode(Time(1, 90000u)))
         assertEquals("{\"offset\":\"18446744073709551615\",\"length\":\"0\"}", Json.encode(ByteRange(ULong.MAX_VALUE, 0uL)))
     }
+    @Test fun coverPositionJsonUsesExplicitKindAndExactIntegerWidth() {
+        assertEquals("{\"kind\":\"FrameIndex\",\"index\":\"18446744073709551615\",\"trackId\":{\"value\":\"2\"}}",
+            Json.encode(CoverPosition.FrameIndex(ULong.MAX_VALUE, TrackId("2"))))
+        assertEquals("{\"kind\":\"Timestamp\",\"time\":{\"value\":\"9223372036854775807\",\"timescale\":90000},\"selection\":\"Exact\",\"tolerance\":{\"value\":\"0\",\"timescale\":1}}",
+            Json.encode(CoverPosition.Timestamp(Time(Long.MAX_VALUE, 90000u), Selection.Exact)))
+    }
+    @Test fun futureCoreIssueCodesArePassedThroughWithoutCliInterpretation() = blocking {
+        val code = "FUTURE_MEDIA_RULE_2030"
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun detect(request: ReadRequest): CoreResult<DetectionResult> =
+                CoreResult.Failure(CoreError(IssueCode(code), Stage.Detect, "Future structured error", details = mapOf("tick" to Value.Text(ULong.MAX_VALUE.toString()))))
+        }
+        val lines = mutableListOf<String>()
+        assertEquals(3, Cli(core).run(listOf("detect", "--input", "not-opened"), lines::add))
+        assertTrue(lines.single().contains("\"value\":\"$code\""))
+        assertTrue(lines.single().contains("18446744073709551615"))
+    }
     @Test fun replacementKeyUpdateAndStrictPolicyAreOnlyForwarded() = blocking {
         var received: ReplaceRequest? = null
         val core = object : LivePhotoCore by DefaultLivePhotoCore() {
