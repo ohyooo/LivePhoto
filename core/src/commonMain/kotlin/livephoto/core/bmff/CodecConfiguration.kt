@@ -44,7 +44,7 @@ internal fun avcConfig(bytes: Bytes, budget: ParseBudget? = null, inBand: Boolea
     return width
 }
 
-internal fun hevcConfig(bytes: Bytes, budget: ParseBudget? = null, inBand: Boolean = false): Int {
+internal fun hevcConfig(bytes: Bytes, budget: ParseBudget? = null, inBand: Boolean = false, allowedArrayTypes: Set<Int>? = null): Int {
     val cursor = ConfigCursor(bytes)
     if (cursor.byte() != 1) unsupported("HEVC configuration version is not implemented")
     cursor.skip(12)
@@ -61,6 +61,7 @@ internal fun hevcConfig(bytes: Bytes, budget: ParseBudget? = null, inBand: Boole
         val descriptor = cursor.byte()
         if (descriptor and 64 != 0) corrupt("HEVC NAL array reserved bit is invalid")
         val type = descriptor and 63
+        if (allowedArrayTypes != null && type !in allowedArrayTypes) unsupported("HEVC configuration has unclassified metadata arrays")
         if (descriptor and 128 != 0) complete.add(type)
         if (!types.add(type)) corrupt("Duplicate HEVC NAL array")
         val count = cursor.word()

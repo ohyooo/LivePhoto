@@ -3,7 +3,7 @@ package livephoto.core.bmff
 import livephoto.core.*
 import livephoto.core.binary.*
 
-internal data class NalFraming(val units: ULong)
+internal data class NalFraming(val units: ULong, val types: Set<Int>)
 
 /** Encoded lengths and NAL headers only; no SPS/slice semantics or successful decode claim. */
 internal suspend fun validateNalFraming(reader: BinaryReader, range: ByteRange, width: Int, codec: VideoCodec,
@@ -13,6 +13,7 @@ internal suspend fun validateNalFraming(reader: BinaryReader, range: ByteRange, 
     var cursor = range.offset
     var vcl = false
     var units = 0uL
+    val types = mutableSetOf<Int>() // At most 64 header values, independent of sample byte length.
     while (cursor < range.endExclusive) {
         budget.item(depth)
         checkedRange(cursor, width.toULong(), range.endExclusive)
@@ -25,6 +26,7 @@ internal suspend fun validateNalFraming(reader: BinaryReader, range: ByteRange, 
         val first = header[0].toInt() and 255
         if (first and 128 != 0) fail("CORRUPTED_CONTAINER", "NAL forbidden bit is set")
         val type = if (codec == VideoCodec.Hevc) (first shr 1) and 63 else first and 31
+        types.add(type)
         if (codec == VideoCodec.Hevc) {
             if (header[1].toInt() and 7 == 0) fail("CORRUPTED_CONTAINER", "HEVC temporal_id_plus1 is zero")
             if (type <= 31) vcl = true
@@ -37,5 +39,5 @@ internal suspend fun validateNalFraming(reader: BinaryReader, range: ByteRange, 
     }
     if (!vcl) fail("CORRUPTED_CONTAINER", "Coded resource has no VCL NAL unit")
     reader.validateIdentity().orThrow()
-    NalFraming(units)
+    NalFraming(units, types.toSet())
 }

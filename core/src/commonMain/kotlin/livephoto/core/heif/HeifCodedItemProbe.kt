@@ -6,7 +6,7 @@ import livephoto.core.bmff.*
 import livephoto.core.implementation.ExtentSource
 
 internal data class HeifCodedItemFacts(val item: UInt, val declaredWidth: UInt, val declaredHeight: UInt,
-    val configuration: ByteRange, val configurationDigest: Digest, val nalWidth: Int, val nalUnits: ULong)
+    val configuration: ByteRange, val configurationDigest: Digest, val nalWidth: Int, val nalUnits: ULong, val nalTypes: Set<Int>)
 
 /** Finite hvc1 framing/property checks. Dimensions are declarations, not verified decoded dimensions. */
 internal object HeifCodedItemProbe {
@@ -41,6 +41,7 @@ internal object HeifCodedItemProbe {
         val framing = validateNalFraming(itemReader, ByteRange(0uL, view.size().orThrow()), nalWidth, VideoCodec.Hevc, budget, 4u).orThrow()
         val digest = Sha256().also { it.update(bytes) }.finish()
         reader.validateIdentity().orThrow()
-        HeifCodedItemFacts(info.id, width, height, configuration.payload, digest, nalWidth, framing.units)
+        budget.retain(checkedMultiply(framing.types.size.toULong(), 32uL))
+        HeifCodedItemFacts(info.id, width, height, configuration.payload, digest, nalWidth, framing.units, framing.types)
     }
 }
