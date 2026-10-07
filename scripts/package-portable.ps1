@@ -143,8 +143,48 @@ try {
             $appleRoundtripVideo = ($appleExtractJson | ConvertFrom-Json).result.output.assets[0].path
             & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $appleRoundtripVideo -map 0:v -map '0:a?' -sn -dn -f null -
             if ($LASTEXITCODE -ne 0 -or (Get-FileHash $appleVideo).Hash -ne $appleInputHash -or (Get-FileHash $appleCarrier).Hash -ne $appleCarrierHash) { throw 'Portable Apple roundtrip failed decode or changed its borrowed sources.' }
+            # Independent ordinary-media Create entrance; no Google carrier or CLI-side protocol assembly.
+            $plainImage = $frame.operation.output.assets[0].path
+            $plainImageHash = (Get-FileHash $plainImage).Hash
+            $directJson = & $launcher create --image $plainImage --video $appleVideo --target apple.livephoto --profile jpeg-mp4 --frame-index 0 --strict --output-dir (Join-Path $verify "Apple direct create $appleIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable Apple direct Create failed: $directJson" }
+            $direct = ($directJson | ConvertFrom-Json).result
+            if ($direct.output.assets.Count -ne 2 -or $direct.validation.verdict -ne 'Valid' -or $direct.validation.coverage -ne 'Complete' -or
+                ($direct.execution | Where-Object { $_.transcoded -or $_.stage -in @('DecodeFrame','EncodeImage') }) -or
+                ($direct.preservation.records | Where-Object { $_.outcome -notin @('Verified','NotApplicable') })) { throw 'Portable Apple Create lacks verified no-encoding atomic pair evidence.' }
+            $directImage = $direct.output.assets[0].path
+            $directMovie = $direct.output.assets[1].path
+            $directImageHash = (Get-FileHash $directImage).Hash
+            $directMovieHash = (Get-FileHash $directMovie).Hash
+            $directInspectJson = & $launcher inspect --input $directImage --pair-video $directMovie
+            if ($LASTEXITCODE -ne 0) { throw 'Portable Apple Create independent inspect failed.' }
+            $directPairing = ($directInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress
+            $keyImage = $directImage; $keyMovie = $directMovie
+            foreach ($keyIndex in @(1, 0)) {
+                $setJson = & $launcher set-key --input $keyImage --pair-video $keyMovie --frame-index $keyIndex --strict --output-dir (Join-Path $verify "Apple key $appleIndex $keyIndex")
+                if ($LASTEXITCODE -ne 0) { throw "Portable Apple SetKey failed: $setJson" }
+                $set = ($setJson | ConvertFrom-Json).result
+                if ($set.output.assets.Count -ne 2 -or ($set.execution | Where-Object { $_.transcoded -or $_.remuxed -or $_.stage -in @('DecodeFrame','EncodeImage') }) -or
+                    ($set.preservation.records | Where-Object { $_.outcome -notin @('Verified','NotApplicable') })) { throw 'Portable Apple SetKey changed media or lacks preservation proof.' }
+                $keyImage = $set.output.assets[0].path; $keyMovie = $set.output.assets[1].path
+                if ((Get-FileHash $keyImage).Hash -ne $directImageHash) { throw 'Portable Apple SetKey changed the complete primary image.' }
+                $keyJson = & $launcher get-key --input $keyImage --pair-video $keyMovie
+                if ($LASTEXITCODE -ne 0) { throw 'Portable Apple SetKey independent key read failed.' }
+                $keyPosition = ($keyJson | ConvertFrom-Json).result.position
+                if (-not $keyPosition -or ([decimal]$keyPosition.value * 1000000 / $keyPosition.timescale) -ne ($keyIndex * 40000)) { throw 'Portable Apple SetKey lost the requested exact presentation time.' }
+                $keyInspectJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
+                if ($LASTEXITCODE -ne 0 -or (($keyInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress) -ne $directPairing) { throw 'Portable Apple SetKey changed pair CID or matching facts.' }
+                $keyValidateJson = & $launcher validate --input $keyImage --pair-video $keyMovie --layers Structure,Protocol
+                if ($LASTEXITCODE -ne 0 -or ($keyValidateJson | ConvertFrom-Json).result.verdict -ne 'Valid' -or ($keyValidateJson | ConvertFrom-Json).result.coverage -ne 'Complete') { throw 'Portable Apple SetKey pair failed complete independent validation.' }
+                & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $keyMovie -map 0:v -map '0:a?' -sn -dn -f null -
+                if ($LASTEXITCODE -ne 0) { throw 'Portable Apple SetKey movie failed complete AV decoding.' }
+            }
+            if ((Get-FileHash $keyMovie).Hash -ne $directMovieHash -or (Get-FileHash $directMovie).Hash -ne $directMovieHash -or
+                (Get-FileHash $directImage).Hash -ne $directImageHash -or (Get-FileHash $plainImage).Hash -ne $plainImageHash -or
+                (Get-FileHash $appleVideo).Hash -ne $appleInputHash) { throw 'Portable Apple zero/nonzero/zero key roundtrip changed unrequested bytes or borrowed inputs.' }
         }
         Write-Host 'PORTABLE_APPLE_PAIR_ROUNDTRIP=SUCCESS'
+        Write-Host 'PORTABLE_APPLE_CREATE_SETKEY=SUCCESS scope=bounded-jpeg-mp4-not-device-compatibility'
         $transcodeFixture = Join-Path $verify 'transcode fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 8 -vf "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709" -fps_mode passthrough -c:v libx264 -preset ultrafast -crf 30 -bf 0 -g 3 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $transcodeFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable transcode fixture generation failed.' }
