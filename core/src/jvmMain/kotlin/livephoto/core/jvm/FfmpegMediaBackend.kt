@@ -16,7 +16,10 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
             listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "frameProfile", Value.Text("progressive-square-pixel-identity-transform-eight-bit-bt709-limited-sdr-to-standard-srgb-jpeg")),
                 Condition(ConditionOperator.Equals, "selectionProof", Value.Text("unique-exact-integer-media-pts-decoder-showinfo-and-independent-jpeg-decode"))))) +
-            listOf(Operation.Trim, Operation.Transcode).map {
+            listOf(CapabilityEntry(Operation.Trim, Implementation.Experimental, conditions = listOf(
+                Condition(ConditionOperator.Equals, "trimProfile", Value.Text("bounded-mp4-one-avc1-track-no-audio-no-reorder-idr-source-boundaries-no-hidden-content-no-encode")),
+                Condition(ConditionOperator.Equals, "boundaryRepresentation", Value.Text("exact-integer-microseconds-and-source-movie-timescale"))))) +
+            listOf(Operation.Transcode).map {
                 CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
             })
 
@@ -78,7 +81,7 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
         is CoreResult.Failure -> validation
         is CoreResult.Success -> CoreResult.Failure(CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This FFmpeg operation is not yet implemented"))
     }
-    override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = unsupported(job)
+    override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = FfmpegTrim.run(executable, job)
     override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = FfmpegRemux.run(executable, job)
     override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = unsupported(job)
     override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = FfmpegFrame.run(executable, job)

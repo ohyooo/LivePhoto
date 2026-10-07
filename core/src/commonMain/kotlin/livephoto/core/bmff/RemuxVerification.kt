@@ -14,7 +14,7 @@ internal object RemuxVerification {
         }
     }
 
-    suspend fun metadata(reader: BinaryReader, video: VideoStructure): Metadata {
+    suspend fun metadata(reader: BinaryReader, video: VideoStructure, trimDurationsVerifiedSeparately: Boolean = false): Metadata {
         val budget = ParseBudget(reader.context)
         val boxes = BmffReader(reader, budget)
         val records = mutableListOf<Pair<String, Digest>>()
@@ -130,7 +130,7 @@ internal object RemuxVerification {
                         // Only these duration/timescale fields may change representation; exact rational checks follow.
                         val start = if (version == 0) (if (box.type == "tkhd") 20 else 12) else (if (box.type == "tkhd") 28 else 20)
                         val length = if (box.type == "tkhd") (if (version == 0) 4 else 8) else (if (version == 0) 8 else 12)
-                        if (box.type == "tkhd") {
+                        if (box.type == "tkhd" && !trimDurationsVerifiedSeparately) {
                             val duration = readUnsigned(Bytes(bytes.copyOfRange(start, start + length)), Endian.Big)
                             val scale = video.movieTimescale.toULong()
                             var a = duration; var b = scale

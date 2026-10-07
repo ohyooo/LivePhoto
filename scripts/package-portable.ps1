@@ -95,6 +95,16 @@ try {
             throw 'Portable frame result does not describe the requested derived image.'
         }
         Write-Host 'PORTABLE_FFMPEG_FRAME=SUCCESS'
+        $trimJson = & $launcher trim --input $remuxFixture --start-us 0 --end-us 80000 --mode LosslessOnly --strict --output-dir (Join-Path $verify 'trim result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real lossless trim failed: $trimJson" }
+        $trim = ($trimJson | ConvertFrom-Json).result
+        if ($trim.wasTranscoded -or $trim.retainedHiddenContent -or -not $trim.wasBitstreamPreserved -or $trim.actualStart.value -ne '0' -or
+            ([decimal]$trim.actualEnd.value * 1000000 / $trim.actualEnd.timescale) -ne 80000 -or ($trim.operation.execution | Where-Object transcoded -eq $true)) {
+            throw 'Portable trim did not disclose the proved nonencoding boundaries.'
+        }
+        $trimDecode = & $launcher probe --input $trim.operation.output.assets[0].path --decode-check
+        if ($LASTEXITCODE -ne 0) { throw "Portable trimmed video could not be decoded: $trimDecode" }
+        Write-Host 'PORTABLE_FFMPEG_TRIM=SUCCESS'
     } else {
         if ($LASTEXITCODE -ne 3 -or ($probeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
             throw "Portable missing-backend gate failed: $probeJson"
@@ -108,6 +118,9 @@ try {
         $frameJson = & $launcher extract-frame --input $referenceVideo --frame-index 0 --format Jpeg --output-dir (Join-Path $verify 'disabled frame')
         if ($LASTEXITCODE -ne 3 -or ($frameJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend frame gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_FRAME=UNAVAILABLE'
+        $trimJson = & $launcher trim --input $referenceVideo --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim')
+        if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trim gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_TRIM=UNAVAILABLE'
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }

@@ -82,7 +82,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
                 "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource")
                 "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format")
-                "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode")
+                "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode", "resource")
                 "remux" -> inputKeys + setOf("output-dir", "strict", "container", "resource")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
                 "validate" -> inputKeys + setOf("layers")
@@ -130,7 +130,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "set-key" -> core.setKeyPhotoPosition(SetKeyRequest(source(), position(), policy, destination(), context))
                 "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))
                 "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), output = destination(), context = context))
-                "trim" -> core.trim(TrimRequest(ResourceRef(source()), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
+                "trim" -> core.trim(TrimRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
                 "remux" -> core.remux(RemuxRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), VideoContainer.valueOf(required("container")), policy, destination(), context))
                 else -> core.transcode(TranscodeRequest(ResourceRef(source()), VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container"))), policy, destination(), context))
             }
