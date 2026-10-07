@@ -377,6 +377,69 @@ try {
     $secondRepairJson = & $launcher repair --input $repairedPath
     if ($LASTEXITCODE -ne 0 -or ($secondRepairJson | ConvertFrom-Json).result.proposedChanges.Count -ne 0) { throw 'Portable V2 repair is not idempotent.' }
     Write-Host 'PORTABLE_GOOGLE_V2_REPAIR=SUCCESS'
+    # Synthetic framing fixtures exported only by successful Core tests. They are not
+    # real-device fixtures or decoder evidence; the real-HEVC suite is separate.
+    $heicFixtures = Join-Path $repository 'core/build/portable-heic-fixtures'
+    $manifestFile = Join-Path $heicFixtures 'manifest.txt'
+    if (-not (Test-Path $manifestFile)) { throw 'Run :core:jvmTest before packaging: HEIC conformance fixtures are absent.' }
+    $manifest = @{}
+    foreach ($line in Get-Content $manifestFile) {
+        $pair = $line.Split('=', 2)
+        if ($pair.Count -ne 2 -or $manifest.ContainsKey($pair[0])) { throw 'Invalid HEIC fixture manifest.' }
+        $manifest[$pair[0]] = $pair[1]
+    }
+    if ($manifest.scope -ne 'synthetic-protocol-framing-not-decoder-or-device-proof' -or -not $manifest.runId) { throw 'HEIC fixture provenance is missing.' }
+    foreach ($file in @('primary.heic', 'motion.mp4', 'motion.heic', 'damaged.heic')) {
+        if ($manifest[$file] -notmatch '^[0-9a-f]{64}$' -or (Get-FileHash (Join-Path $heicFixtures $file)).Hash.ToLowerInvariant() -ne $manifest[$file]) { throw "Stale/mixed HEIC fixture: $file" }
+    }
+    $heicPrimary = Join-Path $heicFixtures 'primary.heic'
+    $heicVideo = Join-Path $heicFixtures 'motion.mp4'
+    $heicOriginal = Join-Path $heicFixtures 'motion.heic'
+    $heicCreatedJson = & $launcher create --image $heicPrimary --video $heicVideo --target google.motionphoto.v2 --profile heic --frame-index 0 --strict --output-dir (Join-Path $verify 'HEIC created')
+    if ($LASTEXITCODE -ne 0) { throw "Portable HEIC Create failed: $heicCreatedJson" }
+    $heicCreated = ($heicCreatedJson | ConvertFrom-Json).result
+    $heicPath = $heicCreated.output.assets[0].path
+    if ($heicCreated.output.assets[0].imageFormat -ne 'Heic' -or (Get-FileHash $heicPath).Hash -ne (Get-FileHash $heicOriginal).Hash) { throw 'Portable HEIC writer did not reproduce the proven fixture.' }
+    $heicInspectJson = & $launcher inspect --input $heicPath
+    if ($LASTEXITCODE -ne 0 -or ($heicInspectJson | ConvertFrom-Json).result.detection.primaryProtocol.profile.value -ne 'heic') { throw 'Portable HEIC content detection/inspection failed.' }
+    $heicValidationJson = & $launcher validate --input $heicPath --layers Structure,Protocol
+    if ($LASTEXITCODE -ne 0) { throw "Portable HEIC validation failed: $heicValidationJson" }
+    foreach ($sameTarget in @('PreserveAsIs', 'Normalize')) {
+        $heicConvertJson = & $launcher convert --input $heicPath --target google.motionphoto.v2 --profile heic --same-target $sameTarget --strict --output-dir (Join-Path $verify "HEIC convert $sameTarget")
+        if ($LASTEXITCODE -ne 0) { throw "Portable HEIC $sameTarget failed: $heicConvertJson" }
+        $heicConverted = ($heicConvertJson | ConvertFrom-Json).result
+        if ($heicConverted.execution | Where-Object { $_.transcoded -or $_.remuxed }) { throw 'Portable HEIC Convert unexpectedly encoded/remuxed media.' }
+        if ($sameTarget -eq 'PreserveAsIs' -and (Get-FileHash $heicConverted.output.assets[0].path).Hash -ne (Get-FileHash $heicPath).Hash) { throw 'HEIC PreserveAsIs is not byte-identical.' }
+        $heicRawJson = & $launcher extract --input $heicConverted.output.assets[0].path --output-dir (Join-Path $verify "HEIC raw $sameTarget")
+        if ($LASTEXITCODE -ne 0 -or (Get-FileHash ($heicRawJson | ConvertFrom-Json).result.output.assets[0].path).Hash -ne (Get-FileHash $heicVideo).Hash) { throw 'Portable HEIC Convert changed the complete movie.' }
+    }
+    $heicCleanJson = & $launcher split --input $heicPath --strict --output-dir (Join-Path $verify 'HEIC clean')
+    if ($LASTEXITCODE -ne 0) { throw "Portable HEIC Clean failed: $heicCleanJson" }
+    $heicClean = ($heicCleanJson | ConvertFrom-Json).result
+    $heicCleanImage = ($heicClean.output.assets | Where-Object role -eq 'PrimaryImage').path
+    $heicCleanVideo = ($heicClean.output.assets | Where-Object role -eq 'MotionVideo').path
+    if ($heicClean.output.assets.Count -ne 2 -or (Get-FileHash $heicCleanVideo).Hash -ne (Get-FileHash $heicVideo).Hash) { throw 'Portable HEIC Clean did not publish the complete exact asset set.' }
+    $heicAgainJson = & $launcher split --input $heicCleanImage --strict --output-dir (Join-Path $verify 'HEIC clean again')
+    if ($LASTEXITCODE -ne 0 -or (Get-FileHash ($heicAgainJson | ConvertFrom-Json).result.output.assets[0].path).Hash -ne (Get-FileHash $heicCleanImage).Hash) { throw 'Portable HEIC Clean is not idempotent.' }
+    $heicKeyJson = & $launcher set-key --input $heicPath --frame-index 1 --strict --output-dir (Join-Path $verify 'HEIC key metadata')
+    if ($LASTEXITCODE -ne 0 -or ($heicKeyJson | ConvertFrom-Json).result.keyPhoto.position.value -ne '40000') { throw "Portable HEIC SetKey failed: $heicKeyJson" }
+    $heicKeyPath = ($heicKeyJson | ConvertFrom-Json).result.output.assets[0].path
+    $heicKeyCleanJson = & $launcher split --input $heicKeyPath --strict --output-dir (Join-Path $verify 'HEIC key cleaned')
+    if ($LASTEXITCODE -ne 0) { throw 'Portable HEIC SetKey cleanup failed.' }
+    $heicKeyClean = ($heicKeyCleanJson | ConvertFrom-Json).result
+    if ((Get-FileHash ($heicKeyClean.output.assets | Where-Object role -eq 'PrimaryImage').path).Hash -ne (Get-FileHash $heicCleanImage).Hash -or
+        (Get-FileHash ($heicKeyClean.output.assets | Where-Object role -eq 'MotionVideo').path).Hash -ne (Get-FileHash $heicVideo).Hash) { throw 'Portable HEIC SetKey changed primary coding or movie bytes.' }
+    $heicDamaged = Join-Path $heicFixtures 'damaged.heic'
+    $heicPreviewJson = & $launcher repair --input $heicDamaged
+    if ($LASTEXITCODE -ne 0) { throw "Portable HEIC repair preview failed: $heicPreviewJson" }
+    $heicPreview = ($heicPreviewJson | ConvertFrom-Json).result
+    if ($heicPreview.proposedChanges.Count -ne 1 -or $heicPreview.changesApplied.Count -ne 0 -or $null -ne $heicPreview.operation) { throw 'HEIC repair preview was not read-only.' }
+    $heicRepairJson = & $launcher repair --input $heicDamaged --apply --strict --output-dir (Join-Path $verify 'HEIC repaired')
+    if ($LASTEXITCODE -ne 0 -or (Get-FileHash ($heicRepairJson | ConvertFrom-Json).result.operation.output.assets[0].path).Hash -ne (Get-FileHash $heicOriginal).Hash) { throw "Portable HEIC length-only repair failed: $heicRepairJson" }
+    foreach ($file in @('primary.heic', 'motion.mp4', 'motion.heic', 'damaged.heic')) {
+        if ((Get-FileHash (Join-Path $heicFixtures $file)).Hash.ToLowerInvariant() -ne $manifest[$file]) { throw "Portable CLI mutated input: $file" }
+    }
+    Write-Host 'PORTABLE_GOOGLE_HEIC_CONFORMANCE=SUCCESS scope=synthetic-protocol-not-device-or-decode'
     & $launcher validate --input $livePath --layers Structure,Protocol
     if ($LASTEXITCODE -ne 0) { throw 'Portable reference validation failed' }
     $extractedJson = & $launcher extract --input $livePath --output-dir (Join-Path $verify 'extracted')

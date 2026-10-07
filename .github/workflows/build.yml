@@ -95,6 +95,7 @@ jobs:
           path: |
             **/build/reports/
             **/build/test-results/
+            core/build/portable-heic-fixtures/
             ci-output/gradle.log
             ci-output/portable.log
           if-no-files-found: warn

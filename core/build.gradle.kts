@@ -13,3 +13,9 @@ kotlin {
         }
     }
 }
+
+// Packaged CLI conformance consumes synthetic fixtures produced by jvmTest.
+// Track them as test outputs so a build-cache hit restores them alongside reports.
+tasks.named<Test>("jvmTest") {
+    outputs.dir(layout.buildDirectory.dir("portable-heic-fixtures"))
+}
