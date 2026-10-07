@@ -145,7 +145,7 @@ class GoogleHeicSessionTest {
     @Test fun readAndFiniteCreateAreExperimentalButBroaderWritesAndDeviceEvidenceAreNotClaimed() {
         val capabilities = core.getProtocolCapabilities(target)
         for (operation in capabilities.operations) {
-            assertEquals(if (operation.operation in setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey, Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo, Operation.SetKey)) Implementation.Experimental else Implementation.Planned,
+            assertEquals(if (operation.operation in setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey, Operation.Create, Operation.SplitClean, Operation.ConvertFrom, Operation.ConvertTo, Operation.SetKey, Operation.Repair)) Implementation.Experimental else Implementation.Planned,
                 operation.implementation)
             assertTrue(operation.verification.none { it == Verification.DeviceTested })
         }

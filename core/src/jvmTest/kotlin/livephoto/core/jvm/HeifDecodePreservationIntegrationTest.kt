@@ -4,6 +4,7 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.heif.*
+import livephoto.core.google.*
 import livephoto.core.memory.*
 import java.nio.file.Files
 import java.nio.file.Path
@@ -133,6 +134,24 @@ class HeifDecodePreservationIntegrationTest {
                     DefaultLivePhotoCore().extract(ExtractRequest(SourceSet.Single(MemoryBinarySource(keyBytes, SourceId("real-key-heic-$index"))),
                         emptyList(), output = keyRaw, context = context)).orThrow()
                     assertEquals(extractedBytes, keyRaw.committedAssets().values.single())
+                    val compositeReader = BinaryReader(composite.source, context)
+                    val compositeRoots = BmffReader(compositeReader).readBoxes(ByteRange(0uL, compositeBytes.size.toULong())).orThrow()
+                    val compositeGraph = HeifItemGraphReader.read(compositeReader, compositeRoots).orThrow()
+                    val ownedXmp = compositeGraph.locations.items.single { it.id != compositeGraph.primary }.extents.single().data
+                    val originalKey = DefaultLivePhotoCore().getKeyPhotoPosition(ReadRequest(composite, context)).orThrow().position!!
+                    val micros = originalKey.value // Public Create normalizes only exactly representable microseconds.
+                    assertEquals(1_000_000u, originalKey.timescale)
+                    val wrongLength = GoogleDirectoryWriter.heic(extractedBytes.size.toULong() - 1uL, micros, context)
+                    assertEquals(ownedXmp.length, wrongLength.size.toULong())
+                    val brokenBytes = compositeBytes.toByteArray(); wrongLength.copyInto(brokenBytes, ownedXmp.offset.toInt())
+                    val repairTx = MemoryOutputTransaction(context, "real-heif-length-repair-$index")
+                    val repairResult = DefaultLivePhotoCore().repair(RepairRequest(SourceSet.Single(MemoryBinarySource(Bytes(brokenBytes), SourceId("real-heif-bad-length-$index"))),
+                        dryRun = false, policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = repairTx, context = context)).orThrow()
+                    assertEquals(1, repairResult.changesApplied.size)
+                    val repairedBytes = repairTx.committedAssets().values.single()
+                    assertEquals(compositeBytes, repairedBytes)
+                    val repairedPath = directory.resolve("repaired length $index.heic"); owned.add(repairedPath); Files.write(repairedPath, repairedBytes.toByteArray())
+                    assertEquals(originalDecode, decode(repairedPath))
                 } finally { motionSource.close() }
                 val stagedDecode = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(result, SourceId("heif-expanded-decode-$index")))), true, context)).orThrow()
                 assertTrue(stagedDecode.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })

@@ -17,7 +17,10 @@ internal object RepairOperations {
         val fixed: BinarySource? = null, val protocol: ProtocolId = ProtocolIds.GoogleV1,
         val exifProofs: List<ExifPositionIndependenceProof> = emptyList())
     suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = attempt {
-        val prepared = prepare(request)
+        val budget = ParseBudget(request.context)
+        val source = open(request, budget)
+        if (source.heifItems != null) return@attempt GoogleHeicRepairOperations.repair(request, source, budget).orThrow()
+        val prepared = prepare(request, source, budget)
         val result = prepared.result
         if (request.dryRun || result.blocked.isNotEmpty() || result.proposedChanges.isEmpty()) return@attempt result
         val session = prepared.session
@@ -76,7 +79,10 @@ internal object RepairOperations {
     }
 
     suspend fun plan(request: RepairRequest): CoreResult<ExecutionPlan> = attempt {
-        val prepared = prepare(request)
+        val budget = ParseBudget(request.context)
+        val source = open(request, budget)
+        if (source.heifItems != null) return@attempt GoogleHeicRepairOperations.plan(request, source, budget).orThrow()
+        val prepared = prepare(request, source, budget)
         val blocked = prepared.result.blocked
         if (!request.dryRun && blocked.isEmpty() && (prepared.rewrite != null || prepared.fixed != null)) {
             val caps = request.output!!.capabilities()
@@ -97,13 +103,14 @@ internal object RepairOperations {
                     }))), reasons = blocked.map { it.code })), blocked))
     }
 
-    private suspend fun prepare(request: RepairRequest): Prepared {
+    private suspend fun open(request: RepairRequest, budget: ParseBudget): SourceSession {
         RequestValidation.validate(request).orThrow()
         if (request.mode != RepairMode.SafeMetadataOnly || request.authority != null || request.policy.authority != null)
             fail("CAPABILITY_UNSUPPORTED", "This preview cannot remux, re-pair, or select conflicting authority", Stage.Plan)
         if (request.input !is SourceSet.Single) fail("REPAIR_AMBIGUOUS", "Offset preview requires one explicit carrier", Stage.Plan)
-        val budget = ParseBudget(request.context)
-        val session = SourceSession.open(request.input, request.context, budget, probeEmbeddedVideo = false).orThrow()
+        return SourceSession.open(request.input, request.context, budget, probeEmbeddedVideo = false).orThrow()
+    }
+    private suspend fun prepare(request: RepairRequest, session: SourceSession, budget: ParseBudget): Prepared {
         val jpeg = session.jpeg ?: fail("REPAIR_NOT_POSSIBLE", "Offset preview requires a parsed JPEG", Stage.Plan)
         if (session.bindings.any { it.protocol == ProtocolIds.Samsung }) return prepareSamsung(request)
         if (session.bindings.map { it.protocol }.toSet() == setOf(ProtocolIds.GoogleV2, ProtocolIds.VivoModern) && session.bindings.size == 2)
