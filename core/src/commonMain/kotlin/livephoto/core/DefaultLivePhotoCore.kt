@@ -31,7 +31,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = ConvertOperations.convert(request)
     override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairOperations.repair(request)
     override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = KeyMetadataOperations.set(request)
-    override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = unavailable(request)
+    override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = FrameOperations.extract(request, backend)
     override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> = unavailable(request)
     override suspend fun trim(request: TrimRequest): CoreResult<TrimResult> = unavailable(request)
     override suspend fun remux(request: RemuxRequest): CoreResult<OperationResult> = RemuxOperations.remux(request, backend)
@@ -145,7 +145,9 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             verification = listOf(Verification.SourceReviewed))) +
             listOf(if (backend?.capabilities()?.operations?.any { it.operation == Operation.Remux && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } == true)
                 RemuxOperations.capability(backend) else CapabilityEntry(Operation.Remux, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))) +
-            listOf(Operation.Trim, Operation.Transcode, Operation.ExtractFrame).map { CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED"))) })
+            listOf(if (backend?.capabilities()?.operations?.any { it.operation == Operation.ExtractFrame && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } == true)
+                FrameOperations.capability(backend) else CapabilityEntry(Operation.ExtractFrame, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))) +
+            listOf(Operation.Trim, Operation.Transcode).map { CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED"))) })
     override suspend fun getOperationCapabilities(request: MutationRequest): CoreResult<CapabilitySet> = when (val result = plan(request)) {
         is CoreResult.Success -> CoreResult.Success(result.value.capabilities)
         is CoreResult.Failure -> if (result.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED")) result
@@ -153,6 +155,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
     override suspend fun plan(request: MutationRequest): CoreResult<ExecutionPlan> =
         when (request) {
+            is ExtractFrameRequest -> FrameOperations.plan(request, backend)
             is RemuxRequest -> RemuxOperations.plan(request, backend)
             is ConvertRequest -> ConvertOperations.plan(request)
             is SetKeyRequest -> KeyMetadataOperations.plan(request)

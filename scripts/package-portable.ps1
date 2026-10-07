@@ -25,7 +25,7 @@ if (Test-Path $imageParent) { throw 'Package image destination already exists; u
 New-Item -ItemType Directory -Path $imageParent -Force | Out-Null
 $packageArgs = @('--type', 'app-image', '--name', 'LivePhoto', '--app-version', '0.1.0',
     '--input', $inputLib, '--main-jar', 'livephoto-cli.jar', '--main-class', 'livephoto.cli.MainKt',
-    '--add-modules', 'java.base', '--dest', $imageParent)
+    '--add-modules', 'java.base,java.desktop', '--java-options', '-Djava.awt.headless=true', '--dest', $imageParent)
 if ($IsWindows) { $packageArgs += '--win-console' }
 & "$env:JAVA_HOME/bin/jpackage" @packageArgs
 if ($LASTEXITCODE -ne 0) { throw 'jpackage failed' }
@@ -84,6 +84,17 @@ try {
             throw 'Portable remux did not return verified no-encoding evidence.'
         }
         Write-Host 'PORTABLE_FFMPEG_REMUX=SUCCESS'
+        $frameFixture = Join-Path $verify 'frame fixture.mp4'
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 4 -vf 'setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709' -c:v libx264 -preset medium -bf 2 -g 4 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $frameFixture
+        if ($LASTEXITCODE -ne 0) { throw 'Portable frame fixture generation failed.' }
+        $frameJson = & $launcher extract-frame --input $frameFixture --frame-index 1 --format Jpeg --output-dir (Join-Path $verify 'frame result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real frame extraction failed: $frameJson" }
+        $frame = ($frameJson | ConvertFrom-Json).result
+        if ($frame.actualFrameIndex -ne '1' -or $frame.operation.output.assets[0].imageFormat -ne 'Jpeg' -or
+            -not ($frame.operation.execution | Where-Object stage -eq 'EncodeImage') -or ($frame.operation.execution | Where-Object transcoded -eq $true)) {
+            throw 'Portable frame result does not describe the requested derived image.'
+        }
+        Write-Host 'PORTABLE_FFMPEG_FRAME=SUCCESS'
     } else {
         if ($LASTEXITCODE -ne 3 -or ($probeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
             throw "Portable missing-backend gate failed: $probeJson"
@@ -94,6 +105,9 @@ try {
             throw 'Portable missing-backend remux gate failed.'
         }
         Write-Host 'PORTABLE_FFMPEG_REMUX=UNAVAILABLE'
+        $frameJson = & $launcher extract-frame --input $referenceVideo --frame-index 0 --format Jpeg --output-dir (Join-Path $verify 'disabled frame')
+        if ($LASTEXITCODE -ne 3 -or ($frameJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend frame gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_FRAME=UNAVAILABLE'
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }

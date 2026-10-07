@@ -21,6 +21,7 @@ Convert: --target PROTOCOL [--profile PROFILE]
 Extract: [--resources ID,ID] [--raw-carrier]
 Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
 Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for frame index]
+Extract-frame: [--resource ID] (select an embedded video in a live-photo carrier)
 Validate: [--layers Structure,Protocol,Media]
 Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred]
 Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
@@ -79,7 +80,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "split" -> inputKeys + setOf("output-dir", "strict")
                 "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues")
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
-                "extract-frame", "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format")
+                "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource")
+                "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format")
                 "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode")
                 "remux" -> inputKeys + setOf("output-dir", "strict", "container", "resource")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
@@ -126,7 +128,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                     core.repair(RepairRequest(source(), allowedIssueCodes = options["issues"]?.split(',')?.map(::IssueCode) ?: emptyList(), dryRun = !options.containsKey("apply"), policy = policy, output = if (options.containsKey("apply")) destination() else null, context = context))
                 }
                 "set-key" -> core.setKeyPhotoPosition(SetKeyRequest(source(), position(), policy, destination(), context))
-                "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source()), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))
+                "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))
                 "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), output = destination(), context = context))
                 "trim" -> core.trim(TrimRequest(ResourceRef(source()), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
                 "remux" -> core.remux(RemuxRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), VideoContainer.valueOf(required("container")), policy, destination(), context))

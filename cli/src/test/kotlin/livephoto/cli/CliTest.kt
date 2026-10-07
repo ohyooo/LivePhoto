@@ -75,4 +75,22 @@ class CliTest {
         assertEquals(3, Cli(core).run(listOf("probe", "--input", "not-opened", "--decode-check")) {})
         assertTrue(decode)
     }
+    @Test fun extractFrameForwardsResourceIndexAndEncodingAsRequestOnly() = blocking {
+        var received: ExtractFrameRequest? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> { received = request; return failure }
+        }
+        val args = listOf("extract-frame", "--input", "not-opened", "--resource", "embedded-video", "--frame-index", "0", "--track-id", "2", "--format", "Jpeg", "--output-dir", "not-created")
+        assertEquals(3, Cli(core).run(args) {})
+        val request = assertNotNull(received)
+        assertEquals(ResourceId("embedded-video"), request.video.resourceId)
+        assertEquals(CoverPosition.FrameIndex(0uL, TrackId("2")), request.position)
+        assertEquals(ImageEncoding(ImageFormat.Jpeg), request.encoding)
+    }
+    @Test fun int64AndUint64UseDecimalStringsForJavaScriptSafeJson() {
+        assertEquals("\"9223372036854775807\"", Json.encode(Long.MAX_VALUE))
+        assertEquals("\"18446744073709551615\"", Json.encode(ULong.MAX_VALUE))
+        assertEquals("{\"value\":\"1\",\"timescale\":90000}", Json.encode(Time(1, 90000u)))
+        assertEquals("{\"offset\":\"18446744073709551615\",\"length\":\"0\"}", Json.encode(ByteRange(ULong.MAX_VALUE, 0uL)))
+    }
 }

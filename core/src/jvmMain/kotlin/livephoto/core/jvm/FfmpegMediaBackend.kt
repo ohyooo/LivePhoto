@@ -13,7 +13,10 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
             Condition(ConditionOperator.Equals, "decodeScope", Value.Text("bounded-jpeg-or-validated-bmff-video-and-audio"))))) +
             listOf(CapabilityEntry(Operation.Remux, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "input", Value.Text("one-video-no-audio-classified-mp4-mov-metadata-independent-sample-proof"))))) +
-            listOf(Operation.Trim, Operation.Transcode, Operation.ExtractFrame).map {
+            listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
+                Condition(ConditionOperator.Equals, "frameProfile", Value.Text("progressive-square-pixel-identity-transform-eight-bit-bt709-limited-sdr-to-standard-srgb-jpeg")),
+                Condition(ConditionOperator.Equals, "selectionProof", Value.Text("unique-exact-integer-media-pts-decoder-showinfo-and-independent-jpeg-decode"))))) +
+            listOf(Operation.Trim, Operation.Transcode).map {
                 CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
             })
 
@@ -78,5 +81,5 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
     override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = unsupported(job)
     override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = FfmpegRemux.run(executable, job)
     override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = unsupported(job)
-    override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = unsupported(job)
+    override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = FfmpegFrame.run(executable, job)
 }

@@ -87,8 +87,13 @@ class KeyMetadataTest {
 
     @Test fun unrepresentableSelectionAndUnprovenStrictMetadataDoNotPublish(): Unit = runImmediate {
         val exactOutput = MemoryOutputTransaction(context, "key-exact-unrepresentable")
-        val position = CoverPosition.Timestamp(Time(1, 30_000u), Selection.Nearest, Time(1, 1000u))
-        assertEquals(IssueCode("VALUE_NOT_REPRESENTABLE"), assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source(GoogleFixtures.v1Photo())), position, output = exactOutput, context = context))).error.code)
+        val video = GoogleFixtures.video().bytes.copyOf()
+        for (type in listOf("mvhd", "mdhd")) {
+            val offset = (4 until video.size - 4).first { video.copyOfRange(it, it + 4).contentEquals(type.encodeToByteArray()) } + 4
+            GoogleFixtures.u32(30_000u).copyInto(video, offset + 12)
+        }
+        // Source selection is rational; only the actual protocol field still requires integer microseconds.
+        assertEquals(IssueCode("VALUE_NOT_REPRESENTABLE"), assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source(GoogleFixtures.v1Photo(video))), CoverPosition.FrameIndex(1uL), output = exactOutput, context = context))).error.code)
         assertTrue(value(exactOutput.query()).assetIds.isEmpty())
         val plain = GoogleFixtures.v1Photo()
         val emptyExif = "Exif\u0000\u0000".encodeToByteArray() + byteArrayOf(77, 77, 0, 42) + GoogleFixtures.u32(8u) + ByteArray(6)
@@ -97,5 +102,12 @@ class KeyMetadataTest {
         assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source(withExif)), CoverPosition.FrameIndex(1uL), policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = strictOutput, context = context))).error.code)
         assertEquals(TransactionState.Aborted, value(strictOutput.query()).state)
         assertTrue(strictOutput.committedAssets().isEmpty())
+    }
+    @Test fun subMicrosecondRequestCanSelectAnExactlyRepresentableProtocolPosition(): Unit = runImmediate {
+        val output = MemoryOutputTransaction(context, "key-rational-request")
+        val position = CoverPosition.Timestamp(Time(1, 30_000u), Selection.Nearest, Time(1, 1000u))
+        val result = core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source(GoogleFixtures.v1Photo())), position, output = output, context = context)).orThrow()
+        assertEquals(Time(0, 1_000_000u), result.keyPhoto?.position)
+        result.output.assets.forEach { it.readableSource?.close() }
     }
 }

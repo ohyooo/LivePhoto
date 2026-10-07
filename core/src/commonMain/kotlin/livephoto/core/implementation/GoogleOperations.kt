@@ -275,40 +275,12 @@ internal fun checkResourceAliases(session: SourceSession, selected: List<Resourc
 }
 
 internal fun selectKey(video: VideoStructure, requested: CoverPosition?): KeyPhotoResult {
-    val track = when (requested) {
-        is CoverPosition.FrameIndex -> video.tracks.firstOrNull { it.handler == "vide" && (requested.trackId == null || TrackId(it.trackId.toString()) == requested.trackId) }
-        else -> video.tracks.firstOrNull { it.handler == "vide" }
-    } ?: fail("FRAME_INDEX_UNAVAILABLE", "No eligible presentation video track")
-    if (video.tracks.count { it.handler == "vide" } > 1 && (requested !is CoverPosition.FrameIndex || requested.trackId == null)) fail("FRAME_INDEX_UNAVAILABLE", "Multiple video tracks need an explicit presentation track")
-    val samples = track.samples.filter { it.presentationTime >= 0 && Time(it.presentationTime, track.timescale) < track.presentationDuration }.sortedBy { it.presentationTime }
-    if (samples.isEmpty()) fail("FRAME_INDEX_UNAVAILABLE", "Video has no presented samples")
-    val requestedTime = (requested as? CoverPosition.Timestamp)?.time
-    val position = when (requested) {
-        is CoverPosition.FrameIndex -> samples.getOrNull(if (requested.index > Int.MAX_VALUE.toULong()) -1 else requested.index.toInt())?.let { Time(it.presentationTime, track.timescale) } ?: fail("FRAME_INDEX_OUT_OF_RANGE", "Presentation frame index exceeds track")
-        is CoverPosition.Timestamp -> {
-            if (requestedTime!! < Time.Zero || requestedTime >= track.presentationDuration) fail("INVALID_PRESENTATION_TIMESTAMP", "Key position is outside presented video")
-            val actual = when (requested.selection) {
-                Selection.AtOrBefore -> samples.lastOrNull { Time(it.presentationTime, track.timescale) <= requestedTime }
-                Selection.Exact -> samples.firstOrNull { Time(it.presentationTime, track.timescale).compareTo(requestedTime) == 0 }
-                Selection.Nearest -> samples.minByOrNull { sample ->
-                    // Normalize within exact signed microseconds; unrepresentable comparisons
-                    // remain unsupported rather than silently selecting through floating point.
-                    val sampleUs = microseconds(Time(sample.presentationTime, track.timescale))
-                    val requestedUs = microseconds(requestedTime)
-                    if (sampleUs >= requestedUs) sampleUs - requestedUs else requestedUs - sampleUs
-                }
-            } ?: fail("INVALID_PRESENTATION_TIMESTAMP", "Requested selection has no eligible presentation sample")
-            val actualTime = Time(actual.presentationTime, track.timescale)
-            val deltaUs = microseconds(actualTime).let { value -> val expected = microseconds(requestedTime); if (value >= expected) value - expected else expected - value }
-            if (Time(deltaUs, 1_000_000u) > requested.tolerance) fail("INVALID_PRESENTATION_TIMESTAMP", "Selected presentation sample exceeds requested tolerance")
-            actualTime
-        }
-        null -> {
-            val middle = Time(track.presentationDuration.value / 2, track.presentationDuration.timescale)
-            samples.lastOrNull { Time(it.presentationTime, track.timescale) <= middle }?.let { Time(it.presentationTime, track.timescale) } ?: Time(samples.first().presentationTime, track.timescale)
-        }
-    }
-    return KeyPhotoResult(position, source = if (requested == null) KeySource.DerivedDefault else KeySource.ProtocolField)
+    if (requested != null) return KeyPhotoResult(selectFrame(video, requested).time, source = KeySource.ProtocolField)
+    val track = video.tracks.filter { it.handler == "vide" }.singleOrNull() ?: fail("FRAME_INDEX_UNAVAILABLE", "No unique presentation video track")
+    val first = selectFrame(video, CoverPosition.FrameIndex(0uL))
+    val middle = Time(track.presentationDuration.value / 2, track.presentationDuration.timescale)
+    val position = if (middle < first.time) first.time else selectFrame(video, CoverPosition.Timestamp(middle, Selection.AtOrBefore, track.presentationDuration)).time
+    return KeyPhotoResult(position, source = KeySource.DerivedDefault)
 }
 
 internal fun microseconds(time: Time): Long {

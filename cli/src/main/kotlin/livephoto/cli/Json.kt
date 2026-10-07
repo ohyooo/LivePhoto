@@ -9,7 +9,8 @@ internal object Json {
     fun encode(value: Any?, output: DirectoryOutputTransaction? = null): String = when (value) {
         null, Value.Null -> "null"
         is String -> quote(value)
-        is Boolean, is Number, is UInt, is ULong -> value.toString()
+        is Long, is ULong -> quote(value.toString())
+        is Boolean, is Number, is UInt -> value.toString()
         is Enum<*> -> quote(value.name)
         is Value.Text -> quote(value.value)
         is Value.Number -> value.decimal
