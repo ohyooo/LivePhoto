@@ -1,6 +1,7 @@
 package livephoto.core.jvm
 
 import livephoto.core.*
+import livephoto.core.binary.orThrow
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.memory.MemoryBinarySource
 import java.nio.file.Files
@@ -79,6 +80,77 @@ class MediaBackendDiscoveryTest {
             context = context, destination = staging)
         assertEquals("TRANSCODE_NOT_AUTHORIZED", assertIs<CoreResult.Failure>(backend.transcode(transcode)).error.code.value)
         assertEquals("INVALID_ARGUMENT", assertIs<CoreResult.Failure>(backend.remux(transcode)).error.code.value)
+    }
+    @Test fun mutationFallbackIsAllowedOnlyBeforeAnyStagingAttempt(): Unit = runImmediate {
+        for (operation in listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame)) for (touch in listOf("", "create", "read")) {
+            var attempts = 0
+            val staging = object : StagingArea {
+                override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> { attempts++; return CoreResult.Failure(CoreError(IssueCode("IO_WRITE_FAILED"), Stage.WriteProtocol, "Synthetic failed staging create")) }
+                override suspend fun openForRead(id: AssetId): CoreResult<BinarySource> { attempts++; return CoreResult.Failure(CoreError(IssueCode("IO_READ_FAILED"), Stage.Read, "Synthetic failed staging read")) }
+            }
+            val first = JobBackend(touch); val second = JobBackend(code = null)
+            val backend = FallbackMediaBackend(listOf(first, second))
+            val job = BackendJob(operation, listOf(request().media),
+                trim = if (operation == Operation.Trim) TrimSpec(TimeRange(Time.Zero, Time(80, 1000u))) else null,
+                remuxContainer = if (operation == Operation.Remux) VideoContainer.Mp4 else null,
+                videoEncoding = if (operation == Operation.Transcode) VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4) else null,
+                position = if (operation == Operation.ExtractFrame) CoverPosition.FrameIndex(0uL) else null,
+                imageEncoding = if (operation == Operation.ExtractFrame) ImageEncoding(ImageFormat.Jpeg) else null,
+                policy = MutationPolicy(transcode = TranscodePolicy.Explicit), context = context, destination = staging)
+            val result = when (operation) {
+                Operation.Trim -> backend.trim(job); Operation.Remux -> backend.remux(job)
+                Operation.Transcode -> backend.transcode(job); else -> backend.extractFrame(job)
+            }
+            assertEquals(1, first.calls); assertEquals(if (touch.isEmpty()) 1 else 0, second.calls)
+            assertEquals(if (touch.isEmpty()) 0 else 1, attempts)
+            if (touch.isEmpty()) assertIs<CoreResult.Success<BackendResult>>(result)
+            else assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(result).error.code.value)
+        }
+    }
+    @Test fun unsupportedAfterPartialOutputAbortsCoreTransactionWithoutRetry(): Unit = runImmediate {
+        val first = JobBackend("partial"); val second = JobBackend(code = null)
+        val backend = FallbackMediaBackend(listOf(first, second))
+        val source = MemoryBinarySource(Bytes(GoogleFixtures.video().bytes), SourceId("fallback-partial-video"))
+        val output = livephoto.core.memory.MemoryOutputTransaction(context, "fallback-partial")
+        val result = DefaultLivePhotoCore(backend).remux(RemuxRequest(ResourceRef(SourceSet.Single(source)), VideoContainer.Mp4, output = output, context = context))
+        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(result).error.code.value)
+        assertEquals(0, second.calls); assertEquals(TransactionState.Aborted, output.query().orThrow().state); assertTrue(output.committedAssets().isEmpty())
+    }
+    @Test fun cancellationBeforeOrBetweenFallbacksPreventsAdditionalBackendWork(): Unit = runImmediate {
+        for (alreadyCancelled in listOf(false, true)) {
+            var cancelled = alreadyCancelled
+            val first = JobBackend(onCall = { cancelled = true }); val second = JobBackend(code = null)
+            val staging = object : StagingArea {
+                override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> = error("Cancellation cannot write")
+                override suspend fun openForRead(id: AssetId): CoreResult<BinarySource> = error("Cancellation cannot read")
+            }
+            val job = BackendJob(Operation.Remux, listOf(request().media), remuxContainer = VideoContainer.Mp4,
+                context = context.copy(cancellation = Cancellation { cancelled }), destination = staging)
+            assertEquals("CANCELLED", assertIs<CoreResult.Failure>(FallbackMediaBackend(listOf(first, second)).remux(job)).error.code.value)
+            assertEquals(if (alreadyCancelled) 0 else 1, first.calls); assertEquals(0, second.calls)
+        }
+    }
+
+    private class JobBackend(val touch: String = "", val code: String? = "CAPABILITY_UNSUPPORTED", val onCall: () -> Unit = {}) : MediaBackend {
+        var calls = 0
+        override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("synthetic-job"), listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map { CapabilityEntry(it, Implementation.Experimental) })
+        private suspend fun run(job: BackendJob): CoreResult<BackendResult> {
+            job.validate().orThrow(); calls++; onCall()
+            when (touch) {
+                "create" -> job.destination.create(OutputAssetSpec(AssetRole.MotionVideo, mime = "video/mp4"))
+                "read" -> job.destination.openForRead(AssetId("missing"))
+                "partial" -> {
+                    val handle = job.destination.create(OutputAssetSpec(AssetRole.MotionVideo, mime = "video/mp4")).orThrow()
+                    handle.sink.write(Bytes(byteArrayOf(0, 1, 2))).orThrow(); handle.sink.close().orThrow()
+                }
+            }
+            return code?.let { CoreResult.Failure(CoreError(IssueCode(it), Stage.Plan, "Synthetic job failure")) } ?: CoreResult.Success(BackendResult(emptyList(), emptyList(), emptyList()))
+        }
+        override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = error("Unexpected probe")
+        override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = run(job)
+        override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = run(job)
+        override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = run(job)
+        override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = run(job)
     }
 
     private class FakeBackend(val id: String, val code: String? = null, val implemented: Boolean = true) : MediaBackend {
