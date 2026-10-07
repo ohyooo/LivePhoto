@@ -160,6 +160,67 @@ class SamsungHeicTest {
     }
 
     @Test
+    fun plainHeicUsesTheSameItemInspectionAndRawWithoutPretendingToBeAMotionPhoto(): Unit = runImmediate {
+        for (multiple in listOf(false, true)) {
+            val fixture = fixture(multiple = multiple)
+            val bytes = fixture.bytes.copyOfRange(0, fixture.mpvdStart)
+            val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+            assertEquals(Disposition.NonLive, inspected.detection.disposition)
+            assertTrue(inspected.detection.matches.isEmpty())
+            assertEquals(ImageFormat.Heic, inspected.media.single().imageFormat)
+            assertEquals(1u, inspected.media.single().width)
+            assertEquals(Coverage.Partial, inspected.media.single().coverage)
+            val item = inspected.layout.resources.single { it.id == ResourceId("heif:item:1") }
+            assertFalse(item.standalone)
+            val output = MemoryOutputTransaction(context, "plain-heic-item-$multiple")
+            val request = ExtractRequest(input(bytes), listOf(item.id), inspected.snapshot, output = output, context = context)
+            val plan = value(core.plan(request))
+            assertEquals(Availability.Conditional, plan.capabilities.availability)
+            assertTrue(output.committedAssets().isEmpty())
+            value(core.extract(request))
+            assertEquals(Bytes(GoogleFixtures.video(hevc = true).samples.first()), output.committedAssets().values.single())
+        }
+    }
+
+    @Test
+    fun multiItemOrUnknownPrivateDependenciesDoNotBecomeCertifiedPlainImages(): Unit = runImmediate {
+        val fixture = fixture(shared = true)
+        val bytes = fixture.bytes.copyOfRange(0, fixture.mpvdStart)
+        val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+        assertEquals(Disposition.Unknown, inspected.detection.disposition)
+        assertEquals(2, inspected.layout.resources.size)
+        assertTrue(inspected.layout.resources.all { !it.standalone })
+        assertTrue(inspected.issues.any { it.code == IssueCode("CAPABILITY_UNSUPPORTED") && it.layer == Layer.Structure })
+        val extended = bytes + GoogleFixtures.box("priv", byteArrayOf(0, 1, 2))
+        val other = value(core.inspect(ReadRequest(input(extended), context)))
+        assertEquals(Disposition.Unknown, other.detection.disposition)
+        assertTrue(other.detection.matches.isEmpty())
+    }
+
+    @Test
+    fun plainHeicRawCarrierKeepsEveryByteAndItemCodestreamIsNotARebuiltImage(): Unit = runImmediate {
+        val fixture = fixture(multiple = true)
+        val bytes = fixture.bytes.copyOfRange(0, fixture.mpvdStart)
+        val output = MemoryOutputTransaction(context, "plain-heic-whole-raw")
+        val result = value(core.extract(ExtractRequest(input(bytes), emptyList(), includeRawCarrier = true, output = output, context = context)))
+        assertEquals(Bytes(bytes), output.committedAssets().values.single())
+        assertEquals(AssetRole.Composite, result.output.assets.single().role)
+        assertTrue(result.preservation.records.all { it.outcome in setOf(GuaranteeOutcome.Verified, GuaranteeOutcome.NotApplicable) })
+        val split = MemoryOutputTransaction(context, "plain-heic-clean-not-implemented")
+        assertIs<CoreResult.Failure>(core.split(SplitRequest(input(bytes), output = split, context = context)))
+        assertTrue(split.committedAssets().isEmpty())
+    }
+
+    @Test
+    fun heicBrandAloneCannotSupplyAnImageItemGraph(): Unit = runImmediate {
+        val bytes = GoogleFixtures.box("ftyp", "heic".encodeToByteArray() + GoogleFixtures.u32(0u) + "heicmif1".encodeToByteArray()) + GoogleFixtures.box("mdat", byteArrayOf(0, 1, 2, 3))
+        val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+        assertEquals(Disposition.Unknown, inspected.detection.disposition)
+        assertTrue(inspected.media.isEmpty())
+        assertTrue(inspected.layout.resources.isEmpty())
+    }
+
+    @Test
     fun absoluteAndAbiOnlyRelativePointersExposeExactVideoWithIncompleteImageCoverage(): Unit = runImmediate {
         for (relative in listOf(false, true)) for (nested in listOf(false, true)) {
             val fixture = fixture(relative, nested)

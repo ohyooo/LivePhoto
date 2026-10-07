@@ -76,4 +76,19 @@ class HeifItemGraphTest {
             assertEquals(IssueCode("CAPABILITY_UNSUPPORTED"), assertIs<CoreResult.Failure>(read(bytes)).error.code)
         assertEquals(IssueCode("RESOURCE_LIMIT_EXCEEDED"), assertIs<CoreResult.Failure>(read(fixture(), context.copy(limits = context.limits.copy(maxItems = 2uL)))).error.code)
     }
+    @Test fun publicInspectionRetainsDerivedLinksWithoutInventingImageSemantics(): Unit = runImmediate {
+        val bytes = fixture()
+        val source = SourceSet.Single(MemoryBinarySource(Bytes(bytes), SourceId("heif-public-graph")))
+        val inspected = DefaultLivePhotoCore().inspect(ReadRequest(source, context)).orThrow()
+        assertEquals(Disposition.Unknown, inspected.detection.disposition)
+        assertEquals(ImageFormat.HeifOther, inspected.media.single().imageFormat)
+        assertEquals(Coverage.Partial, inspected.media.single().coverage)
+        assertEquals(6, inspected.layout.resources.size)
+        assertTrue(inspected.layout.resources.all { !it.standalone && it.kind == ResourceKind.Unknown })
+        assertEquals(Value.ArrayValue(listOf(Value.Number("1"), Value.Number("2"))), inspected.metadata.single { it.selector == "heif:reference:dimg:3" }.value)
+        assertEquals(3, inspected.layout.relationships.size)
+        assertTrue(inspected.layout.relationships.any { it.kind == RelationshipKind.AuxiliaryOf && it.from == ResourceId("heif:item:4") && it.to == ResourceId("heif:item:3") })
+        assertTrue(inspected.layout.relationships.any { it.kind == RelationshipKind.Describes && it.from == ResourceId("heif:item:5") && it.to == ResourceId("heif:item:3") })
+        assertTrue(inspected.layout.relationships.none { it.from == ResourceId("heif:item:3") })
+    }
 }

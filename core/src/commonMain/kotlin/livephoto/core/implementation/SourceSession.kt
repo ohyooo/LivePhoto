@@ -84,27 +84,8 @@ internal class SourceSession internal constructor(
                         val videoRegion = Region(videoId(binding.protocol), identity.id, binding.video!!, ResourceKind.Video, binding.protocol)
                         val regions = mutableListOf(primaryRegion, videoRegion)
                         val resources = mutableListOf(Resource(primaryRegion.id, primaryRegion.kind, listOf(primaryRegion), false), Resource(videoRegion.id, videoRegion.kind, listOf(videoRegion), true))
-                        // An item codestream is not a standalone HEIC carrier. Keep raw item resources untyped.
-                        heic.itemGraph?.let { graph ->
-                            for (item in graph.locations.items) {
-                                budget.item(); budget.retain(96uL)
-                                val id = ResourceId("heif:item:${item.id}")
-                                val extents = item.extents.mapIndexed { index, extent ->
-                                    budget.item(); budget.retain(96uL)
-                                    Region(ResourceId("${id.value}:extent:$index"), identity.id, extent.data, ResourceKind.Unknown)
-                                }
-                                val shared = mutableListOf<ResourceId>()
-                                for (other in graph.locations.items) if (other.id != item.id) {
-                                    var overlap = false
-                                    for (right in other.extents) for (left in item.extents) {
-                                        budget.item()
-                                        if (left.data.offset < right.data.endExclusive && right.data.offset < left.data.endExclusive) overlap = true
-                                    }
-                                    if (overlap) { budget.retain(32uL); shared += ResourceId("heif:item:${other.id}") }
-                                }
-                                regions += extents; resources += Resource(id, ResourceKind.Unknown, extents, false, shared)
-                            }
-                        }
+                        val heif = heic.itemGraph?.let { inspectHeifItems(identity, it, budget) }
+                        if (heif != null) { regions += heif.regions; resources += heif.resources }
                         for ((index, record) in heic.directory.records.withIndex()) {
                             budget.item(); budget.retain(96uL)
                             val region = Region(ResourceId("samsung:sef:record:$index"), identity.id, record.range, ResourceKind.Trailer,
@@ -115,18 +96,12 @@ internal class SourceSession internal constructor(
                             coverage = Coverage.Partial, issues = binding.issues.filter { it.layer in setOf(Layer.Structure, Layer.Media) })) + listOfNotNull(video?.let(::videoFacts))
                         val metadata = mutableListOf(MetadataEntry("samsung:mpv2:pointer-mode", value = heic.pointerMode?.let { Value.Text(it) }, owner = Ownership.SourceProtocol,
                             location = Location(source = identity.id, range = heic.directory.motionRecord!!.payloadRange, selector = "samsung:mpv2:pointer-mode"), origin = FactOrigin.Parsed))
-                        heic.itemGraph?.let { graph ->
-                            for (item in graph.infos) {
-                                budget.item(); budget.retain(192uL)
-                                val location = Location(source = identity.id, range = item.box.range, selector = "heif:item:${item.id}")
-                                metadata += MetadataEntry("heif:item:${item.id}:type", value = Value.Text(item.type), owner = Ownership.StandardImage, location = location, origin = FactOrigin.Parsed)
-                                if (item.id == graph.primary) metadata += MetadataEntry("heif:primary-item-id", value = Value.Number(item.id.toString()), owner = Ownership.StandardImage, location = location, origin = FactOrigin.Parsed)
-                            }
-                        }
-                        val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources), media, metadata, binding.key, issues = binding.issues)
+                        if (heif != null) metadata += heif.metadata
+                        val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources, heif?.relationships ?: emptyList()), media, metadata, binding.key, issues = binding.issues)
                         reader.validateIdentity().orThrow()
                         return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory, heifItems = heic.itemGraph)
                     }
+                    HeifImageSession.open(reader, snapshot, budget).orThrow()?.let { return@attempt it }
                 }
                 val detection = DetectionResult(Disposition.Unknown, matches = emptyList(), snapshot = snapshot)
                 val inspection = InspectionResult(snapshot, detection, Layout(identities, emptyList(), emptyList()), emptyList(), emptyList(), KeyPhotoResult())
