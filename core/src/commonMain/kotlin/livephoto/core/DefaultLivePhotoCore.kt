@@ -26,6 +26,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun validateMedia(request: ValidationRequest): CoreResult<ValidationReport> = validate(ValidationRequest(request.input, listOf(Layer.Media), request.requiredChecks, request.target, request.context))
 
     override suspend fun create(request: CreateRequest): CoreResult<OperationResult> = when {
+        request.target.protocol == ProtocolIds.Apple -> AppleAssemblyOperations.create(request)
         GoogleHeicCreateOperations.accepts(request.target) -> GoogleHeicCreateOperations.create(request)
         request.edits?.replacementFrame != null -> CreateReplacementOperations.create(request, backend)
         request.edits?.trim != null -> CreateTrimOperations.create(request, backend)
@@ -49,14 +50,14 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-mov")) else target
             if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = setOf(Operation.SplitClean, Operation.ConvertFrom) + if (actual.profile == ProfileId("jpeg-mp4")) setOf(Operation.ConvertTo) else emptySet()
+            val writes = setOf(Operation.SplitClean, Operation.ConvertFrom) + if (actual.profile == ProfileId("jpeg-mp4")) setOf(Operation.ConvertTo, Operation.Create) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 if (operation in reads + writes) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
-                conditions = if (operation == Operation.ConvertTo && operation in writes) listOf(
-                    Condition(ConditionOperator.Equals, "assembly", Value.Text("unique-live-source-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-except-exact-canonical-jfif-mp4-movie-known-or-explicit-key-no-trim-replacement")),
+                conditions = if (operation in setOf(Operation.ConvertTo, Operation.Create) && operation in writes) listOf(
+                    Condition(ConditionOperator.Equals, "assembly", Value.Text(if (operation == Operation.Create) "ordinary-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-except-exact-canonical-jfif-mp4-movie-selected-or-default-presentation-key-no-trim-replacement" else "unique-live-source-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-except-exact-canonical-jfif-mp4-movie-known-or-explicit-key-no-trim-replacement")),
                     Condition(ConditionOperator.Equals, "publication", Value.Text("independent-two-asset-reread-and-asset-set-atomic-no-encoding"))) else listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("exact-id-jpeg-quicktime-meta-pair")),
                     Condition(ConditionOperator.Equals, "timedMetadata", Value.Text("bounded-mebx-samples-with-exact-edit-mapping"))) +
-                    if (operation in writes && operation != Operation.ConvertTo) listOf(Condition(ConditionOperator.Equals, "cleanup", Value.Text("cid-only-maker-note-and-dedicated-cid-meta-and-still-time-tracks")),
+                    if (operation in writes && operation !in setOf(Operation.ConvertTo, Operation.Create)) listOf(Condition(ConditionOperator.Equals, "cleanup", Value.Text("cid-only-maker-note-and-dedicated-cid-meta-and-still-time-tracks")),
                         Condition(ConditionOperator.Equals, "preservation", Value.Text("fixed-offset-no-unclassified-track-fields-opaque-associations-unknown"))) +
                         if (operation == Operation.ConvertFrom) listOf(Condition(ConditionOperator.Equals, "target", Value.Text("google-jpeg-single-mdat-or-unchanged-same-target"))) else emptyList() else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
@@ -200,6 +201,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             is TranscodeRequest -> TranscodeOperations.plan(request, backend)
             is ConvertRequest -> if (GoogleHeicCreateOperations.accepts(request.target)) GoogleHeicConvertOperations.plan(request) else ConvertOperations.plan(request, backend)
             is CreateRequest -> when {
+                request.target.protocol == ProtocolIds.Apple -> AppleAssemblyOperations.plan(request)
                 GoogleHeicCreateOperations.accepts(request.target) -> GoogleHeicCreateOperations.plan(request)
                 request.edits?.replacementFrame != null -> CreateReplacementOperations.plan(request, backend)
                 request.edits?.trim != null -> CreateTrimOperations.plan(request, backend)

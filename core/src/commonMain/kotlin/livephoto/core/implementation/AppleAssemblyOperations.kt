@@ -7,10 +7,16 @@ import livephoto.core.bmff.*
 import livephoto.core.jpeg.*
 import kotlin.uuid.Uuid
 
-/** Finite ConvertTo only. Generic Create remains independently Planned. */
-internal object AppleConvertOperations {
+/** Shared finite assembler with distinct ordinary-media Create and live-source Convert gates. */
+internal object AppleAssemblyOperations {
     private val target = ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4"))
-    private data class Prepared(val image: SourceSession, val rewrite: JpegRewritePlan, val movie: AppleMoviePlan, val unknownMetadata: Boolean)
+    private data class AssemblyRequest(val target: ProtocolSelector, val preference: MediaPreference, val edits: EditSpec?,
+        val policy: MutationPolicy, val output: OutputTransaction, val context: Context, val creating: Boolean,
+        val sourceBindings: SourceBindingPolicy = SourceBindingPolicy.RejectAlreadyLive)
+    private fun ConvertRequest.assembly() = AssemblyRequest(target, preference, edits, policy, output, context, false)
+    private fun CreateRequest.assembly() = AssemblyRequest(target, preference, edits, policy, output, context, true, sourceBindings)
+    private data class Prepared(val image: SourceSession, val rewrite: JpegRewritePlan, val movie: AppleMoviePlan,
+        val unknownMetadata: Boolean, val snapshot: Snapshot)
 
     fun validateTarget(request: ConvertRequest) {
         if (request.target != target) fail("CAPABILITY_PLANNED", "Apple conversion currently requires the explicit jpeg-mp4 profile", Stage.Plan)
@@ -18,8 +24,10 @@ internal object AppleConvertOperations {
             fail("CAPABILITY_UNSUPPORTED", "Apple conversion media edits do not yet have an assembly preservation proof", Stage.Plan)
     }
 
-    private suspend fun prepare(request: ConvertRequest, original: SourceSession, inputs: Pair<BinarySource, BinarySource>, identifier: String): Prepared {
-        validateTarget(request)
+    private suspend fun prepare(request: AssemblyRequest, original: SourceSession?, inputs: Pair<BinarySource, BinarySource>, identifier: String): Prepared {
+        if (request.target != target) fail("CAPABILITY_PLANNED", "Apple assembly requires the explicit jpeg-mp4 profile", Stage.Plan)
+        if (request.edits?.trim != null || request.edits?.replacementFrame != null)
+            fail("CAPABILITY_UNSUPPORTED", "Apple assembly media edits lack an independent preservation proof", Stage.Plan)
         val context = request.context
         val caps = request.output.capabilities()
         if (!caps.assetSetAtomic || !caps.canReadStaged || request.policy.atomicity != Atomicity.AssetSetRequired ||
@@ -30,11 +38,17 @@ internal object AppleConvertOperations {
             fail("PRESERVATION_REQUIREMENT_FAILED", "Apple conversion constructs new carriers; whole-file exact extraction is not applicable", Stage.Plan)
         val budget = ParseBudget(context)
         val image = SourceSession.open(SourceSet.Single(inputs.first), context, budget).orThrow()
+        if (request.creating && image.bindings.isNotEmpty()) fail(
+            if (request.sourceBindings == SourceBindingPolicy.RejectAlreadyLive) "SOURCE_ALREADY_LIVE" else "CAPABILITY_UNSUPPORTED",
+            "Ordinary-media Apple Create cannot silently strip an existing live binding", Stage.Plan)
         val jpeg = image.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion currently requires JPEG", Stage.Plan)
         val jfif = ReplaceOperations.canonicalJfif(image)
         if (image.bindings.isNotEmpty() || jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown && it != jfif })
             fail("UNSAFE_METADATA_REWRITE", "Apple assembly cannot relocate unclassified APP or retain a source image binding", Stage.Plan)
         val videoReader = BinaryReader(inputs.second, context)
+        val videoIdentity = videoReader.identity().orThrow()
+        if (inputs.first === inputs.second || image.snapshot.identities.any { it.id == videoIdentity.id })
+            fail("INVALID_ARGUMENT", "Apple assembly source identities must be distinct", Stage.Plan)
         val video = BmffVideoProbe(videoReader, budget).probe(ByteRange(0uL, videoReader.identity().orThrow().size)).orThrow()
         if (video.container != VideoContainer.Mp4 || request.preference.imageFormat?.let { it != ImageFormat.Jpeg } == true ||
             request.preference.videoContainer?.let { it != video.container } == true ||
@@ -43,22 +57,28 @@ internal object AppleConvertOperations {
             request.preference.dynamicRange != DynamicRangePolicy.Preserve)
             fail("CAPABILITY_UNSUPPORTED", "Apple assembly only preserves existing JPEG/MP4 media and color semantics", Stage.Plan)
         val key = if (request.edits?.keyPosition != null) selectKey(video, request.edits.keyPosition).position!!
-            else original.inspection.keyPhoto.position ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion requires a known source key or an explicit selected frame", Stage.Plan)
+            else if (request.creating) selectKey(video, null).position!!
+            else original?.inspection?.keyPhoto?.position ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion requires a known source key or an explicit selected frame", Stage.Plan)
         val proof = AppleImagePatch.create(image.reader, identifier, budget).orThrow()
         val app = JpegRewrite.appSegment(0xe1, proof.payload).orThrow()
         val rewrite = JpegRewrite.plan(jpeg, listOf(JpegPatch(ByteRange(2uL, 0uL), app, appleProof = proof))).orThrow()
         val movie = AppleMovieAssembler.prepare(videoReader, identifier, key, budget).orThrow()
         if (checkedAdd(rewrite.outputLength, movie.byteLength) > context.limits.maxOutputBytes)
             fail("RESOURCE_LIMIT_EXCEEDED", "Apple pair exceeds the shared output budget", Stage.Plan)
-        val unknown = original.legacyPair != null || original.jpeg?.hasExif == true
+        val unknown = original?.legacyPair != null || original?.jpeg?.hasExif == true
         if (unknown && (request.policy.preservation == PreservationPolicy.Strict || Guarantee.MetadataPreserving in request.policy.requiredGuarantees))
             fail("PRESERVATION_REQUIREMENT_FAILED", "Source cleanup has unproved private metadata dependencies", Stage.Plan)
-        original.recheck(); image.recheck(); videoReader.validateIdentity().orThrow()
-        return Prepared(image, rewrite, movie, unknown)
+        original?.recheck(); image.recheck(); videoReader.validateIdentity().orThrow()
+        val identities = image.snapshot.identities + videoIdentity
+        val hash = Sha256()
+        for (identity in identities) for (field in listOf(identity.id.value, identity.generation.value, identity.size.toString(), identity.digest?.value ?: "")) {
+            val bytes = Bytes(field.encodeToByteArray()); hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes)
+        }
+        return Prepared(image, rewrite, movie, unknown, Snapshot(identities, GenerationToken(hash.finish().value)))
     }
 
     suspend fun plan(request: ConvertRequest, original: SourceSession, inputs: Pair<BinarySource, BinarySource>): CoreResult<ExecutionPlan> = attempt {
-        prepare(request, original, inputs, "00000000-0000-4000-8000-000000000000") // Read-only planning, no UUID entropy or output IO.
+        prepare(request.assembly(), original, inputs, "00000000-0000-4000-8000-000000000000") // Read-only planning, no UUID entropy or output IO.
         ExecutionPlan(original.snapshot, request.target, listOf(
             PlanStep(Stage.WriteProtocol, listOf(Operation.ConvertTo), emptyList(), "Assemble formal image CID and movie CID/timed sample; preserve retained coded tracks"),
             PlanStep(Stage.Verify, listOf(Operation.Validate), emptyList(), "Independently verify both staged assets and their matching pair before one commit")),
@@ -67,7 +87,22 @@ internal object AppleConvertOperations {
                 conditions = listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg-mp4-no-existing-exif-classified-movie-exact-key-asset-set-atomic")))))))
     }
 
-    suspend fun convert(request: ConvertRequest, original: SourceSession, inputs: Pair<BinarySource, BinarySource>, sourceChanges: List<Change>): CoreResult<OperationResult> = attempt {
+    suspend fun plan(request: CreateRequest): CoreResult<ExecutionPlan> = attempt {
+        RequestValidation.validate(request).orThrow()
+        val prepared = prepare(request.assembly(), null, request.image to request.video, "00000000-0000-4000-8000-000000000000")
+        ExecutionPlan(prepared.snapshot, request.target, listOf(
+            PlanStep(Stage.WriteProtocol, listOf(Operation.Create), emptyList(), "Ordinary media to matching Apple image/movie CID and exact key metadata sample; no source Live Photo required"),
+            PlanStep(Stage.Verify, listOf(Operation.Validate), emptyList(), "Independently reread both assets, retained coded media and complete pair before one commit")),
+            PreservationReport(), CapabilitySet(Availability.Conditional, listOf(DefaultLivePhotoCore().getProtocolCapabilities(request.target).operations.single { it.operation == Operation.Create })))
+    }
+    suspend fun create(request: CreateRequest): CoreResult<OperationResult> = attempt {
+        RequestValidation.validate(request).orThrow()
+        assemble(request.assembly(), null, request.image to request.video, emptyList()).orThrow()
+    }
+    suspend fun convert(request: ConvertRequest, original: SourceSession, inputs: Pair<BinarySource, BinarySource>, sourceChanges: List<Change>): CoreResult<OperationResult> =
+        assemble(request.assembly(), original, inputs, sourceChanges)
+
+    private suspend fun assemble(request: AssemblyRequest, original: SourceSession?, inputs: Pair<BinarySource, BinarySource>, sourceChanges: List<Change>): CoreResult<OperationResult> = attempt {
         val identifier = try { Uuid.random().toString() } catch (_: Exception) { fail("BACKEND_UNAVAILABLE", "Platform UUID generation failed", Stage.Plan) }
         val prepared = prepare(request, original, inputs, identifier)
         val image = prepared.image
@@ -75,6 +110,7 @@ internal object AppleConvertOperations {
         val context = request.context
         val app = prepared.rewrite.patches.single().replacement
         val size = image.reader.identity().orThrow().size
+        val originalReaders = original?.readers.orEmpty()
         var imageId: AssetId? = null
         var imageIdentity: SourceIdentity? = null
         var imageDigest: Digest? = null
@@ -105,10 +141,10 @@ internal object AppleConvertOperations {
                 val imageSource = request.output.openStaged(imageId ?: fail("POSTCONDITION_FAILED", "Apple image must be verified before video", Stage.Verify)).orThrow()
                 var aliasesInput = false
                 try {
-                    if ((original.readers + image.readers + movie.reader).any { it.source === imageSource }) { aliasesInput = true; fail("OUTPUT_ALIASES_INPUT", "Pair reader aliases input", Stage.Verify) }
+                    if ((originalReaders + image.readers + movie.reader).any { it.source === imageSource }) { aliasesInput = true; fail("OUTPUT_ALIASES_INPUT", "Pair reader aliases input", Stage.Verify) }
                     val imageReader = BinaryReader(imageSource, context)
                     val identity = imageReader.identity().orThrow()
-                    if ((original.readers + image.readers + movie.reader).any { it.identity().orThrow().id == identity.id }) { aliasesInput = true; fail("OUTPUT_ALIASES_INPUT", "Pair reader identity aliases input", Stage.Verify) }
+                    if ((originalReaders + image.readers + movie.reader).any { it.identity().orThrow().id == identity.id }) { aliasesInput = true; fail("OUTPUT_ALIASES_INPUT", "Pair reader identity aliases input", Stage.Verify) }
                     if (identity != imageIdentity || sha256Range(imageReader, ByteRange(0uL, identity.size)).orThrow() != imageDigest)
                         fail("POSTCONDITION_FAILED", "Apple primary image changed before joint verification", Stage.Verify)
                     val pair = SourceSession.open(SourceSet.Pair(imageSource, reader.source), context, ParseBudget(context)).orThrow()
@@ -119,7 +155,7 @@ internal object AppleConvertOperations {
                     AssetVerification(validation, records(id, false), pair.inspection.keyPhoto)
                 } finally { if (!aliasesInput) imageSource.close() }
             })
-        publish(request.output, request.policy, context, original.readers + image.readers + movie.reader, listOf(imageAsset, videoAsset), sourceChanges + listOf(
+        publish(request.output, request.policy, context, originalReaders + image.readers + movie.reader, listOf(imageAsset, videoAsset), sourceChanges + listOf(
             Change("apple:image:content-identifier", after = Value.Text(identifier), reason = "New requested Apple pair CID", requested = true),
             Change(APPLE_CID, after = Value.Text(identifier), reason = "Matching movie CID", requested = true),
             Change(APPLE_STILL_TIME, after = Value.Text("${movie.key.value}/${movie.key.timescale}"), reason = "Exact metadata-sample PTS, independent of zero marker payload", requested = true))).orThrow()

@@ -56,6 +56,19 @@ class AppleConvertIntegrationTest {
                         val original = BinaryReader(input, context)
                         val originalFacts = BmffVideoProbe(original).probe(ByteRange(0uL, original.identity().orThrow().size)).orThrow()
                         val before = sha256Range(original, originalFacts.range).orThrow()
+                        val createdApple = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, input,
+                            ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4")), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)),
+                            policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-create-$index"), context = context)).orThrow()
+                        try {
+                            val createdMovie = BinaryReader(createdApple.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!, context)
+                            val createdFacts = BmffVideoProbe(createdMovie, allowTimedMetadata = true).probe(ByteRange(0uL, createdMovie.identity().orThrow().size)).orThrow()
+                            RemuxVerification.verify(original, originalFacts, createdMovie, createdFacts.copy(tracks = createdFacts.tracks.filter { it.handler != "meta" }))
+                            val createdPath = directory.resolve("created apple movie $index.mp4"); owned.add(createdPath)
+                            save(createdMovie.source, createdPath); decode(createdPath)
+                            val createdPair = SourceSet.Pair(createdApple.output.assets[0].readableSource!!, createdMovie.source)
+                            assertEquals(0, core.inspect(ReadRequest(createdPair, context)).orThrow().keyPhoto.position!!.compareTo(Time(40, 1000u)))
+                            assertTrue(createdApple.execution.none { it.transcoded || it.remuxed })
+                        } finally { createdApple.output.assets.forEach { it.readableSource?.close() } }
                         val carrier = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, input, ProtocolSelector(ProtocolIds.GoogleV2),
                             edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
                             output = MemoryOutputTransaction(context, "apple-real-carrier-$index"), context = context)).orThrow()

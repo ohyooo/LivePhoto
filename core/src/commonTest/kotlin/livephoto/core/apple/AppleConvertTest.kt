@@ -53,7 +53,9 @@ class AppleConvertTest {
         }
         val caps = core.getProtocolCapabilities(target).operations
         assertEquals(Implementation.Experimental, caps.single { it.operation == Operation.ConvertTo }.implementation)
-        assertEquals(Implementation.Planned, caps.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Experimental, caps.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Planned, core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple)).operations.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Planned, core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple, ProfileId("heic-mov"))).operations.single { it.operation == Operation.Create }.implementation)
     }
 
     @Test fun secondAssetFailureAndStagedMetadataCorruptionNeverPublishHalfPair(): Unit = runImmediate {
