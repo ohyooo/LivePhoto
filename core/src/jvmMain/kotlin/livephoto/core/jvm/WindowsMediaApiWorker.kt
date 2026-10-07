@@ -10,13 +10,17 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
-/** Isolated OS API bootstrap. This is NOT a decoder or an advertised MediaBackend capability. */
+/** Isolated OS API worker. Internal decode evidence is not a public MediaBackend capability. */
 internal object WindowsMediaApiWorker {
     @JvmStatic fun main(args: Array<String>) {
-        if (!args.contentEquals(arrayOf("--preflight"))) {
+        val preflight = args.contentEquals(arrayOf("--preflight"))
+        val decode = if (!preflight) WindowsNativeVideoDecode.request(args) else null
+        if (!preflight && decode == null) {
             println("WINDOWS_MEDIA_API_PREFLIGHT=INVALID_ARGUMENT")
             exitProcess(2)
         }
+        var enteredDecode = false
+        var decodeResult: String? = null
         try {
             check(System.getProperty("os.name").startsWith("Windows") && System.getProperty("os.arch") in setOf("amd64", "x86_64"))
             // Do not rely on the JDK's warning-only default or enable access in the primary CLI process.
@@ -48,16 +52,25 @@ internal object WindowsMediaApiWorker {
                     comStarted = true
                     check((startup.invokeWithArguments(0x00020070, 1) as Int) >= 0) // SDK MF_VERSION and MFSTARTUP_NOSOCKET.
                     mfStarted = true
+                    if (decode != null) {
+                        enteredDecode = true
+                        decodeResult = WindowsNativeVideoDecode.run(decode, arena, mf, read, library("kernel32.dll"))
+                    }
                 } finally {
                     try { if (mfStarted) check((shutdown.invokeWithArguments() as Int) >= 0) }
                     finally { if (comStarted) uninitialize.invokeWithArguments() }
                 }
             }
-            println("WINDOWS_MEDIA_API_PREFLIGHT=SUCCESS scope=runtime-bootstrap-not-media-decode")
+            if (preflight) println("WINDOWS_MEDIA_API_PREFLIGHT=SUCCESS scope=runtime-bootstrap-not-media-decode")
+            else println(decodeResult ?: error("Missing decode evidence"))
         } catch (failure: Throwable) {
             // A bounded worker diagnostic, not an input path, user content or a simulated decoder result.
-            println("WINDOWS_MEDIA_API_PREFLIGHT=UNAVAILABLE reason=${failure.javaClass.simpleName}")
-            exitProcess(3)
+            val unavailable = !enteredDecode
+            val site = failure.stackTrace.firstOrNull { it.className.startsWith("livephoto.core.jvm.WindowsNativeVideoDecode") }
+                ?.let { " line=${it.lineNumber}" } ?: ""
+            val hresult = (failure as? WindowsNativeVideoDecode.Failure)?.let { " ${it.diagnostic}" } ?: ""
+            println("${if (unavailable) "WINDOWS_MEDIA_API_PREFLIGHT=UNAVAILABLE" else "WINDOWS_MEDIA_API_DECODE=FAILED"} reason=${failure.javaClass.simpleName}$site$hresult")
+            exitProcess(if (unavailable) 3 else 4)
         }
     }
 }

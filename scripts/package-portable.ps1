@@ -88,6 +88,39 @@ try {
             throw "Portable existing-FFmpeg decode failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=SUCCESS'
+        if ($IsWindows -and $workerExit -eq 0) {
+            # Explicit fixture encoding only: the OS worker itself never launches FFmpeg.
+            # Microsoft H.264 decoding requires at least 48x48, unlike the smaller Core fixtures.
+            $ptsBytes = [Collections.Generic.List[byte]]::new()
+            foreach ($pts in @([long]0, [long]400000, [long]800000, [long]1200000)) {
+                $bytes = [BitConverter]::GetBytes($pts)
+                if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($bytes) }
+                $ptsBytes.AddRange($bytes)
+            }
+            $ptsHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($ptsBytes.ToArray())).ToLowerInvariant()
+            foreach ($bFrames in @(0, 2)) {
+                $osFixture = Join-Path $verify "OS AVC B $bFrames fixture.mp4"
+                & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=64x64:rate=25' -frames:v 4 -c:v libx264 -preset medium -bf $bFrames -g 4 -pix_fmt yuv420p $osFixture
+                if ($LASTEXITCODE -ne 0) { throw 'Portable OS decode fixture generation failed.' }
+                $osHash = (Get-FileHash $osFixture).Hash
+                $start = [Diagnostics.ProcessStartInfo]::new($mediaWorker)
+                $start.UseShellExecute = $false
+                $start.RedirectStandardOutput = $true
+                $start.RedirectStandardError = $true
+                foreach ($argument in @('--decode-video', $osFixture, '4', '65536', '128000000')) { $start.ArgumentList.Add($argument) }
+                $process = [Diagnostics.Process]::Start($start)
+                try {
+                    $stdout = $process.StandardOutput.ReadToEndAsync()
+                    $stderr = $process.StandardError.ReadToEndAsync()
+                    if (-not $process.WaitForExit(30000)) { $process.Kill($true); throw 'Portable OS decoder timed out.' }
+                    $trace = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
+                    if ($process.ExitCode -ne 0 -or $trace.Length -gt 65536 -or
+                        $trace -notmatch "WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=4 width=64 height=64 ptsSha256=$ptsHash" -or
+                        $osHash -ne (Get-FileHash $osFixture).Hash) { throw "Portable OS decoder failed independent frame/timeline/source checks: $trace" }
+                } finally { $process.Dispose() }
+            }
+            Write-Host 'PORTABLE_WINDOWS_API_DECODE=SUCCESS scope=selected-avc-video-not-audio-or-device'
+        }
         # Explicitly generated fixture: its encoding is not part of the remux operation.
         $remuxFixture = Join-Path $verify 'remux fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'color=c=black:s=16x16:r=25' -frames:v 4 -c:v libx264 -preset ultrafast -bf 0 -g 2 -pix_fmt yuv420p -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $remuxFixture

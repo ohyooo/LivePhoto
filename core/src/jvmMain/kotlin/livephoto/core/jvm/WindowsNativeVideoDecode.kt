@@ -1,0 +1,186 @@
+package livephoto.core.jvm
+
+import java.lang.foreign.*
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.MessageDigest
+import java.util.UUID
+
+/** Narrow internal SourceReader experiment, confined to the native-enabled worker process. */
+internal object WindowsNativeVideoDecode {
+    class Failure(val diagnostic: String) : Exception()
+    data class Request(val path: Path, val maxFrames: Int, val maxBuffer: Int, val maxFile: Long)
+
+    fun request(args: Array<String>): Request? = try {
+        if (args.size != 5 || args[0] != "--decode-video") null else {
+            val path = Path.of(args[1])
+            val frames = args[2].toIntOrNull()
+            val buffer = args[3].toIntOrNull()
+            val file = args[4].toLongOrNull()
+            if (!path.isAbsolute || frames == null || frames !in 1..10_000 ||
+                buffer == null || buffer !in 1..32_000_000 || file == null || file !in 1..128_000_000) null
+            else Request(path, frames, buffer, file)
+        }
+    } catch (_: Exception) { null }
+
+    private val major = "48eba18e-f8c9-4687-bf11-0a74c9f96a8f"
+    private val subtype = "f7e34c9a-42e8-4714-b74b-cb29d72c35e5"
+    private val video = "73646976-0000-0010-8000-00aa00389b71"
+    private val h264 = "34363248-0000-0010-8000-00aa00389b71"
+    private val nv12 = "3231564e-0000-0010-8000-00aa00389b71"
+    private val frameSize = "1652c33d-d6b2-4012-b834-72030849a37d"
+    private const val FIRST_VIDEO = -4
+
+    fun run(request: Request, arena: Arena, mf: SymbolLookup, read: SymbolLookup, kernel: SymbolLookup): String {
+        // No URLs or extension-based trust. A caller must provide an existing local file within bounds.
+        val path = request.path.toRealPath()
+        check(Files.isRegularFile(path) && Files.size(path) in 1..request.maxFile)
+        val api = Api(arena)
+        // The worker's committed native + managed memory is bounded independently of its JVM heap.
+        val job = api.export(kernel, "CreateJobObjectW", ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
+            .invokeWithArguments(MemorySegment.NULL, MemorySegment.NULL) as MemorySegment
+        check(job.address() != 0L)
+        try {
+            val limits = arena.allocate(144, 8)
+            limits.set(ValueLayout.JAVA_INT, 16, 0x100) // JOB_OBJECT_LIMIT_PROCESS_MEMORY, no kill-on-close flag.
+            limits.set(ValueLayout.JAVA_LONG, 112, 512L * 1024 * 1024)
+            check((api.export(kernel, "SetInformationJobObject", ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)
+                .invokeWithArguments(job, 9, limits, 144) as Int) != 0)
+            check((api.export(kernel, "AssignProcessToJobObject", ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
+                .invokeWithArguments(job, MemorySegment.ofAddress(-1L)) as Int) != 0)
+            return decode(request, path, api, mf, read)
+        } finally {
+            check((api.export(kernel, "CloseHandle", ValueLayout.JAVA_INT, ValueLayout.ADDRESS).invokeWithArguments(job) as Int) != 0)
+        }
+    }
+
+    private fun decode(request: Request, path: Path, api: Api, mf: SymbolLookup, read: SymbolLookup): String {
+        val attributes = api.pointer { out -> api.hr(api.export(mf, "MFCreateAttributes", ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS, ValueLayout.JAVA_INT).invokeWithArguments(out, 1)) }
+        try {
+            api.hr(api.method(attributes, 21, ValueLayout.ADDRESS, ValueLayout.JAVA_INT).invokeWithArguments(attributes,
+                api.guid("aa456cfd-3943-4a1e-a77d-1838c0ea2e35"), 1)) // disable DXVA, software-only.
+            val text = path.toString()
+            check(text.length <= 32_760)
+            val wide = api.arena.allocate((text.length + 1L) * 2, 2)
+            text.forEachIndexed { i, c -> wide.set(ValueLayout.JAVA_SHORT, i * 2L, c.code.toShort()) }
+            val reader = api.pointer { out -> api.hr(api.export(read, "MFCreateSourceReaderFromURL", ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS).invokeWithArguments(wide, attributes, out)) }
+            try {
+                api.hr(api.method(reader, 4, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT).invokeWithArguments(reader, -2, 0))
+                api.hr(api.method(reader, 4, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT).invokeWithArguments(reader, FIRST_VIDEO, 1))
+                val native = api.pointer { out -> api.hr(api.method(reader, 5, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                    ValueLayout.ADDRESS).invokeWithArguments(reader, FIRST_VIDEO, 0, out)) }
+                try {
+                    check(api.getGuid(native, major) == video && api.getGuid(native, subtype) == h264)
+                    api.dimensions(native, request.maxBuffer)
+                } finally { api.release(native) }
+                val type = api.pointer { out -> api.hr(api.export(mf, "MFCreateMediaType", ValueLayout.JAVA_INT,
+                    ValueLayout.ADDRESS).invokeWithArguments(out)) }
+                try {
+                    for ((key, value) in listOf(major to video, subtype to nv12)) api.hr(api.method(type, 24,
+                        ValueLayout.ADDRESS, ValueLayout.ADDRESS).invokeWithArguments(type, api.guid(key), api.guid(value)))
+                    api.hr(api.method(reader, 7, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
+                        .invokeWithArguments(reader, FIRST_VIDEO, MemorySegment.NULL, type))
+                } finally { api.release(type) }
+                fun current(): Pair<Int, Int> {
+                    val decoded = api.pointer { out -> api.hr(api.method(reader, 6, ValueLayout.JAVA_INT,
+                        ValueLayout.ADDRESS).invokeWithArguments(reader, FIRST_VIDEO, out)) }
+                    try {
+                        check(api.getGuid(decoded, major) == video && api.getGuid(decoded, subtype) == nv12)
+                        return api.dimensions(decoded, request.maxBuffer)
+                    } finally { api.release(decoded) }
+                }
+                val dimensions = current()
+                val actual = api.arena.allocate(ValueLayout.JAVA_INT)
+                val flags = api.arena.allocate(ValueLayout.JAVA_INT)
+                val timestamp = api.arena.allocate(ValueLayout.JAVA_LONG)
+                val sampleTime = api.arena.allocate(ValueLayout.JAVA_LONG)
+                val length = api.arena.allocate(ValueLayout.JAVA_INT)
+                val out = api.arena.allocate(ValueLayout.ADDRESS)
+                val digest = MessageDigest.getInstance("SHA-256")
+                var frames = 0; var previous = -1L; var ended = false
+                for (iteration in 0 until request.maxFrames * 4 + 32) {
+                    out.set(ValueLayout.ADDRESS, 0, MemorySegment.NULL)
+                    val status = api.method(reader, 9, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
+                        .invokeWithArguments(reader, FIRST_VIDEO, 0, actual, flags, timestamp, out)
+                    val sample = out.get(ValueLayout.ADDRESS, 0)
+                    try {
+                        api.hr(status)
+                        val bits = flags.get(ValueLayout.JAVA_INT, 0)
+                        check(bits and (2 or 16 or 32 or 256).inv() == 0) // Reject error/new-stream/unknown effects.
+                        if (bits and (16 or 32) != 0) check(current() == dimensions)
+                        if (sample.address() != 0L) {
+                            check(++frames <= request.maxFrames)
+                            api.hr(api.method(sample, 35, ValueLayout.ADDRESS).invokeWithArguments(sample, sampleTime))
+                            api.hr(api.method(sample, 45, ValueLayout.ADDRESS).invokeWithArguments(sample, length))
+                            val pts = sampleTime.get(ValueLayout.JAVA_LONG, 0)
+                            check(pts == timestamp.get(ValueLayout.JAVA_LONG, 0) && pts >= 0 && pts >= previous)
+                            check(length.get(ValueLayout.JAVA_INT, 0) in 1..request.maxBuffer)
+                            previous = pts
+                            digest.update(ByteBuffer.allocate(8).putLong(pts).array())
+                        }
+                        if (bits and 2 != 0) { ended = true; break }
+                    } finally { if (sample.address() != 0L) api.release(sample) }
+                }
+                val finalDimensions = current()
+                if (!ended || frames == 0 || finalDimensions != dimensions)
+                    throw Failure("state_frames=${frames}_eos=${ended}_size=${dimensions.first}x${dimensions.second}_final=${finalDimensions.first}x${finalDimensions.second}")
+                val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+                return "WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=$frames width=${dimensions.first} height=${dimensions.second} ptsSha256=$hash"
+            } finally { api.release(reader) }
+        } finally { api.release(attributes) }
+    }
+
+    private class Api(val arena: Arena) {
+        private val linker = Linker.nativeLinker()
+        fun export(lib: SymbolLookup, name: String, result: MemoryLayout, vararg args: MemoryLayout) =
+            linker.downcallHandle(lib.find(name).orElseThrow(), FunctionDescriptor.of(result, *args))
+        fun method(pointer: MemorySegment, slot: Int, vararg args: MemoryLayout): java.lang.invoke.MethodHandle {
+            check(pointer.address() != 0L && slot in 0..46)
+            val vtable = pointer.reinterpret(8).get(ValueLayout.ADDRESS, 0)
+            check(vtable.address() != 0L)
+            val address = vtable.reinterpret((slot + 1L) * 8).get(ValueLayout.ADDRESS, slot * 8L)
+            check(address.address() != 0L)
+            return linker.downcallHandle(address, FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, *args))
+        }
+        fun hr(result: Any?) { if ((result as Int) < 0) throw Failure("HRESULT_${result.toUInt().toString(16).padStart(8, '0')}") }
+        fun release(pointer: MemorySegment) { method(pointer, 2).invokeWithArguments(pointer) }
+        fun pointer(call: (MemorySegment) -> Unit): MemorySegment {
+            val out = arena.allocate(ValueLayout.ADDRESS)
+            try { call(out) } catch (failure: Throwable) {
+                val value = out.get(ValueLayout.ADDRESS, 0)
+                if (value.address() != 0L) release(value)
+                throw failure
+            }
+            return out.get(ValueLayout.ADDRESS, 0).also { check(it.address() != 0L) }
+        }
+        fun guid(text: String): MemorySegment {
+            val id = UUID.fromString(text)
+            val bytes = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt((id.mostSignificantBits ushr 32).toInt()).putShort((id.mostSignificantBits ushr 16).toShort())
+                .putShort(id.mostSignificantBits.toShort()).order(ByteOrder.BIG_ENDIAN).putLong(id.leastSignificantBits).array()
+            return arena.allocate(16, 4).also { it.copyFrom(MemorySegment.ofArray(bytes)) }
+        }
+        fun getGuid(pointer: MemorySegment, key: String): String {
+            val out = arena.allocate(16, 4)
+            hr(method(pointer, 10, ValueLayout.ADDRESS, ValueLayout.ADDRESS).invokeWithArguments(pointer, guid(key), out))
+            val buffer = ByteBuffer.wrap(out.toArray(ValueLayout.JAVA_BYTE)).order(ByteOrder.LITTLE_ENDIAN)
+            val msb = ((buffer.int.toLong() and 0xffffffffL) shl 32) or ((buffer.short.toLong() and 65535L) shl 16) or (buffer.short.toLong() and 65535L)
+            return UUID(msb, buffer.order(ByteOrder.BIG_ENDIAN).long).toString()
+        }
+        fun dimensions(type: MemorySegment, maxBuffer: Int): Pair<Int, Int> {
+            val out = arena.allocate(ValueLayout.JAVA_LONG)
+            hr(method(type, 8, ValueLayout.ADDRESS, ValueLayout.ADDRESS).invokeWithArguments(type, guid(frameSize), out))
+            val packed = out.get(ValueLayout.JAVA_LONG, 0)
+            val width = (packed ushr 32).toInt(); val height = packed.toInt()
+            // Official software H.264 decoder limits; do not report EOS-with-no-frames as success.
+            check(width in 48..4096 && height in 48..2304 && width.toLong() * height * 3 / 2 <= maxBuffer)
+            return width to height
+        }
+    }
+}
