@@ -19,6 +19,7 @@ internal object ConvertOperations {
         val targetPlan = if (prepared != null) {
             val create = CreateRequest(prepared.first, prepared.second, request.target, request.preference, request.edits, policy = request.policy, output = request.output, context = request.context)
             when {
+                request.target.protocol == ProtocolIds.Apple -> AppleConvertOperations.plan(request, session, prepared).orThrow()
                 request.edits?.replacementFrame != null -> CreateReplacementOperations.plan(create, backend, session.inspection.keyPhoto).orThrow()
                 request.edits?.trim != null -> CreateTrimOperations.plan(create, backend, session.inspection.keyPhoto).orThrow()
                 else -> GoogleOperations.plan(create).orThrow()
@@ -55,6 +56,7 @@ internal object ConvertOperations {
         }
         val changes = if (session.applePair != null) ApplePairOperations.changes(session) else session.inspection.metadata.filter { it.owner == Ownership.SourceProtocol }.map { Change(it.selector, it.value, null, "Remove confirmed source binding before conversion", true) } +
             if (session.legacyPair != null) listOf(Change("vivo:legacy:image-tail", reason = "Remove confirmed source tail", requested = true), Change("vivo:legacy:video-uuid", reason = "Remove terminal owned UUID", requested = true)) else emptyList()
+        if (request.target.protocol == ProtocolIds.Apple) return@attempt AppleConvertOperations.convert(request, session, prepared, changes).orThrow()
         val create = CreateRequest(prepared.first, prepared.second, request.target, request.preference, request.edits, policy = request.policy, output = request.output, context = request.context)
         val metadataUnproven = session.jpeg!!.hasExif || session.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true || session.legacyPair != null
         if (request.edits?.replacementFrame != null) CreateReplacementOperations.create(create, backend, session.readers, changes, session.inspection.keyPhoto, metadataUnproven).orThrow()
@@ -75,7 +77,8 @@ internal object ConvertOperations {
             if (request.edits != null || request.preference != MediaPreference()) fail("INVALID_ARGUMENT", "PreserveAsIs does not apply requested media edits", Stage.Plan)
             return null
         }
-        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern))
+        if (request.target.protocol == ProtocolIds.Apple) AppleConvertOperations.validateTarget(request)
+        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern, ProtocolIds.Apple))
             fail("CAPABILITY_UNSUPPORTED", "Conversion requires an implemented JPEG target with classified key semantics", Stage.Plan)
         if (request.edits?.trim != null && !allowTrim || request.edits?.replacementFrame != null && !allowReplacement) fail("CAPABILITY_UNSUPPORTED", "Conversion media edits require backend orchestration", Stage.Plan)
         if (session.applePair != null) {
