@@ -122,4 +122,33 @@ class CliTest {
         assertTrue(assertNotNull(received).updateKeyPosition)
         assertEquals(PreservationPolicy.Strict, assertNotNull(received).policy.preservation)
     }
+    @Test fun createAndConvertTrimEditsAreOnlyConstructedAsSourceDomainRequests() = blocking {
+        var create: CreateRequest? = null; var convert: ConvertRequest? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun create(request: CreateRequest): CoreResult<OperationResult> { create = request; return failure }
+            override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> { convert = request; return failure }
+        }
+        val common = listOf("--target", "google.motionphoto.v2", "--output-dir", "not-created", "--start-us", "80000", "--end-us", "160000", "--mode", "LosslessOnly", "--frame-index", "3", "--key-outside", "ClampExplicitly")
+        assertEquals(3, Cli(core).run(listOf("create", "--image", "not-opened-image", "--video", "not-opened-video") + common) {})
+        val createdRequest = assertNotNull(create)
+        val edits = assertNotNull(createdRequest.edits)
+        val trim = assertNotNull(edits.trim)
+        assertEquals(TimeRange(Time(80000, 1_000_000u), Time(160000, 1_000_000u)), trim.range)
+        assertEquals(TrimMode.LosslessOnly, trim.mode); assertEquals(KeyOutsidePolicy.ClampExplicitly, trim.keyOutside)
+        assertEquals(CoverPosition.FrameIndex(3uL), edits.keyPosition)
+        assertEquals(TranscodePolicy.Forbid, createdRequest.policy.transcode)
+        assertEquals(3, Cli(core).run(listOf("convert", "--input", "not-opened", "--same-target", "Normalize") + common) {})
+        val convertedRequest = assertNotNull(convert)
+        assertEquals(edits, convertedRequest.edits); assertEquals(SameTargetPolicy.Normalize, convertedRequest.sameTarget)
+    }
+    @Test fun pureCreateDoesNotDiscoverMediaToolsAndIncompleteTrimCannotReachCore() = blocking {
+        var calls = 0; var discoveries = 0
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() { override suspend fun create(request: CreateRequest): CoreResult<OperationResult> { calls++; return failure } }
+        val cli = Cli(core, discover = { discoveries++; BackendDiscovery(null, null, emptyList()) })
+        val args = listOf("create", "--image", "not-opened-image", "--video", "not-opened-video", "--target", "google.motionphoto.v2", "--output-dir", "not-created")
+        assertEquals(3, Cli(discover = { discoveries++; BackendDiscovery(null, null, emptyList()) }).run(args) {})
+        assertEquals(0, discoveries)
+        assertEquals(3, cli.run(args) {}); assertEquals(1, calls); assertEquals(0, discoveries)
+        assertEquals(2, cli.run(args + listOf("--start-us", "0")) {}); assertEquals(1, calls)
+    }
 }

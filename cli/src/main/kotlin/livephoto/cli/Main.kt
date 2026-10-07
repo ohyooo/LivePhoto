@@ -18,6 +18,8 @@ Read/source: --input FILE [--pair-video FILE]
 Create: --image FILE --video FILE --target PROTOCOL
 Write: --output-dir NEW_DIRECTORY (assets published together under assets/)
 Convert: --target PROTOCOL [--profile PROFILE]
+Create/convert edits: [--start-us N --end-us N --mode LosslessPreferred] [--frame-index N | --time-us N]
+Convert: [--same-target PreserveAsIs|Normalize]; trim [--key-outside Reject|ClampExplicitly|ClearIfSupported]
 Extract: [--resources ID,ID] [--raw-carrier]
 Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
 Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for frame index]
@@ -70,12 +72,13 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             val inputKeys = setOf("input", "pair-video")
             val positionKeys = setOf("frame-index", "time-us", "track-id")
             val targetKeys = setOf("target", "profile")
+            val trimKeys = setOf("start-us", "end-us", "mode", "key-outside")
             val mediaCommands = setOf("probe", "media-capabilities", "extract-frame", "replace-cover", "trim", "remux", "transcode")
-            val allowed = common + (if (command in mediaCommands) setOf("ffmpeg") else emptySet()) + when (command) {
+            val allowed = common + (if (command in mediaCommands + setOf("create", "convert")) setOf("ffmpeg") else emptySet()) + when (command) {
                 "capabilities" -> targetKeys
                 "media-capabilities" -> emptySet()
-                "create" -> setOf("image", "video", "output-dir", "strict") + targetKeys
-                "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict")
+                "create" -> setOf("image", "video", "output-dir", "strict") + targetKeys + trimKeys + positionKeys
+                "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target") + trimKeys + positionKeys
                 "extract" -> inputKeys + setOf("output-dir", "resources", "raw-carrier")
                 "split" -> inputKeys + setOf("output-dir", "strict")
                 "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues")
@@ -90,7 +93,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 else -> inputKeys
             }
             require(options.keys.all { it in allowed }) { "Unknown or inapplicable option: ${options.keys.first { it !in allowed }}" }
-            val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options)
+            val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
+                command in setOf("create", "convert") && (options.keys.any { it in trimKeys } || "ffmpeg" in options)
             val discovery = if (providedCore == null && needsBackend) discover(options["ffmpeg"]?.let(Path::of)) else null
             val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
             fun required(name: String): String = options[name] ?: errorArgument("Missing --$name")
@@ -107,6 +111,13 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 return options["frame-index"]?.let { CoverPosition.FrameIndex(it.toULong(), options["track-id"]?.let(::TrackId)) }
                     ?: CoverPosition.Timestamp(Time(required("time-us").toLong(), 1_000_000u))
             }
+            fun edits(): EditSpec? {
+                val trim = if (options.keys.any { it in trimKeys }) TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)),
+                    mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred,
+                    keyOutside = options["key-outside"]?.let(KeyOutsidePolicy::valueOf) ?: KeyOutsidePolicy.Reject) else null
+                val key = if (options.keys.any { it in positionKeys }) position() else null
+                return if (trim == null && key == null) null else EditSpec(trim = trim, keyPosition = key)
+            }
             val policy = MutationPolicy(preservation = if (options.containsKey("strict")) PreservationPolicy.Strict else PreservationPolicy.BestEffortWithReport,
                 transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid)
             val result: CoreResult<*> = when (command) {
@@ -119,8 +130,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "validate" -> core.validate(ValidationRequest(source(), layers = options["layers"]?.split(',')?.map { Layer.valueOf(it) } ?: listOf(Layer.Structure, Layer.Protocol, Layer.Media), context = context))
                 "get-key" -> core.getKeyPhotoPosition(ReadRequest(source(), context))
                 "probe" -> core.probe(ProbeRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), decodeCheck = "decode-check" in options, context = context))
-                "create" -> core.create(CreateRequest(file("image"), file("video"), target(), policy = policy, output = destination(), context = context))
-                "convert" -> core.convert(ConvertRequest(source(), target(), policy = policy, output = destination(), context = context))
+                "create" -> core.create(CreateRequest(file("image"), file("video"), target(), edits = edits(), policy = policy, output = destination(), context = context))
+                "convert" -> core.convert(ConvertRequest(source(), target(), edits = edits(), sameTarget = options["same-target"]?.let(SameTargetPolicy::valueOf) ?: SameTargetPolicy.PreserveAsIs, policy = policy, output = destination(), context = context))
                 "extract" -> core.extract(ExtractRequest(source(), options["resources"]?.split(',')?.map(::ResourceId) ?: emptyList(), includeRawCarrier = options.containsKey("raw-carrier"), output = destination(), context = context))
                 "split" -> core.split(SplitRequest(source(), policy = policy, output = destination(), context = context))
                 "repair" -> {

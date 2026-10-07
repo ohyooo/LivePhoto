@@ -138,6 +138,26 @@ try {
         $trimDecode = & $launcher probe --input $trim.operation.output.assets[0].path --decode-check
         if ($LASTEXITCODE -ne 0) { throw "Portable trimmed video could not be decoded: $trimDecode" }
         Write-Host 'PORTABLE_FFMPEG_TRIM=SUCCESS'
+        $trimCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $remuxFixture --target google.microvideo.v1 --start-us 80000 --end-us 160000 --mode LosslessOnly --frame-index 3 --output-dir (Join-Path $verify 'trim create result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real trim Create failed: $trimCreateJson" }
+        $trimCreate = ($trimCreateJson | ConvertFrom-Json).result
+        if (([decimal]$trimCreate.keyPhoto.position.value * 1000000 / $trimCreate.keyPhoto.position.timescale) -ne 40000 -or
+            -not ($trimCreate.execution | Where-Object stage -eq 'Trim') -or ($trimCreate.execution | Where-Object transcoded -eq $true)) { throw 'Portable Create did not map the source key through actual trim.' }
+        $fullCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $remuxFixture --target google.microvideo.v1 --frame-index 3 --output-dir (Join-Path $verify 'trim full carrier')
+        if ($LASTEXITCODE -ne 0) { throw "Portable full source carrier failed: $fullCarrierJson" }
+        $fullCarrier = ($fullCarrierJson | ConvertFrom-Json).result.output.assets[0].path
+        $trimConvertJson = & $launcher convert --input $fullCarrier --target google.motionphoto.v2 --start-us 80000 --end-us 160000 --mode LosslessOnly --output-dir (Join-Path $verify 'trim convert result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real trim Convert failed: $trimConvertJson" }
+        $trimConvert = ($trimConvertJson | ConvertFrom-Json).result
+        if (([decimal]$trimConvert.keyPhoto.position.value * 1000000 / $trimConvert.keyPhoto.position.timescale) -ne 40000 -or
+            -not ($trimConvert.preservation.changes | Where-Object selector -eq 'videoTrim')) { throw 'Portable Convert did not preserve and rebase the inherited key.' }
+        $createdVideoJson = & $launcher extract --input $trimCreate.output.assets[0].path --output-dir (Join-Path $verify 'trim create extracted')
+        if ($LASTEXITCODE -ne 0) { throw 'Portable trimmed Create extraction failed.' }
+        $convertedVideoJson = & $launcher extract --input $trimConvert.output.assets[0].path --output-dir (Join-Path $verify 'trim convert extracted')
+        if ($LASTEXITCODE -ne 0 -or (Get-FileHash ($createdVideoJson | ConvertFrom-Json).result.output.assets[0].path).Hash -ne (Get-FileHash ($convertedVideoJson | ConvertFrom-Json).result.output.assets[0].path).Hash) {
+            throw 'Portable Create/Convert did not embed the same verified derived video.'
+        }
+        Write-Host 'PORTABLE_FFMPEG_CREATE_CONVERT_TRIM=SUCCESS'
     } else {
         if ($LASTEXITCODE -ne 3 -or ($probeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
             throw "Portable missing-backend gate failed: $probeJson"
@@ -160,6 +180,9 @@ try {
         $transcodeJson = & $launcher transcode --input $referenceVideo --codec Avc --container Mp4 --allow-transcode --output-dir (Join-Path $verify 'disabled transcode')
         if ($LASTEXITCODE -ne 3 -or ($transcodeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend transcode gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_TRANSCODE=UNAVAILABLE'
+        $trimCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.microvideo.v1 --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim create')
+        if ($LASTEXITCODE -ne 3 -or ($trimCreateJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trimmed Create gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_CREATE_TRIM=UNAVAILABLE'
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }

@@ -11,13 +11,15 @@ import livephoto.core.jpeg.*
 import livephoto.core.apple.*
 
 internal object ConvertOperations {
-    suspend fun plan(request: ConvertRequest): CoreResult<ExecutionPlan> = attempt {
+    suspend fun plan(request: ConvertRequest, backend: MediaBackend? = null): CoreResult<ExecutionPlan> = attempt {
         RequestValidation.validate(request).orThrow()
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
-        val prepared = prepare(request, session, budget)
-        val targetPlan = if (prepared != null) GoogleOperations.plan(CreateRequest(prepared.first, prepared.second, request.target,
-            request.preference, request.edits, policy = request.policy, output = request.output, context = request.context)).orThrow() else null
+        val prepared = prepare(request, session, budget, allowTrim = request.edits?.trim != null)
+        val targetPlan = if (prepared != null) {
+            val create = CreateRequest(prepared.first, prepared.second, request.target, request.preference, request.edits, policy = request.policy, output = request.output, context = request.context)
+            if (request.edits?.trim != null) CreateTrimOperations.plan(create, backend, session.inspection.keyPhoto).orThrow() else GoogleOperations.plan(create).orThrow()
+        } else null
         val outputCaps = request.output.capabilities()
         if (!outputCaps.canReadStaged || request.policy.atomicity == Atomicity.AssetSetRequired && !outputCaps.assetSetAtomic ||
             request.policy.existingOutput == ExistingOutput.Replace && !outputCaps.replacesAtomically)
@@ -31,11 +33,11 @@ internal object ConvertOperations {
                 verification = listOf(Verification.SourceReviewed)))))
     }
 
-    suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> = attempt {
+    suspend fun convert(request: ConvertRequest, backend: MediaBackend? = null): CoreResult<OperationResult> = attempt {
         RequestValidation.validate(request).orThrow()
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
-        val prepared = prepare(request, session, budget)
+        val prepared = prepare(request, session, budget, allowTrim = request.edits?.trim != null)
         if (prepared == null) {
             val selectedReaders = session.applePair?.let { listOf(it.imageReader, it.videoReader) } ?: session.legacyPair?.let { listOf(it.imageReader, it.videoReader) } ?: session.readers
             val assets = selectedReaders.map { reader ->
@@ -49,13 +51,14 @@ internal object ConvertOperations {
         }
         val changes = if (session.applePair != null) ApplePairOperations.changes(session) else session.inspection.metadata.filter { it.owner == Ownership.SourceProtocol }.map { Change(it.selector, it.value, null, "Remove confirmed source binding before conversion", true) } +
             if (session.legacyPair != null) listOf(Change("vivo:legacy:image-tail", reason = "Remove confirmed source tail", requested = true), Change("vivo:legacy:video-uuid", reason = "Remove terminal owned UUID", requested = true)) else emptyList()
-        GoogleOperations.create(CreateRequest(prepared.first, prepared.second, request.target, request.preference, request.edits,
-            policy = request.policy, output = request.output, context = request.context), session.readers, changes, session.inspection.keyPhoto,
-            metadataUnproven = session.jpeg!!.hasExif || session.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true || session.legacyPair != null).orThrow()
+        val create = CreateRequest(prepared.first, prepared.second, request.target, request.preference, request.edits, policy = request.policy, output = request.output, context = request.context)
+        val metadataUnproven = session.jpeg!!.hasExif || session.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true || session.legacyPair != null
+        if (request.edits?.trim != null) CreateTrimOperations.create(create, backend, session.readers, changes, session.inspection.keyPhoto, metadataUnproven).orThrow()
+        else GoogleOperations.create(create, session.readers, changes, session.inspection.keyPhoto, metadataUnproven).orThrow()
     }
 
     /** null means an explicit same-target PreserveAsIs copy without edits. */
-    suspend fun prepare(request: ConvertRequest, session: SourceSession, budget: ParseBudget): Pair<BinarySource, BinarySource>? {
+    suspend fun prepare(request: ConvertRequest, session: SourceSession, budget: ParseBudget, allowTrim: Boolean = false): Pair<BinarySource, BinarySource>? {
         val detection = session.inspection.detection
         if (detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_LAYOUT", "Conversion needs a unique trusted source graph", Stage.Plan)
         val selector = detection.primaryProtocol ?: fail("SOURCE_NOT_LIVE", "No live source protocol is available", Stage.Plan)
@@ -68,7 +71,7 @@ internal object ConvertOperations {
             return null
         }
         if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) fail("CAPABILITY_UNSUPPORTED", "This conversion batch implements Google JPEG targets", Stage.Plan)
-        if (request.edits?.trim != null || request.edits?.replacementFrame != null) fail("CAPABILITY_UNSUPPORTED", "Conversion media edits require backend orchestration", Stage.Plan)
+        if (request.edits?.trim != null && !allowTrim || request.edits?.replacementFrame != null) fail("CAPABILITY_UNSUPPORTED", "Conversion media edits require backend orchestration", Stage.Plan)
         if (session.applePair != null) {
             val clean = AppleClean.prepare(session, budget).orThrow()
             return clean.image to clean.video
