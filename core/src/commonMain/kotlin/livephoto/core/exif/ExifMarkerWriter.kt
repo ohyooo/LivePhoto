@@ -67,12 +67,59 @@ internal class ExifMarkerWriter(private val reader: BinaryReader, private val bu
     suspend fun rewriteMarker(tiffRange: ByteRange, action: ExifMarkerAction): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.rewrite(reader, budget, tiffRange, action)
 }
 
+/** Bounded proof for unchanged TIFF bytes containing only standardized position-independent fields. */
+internal class ExifPositionIndependenceProof private constructor(val sourceIdentity: SourceIdentity, val range: ByteRange, val digest: Digest) {
+    companion object {
+        suspend fun prove(reader: BinaryReader, range: ByteRange, budget: ParseBudget): CoreResult<ExifPositionIndependenceProof> = attempt {
+            val identity = reader.identity().orThrow()
+            ExifPatchBuilder(reader, budget).provePositionIndependence(range)
+            val digest = sha256Range(reader, range).orThrow()
+            reader.validateIdentity().orThrow()
+            ExifPositionIndependenceProof(identity, range, digest)
+        }
+    }
+}
+
 private val exifHeader = Bytes(byteArrayOf(0x45, 0x78, 0x69, 0x66, 0, 0))
 private const val MAX_TIFF_LENGTH = 65527
 private data class BuiltPatch(val payload: Bytes, val change: ExifCommentChange, val noOp: Boolean, val document: TiffDocument)
 
 /** Append tables without moving any preexisting value or changing its TIFF offset base. */
 private class ExifPatchBuilder(private val reader: BinaryReader, private val budget: ParseBudget) {
+    suspend fun provePositionIndependence(range: ByteRange) {
+        if (range.length > MAX_TIFF_LENGTH.toULong()) unsafe("EXIF exceeds one APP1 payload")
+        val document = TiffReader(reader, budget).read(range).orThrow()
+        val root = document.ifds.singleOrNull { it.relativeOffset == document.firstIfdOffset }
+            ?: unsafe("Position independence requires a parsed primary IFD")
+        safe(document, root)
+        // Unknown nonzero slack could contain private dependencies even without a MakerNote tag.
+        // Classify every byte as header, parsed table/value, or zero alignment; never guess it away.
+        var extents = checkedAdd(1uL, document.ifds.size.toULong())
+        for (ifd in document.ifds) extents = checkedAdd(extents, ifd.entries.size.toULong())
+        budget.retain(checkedMultiply(extents, 96uL))
+        val covered = (listOf(ByteRange(range.offset, 8uL)) + document.ifds.flatMap { ifd ->
+            listOf(ByteRange(checkedAdd(range.offset, ifd.relativeOffset.toULong()), checkedAdd(6uL, checkedMultiply(ifd.entries.size.toULong(), 12uL)))) +
+                ifd.entries.map { it.valueRange ?: unsafe("Unclassified EXIF value") }
+        }).sortedBy { it.offset }
+        suspend fun zeroGap(start: ULong, end: ULong) {
+            var offset = start
+            while (offset < end) {
+                budget.poll()
+                val bytes = reader.readBuffer(offset, minOf(4096uL, end - offset).toUInt()).orThrow()
+                if (bytes.size == 0) fail("UNEXPECTED_EOF", "EXIF proof gap was truncated")
+                if ((0 until bytes.size).any { bytes[it] != 0.toByte() }) unsafe("Unreferenced nonzero EXIF bytes may contain unknown dependencies")
+                offset = checkedAdd(offset, bytes.size.toULong())
+            }
+        }
+        var cursor = range.offset
+        for (extent in covered) {
+            budget.poll()
+            if (extent.offset > cursor) zeroGap(cursor, extent.offset)
+            cursor = maxOf(cursor, extent.endExclusive)
+        }
+        zeroGap(cursor, range.endExclusive)
+    }
+
     fun create(): Bytes {
         val marker = markerBytes()
         val length = 44 + marker.size

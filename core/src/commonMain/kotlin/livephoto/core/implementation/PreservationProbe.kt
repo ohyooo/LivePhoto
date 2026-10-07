@@ -7,6 +7,7 @@ import livephoto.core.jpeg.*
 import livephoto.core.xml.*
 import livephoto.core.xmp.*
 import livephoto.core.vivo.*
+import livephoto.core.exif.ExifPositionIndependenceProof
 
 /** Hashes JPEG coding bytes including frame/tables/scan headers and entropy, excluding APP/COM. */
 internal suspend fun codingDigest(session: SourceSession): Digest {
@@ -105,12 +106,24 @@ internal fun exactRecords(id: AssetId, digest: Digest, role: AssetRole, metadata
         digest, digest, "SHA-256 of the entire selected resource matches staged readback")
 }
 
-internal suspend fun opaqueOffsetsPreserved(input: SourceSession, output: SourceSession): Boolean {
+internal suspend fun opaqueOffsetsPreserved(input: SourceSession, output: SourceSession, exifProofs: List<ExifPositionIndependenceProof> = emptyList()): Boolean {
     val originalJpeg = input.jpeg ?: return false
     val stagedJpeg = output.jpeg ?: return false
     // An unparsed MakerNote may depend on later contents, not just positions. Only an exact
     // whole-carrier readback proves that these unknown associations remain unchanged.
-    if (originalJpeg.hasExif || input.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true ||
+    val exifRanges = originalJpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }.map { segment ->
+        val payload = segment.payload ?: return false
+        ByteRange(checkedAdd(payload.offset, 6uL), payload.length - 6uL)
+    }
+    val stagedExifRanges = stagedJpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }.map { segment ->
+        val payload = segment.payload ?: return false
+        ByteRange(checkedAdd(payload.offset, 6uL), payload.length - 6uL)
+    }
+    val classifiedExif = exifProofs.size == exifRanges.size && exifProofs.map { it.range }.toSet() == exifRanges.toSet() &&
+        exifRanges == stagedExifRanges && exifProofs.all { proof ->
+            proof.sourceIdentity == input.reader.identity().orThrow() && sha256Range(output.reader, proof.range).orThrow() == proof.digest
+        }
+    if (originalJpeg.hasExif && !classifiedExif || input.sef?.records?.any { it.type !in setOf(0x0a30.toUShort(), 0x0a31.toUShort()) } == true ||
         input.gainMaps.any { gainMap -> gainMap.jpeg.segments.any { it.payloadKind == AppPayloadKind.Unknown && it.marker in 0xe0..0xef } }) {
         val originalSize = input.reader.identity().orThrow().size
         val stagedSize = output.reader.identity().orThrow().size

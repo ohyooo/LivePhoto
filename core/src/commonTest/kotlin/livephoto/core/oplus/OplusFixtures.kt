@@ -11,8 +11,8 @@ internal object OplusFixtures {
     fun photo(
         video: ByteArray = GoogleFixtures.video().bytes,
         tail: ByteArray = byteArrayOf(),
-        directoryLength: String = (video.size + tail.size).toString(),
-        videoLength: String = video.size.toString(),
+        directoryLength: String? = (video.size + tail.size).toString(),
+        videoLength: String? = video.size.toString(),
         googleTimestamp: String? = "0",
         vendorTimestamp: String? = "0",
         owner: String = "oplus",
@@ -25,9 +25,9 @@ internal object OplusFixtures {
     ): ByteArray {
         val padding = secondaryPadding?.let { " item:Padding='$it'" } ?: ""
         val motionDirectory = directory ?: "<rdf:li rdf:parseType='Resource'><container:Item item:Mime='image/jpeg' item:Semantic='Primary' item:Length='0' item:Padding='0'/></rdf:li>" +
-            "<rdf:li rdf:parseType='Resource'><container:Item item:Mime='video/mp4' item:Semantic='MotionPhoto' item:Length='$directoryLength'$padding/></rdf:li>"
+            "<rdf:li rdf:parseType='Resource'><container:Item item:Mime='video/mp4' item:Semantic='MotionPhoto' ${directoryLength?.let { "item:Length='$it'" } ?: ""}$padding/></rdf:li>"
         val key = vendorTimestamp?.let { "o:MotionPhotoPrimaryPresentationTimestampUs='$it'" } ?: ""
-        val vendor = " xmlns:o='$uri' o:MotionPhotoOwner='$owner' o:OLivePhotoVersion='$version' o:VideoLength='$videoLength' $key"
+        val vendor = " xmlns:o='$uri' o:MotionPhotoOwner='$owner' o:OLivePhotoVersion='$version' ${videoLength?.let { "o:VideoLength='$it'" } ?: ""} $key"
         val xml = GoogleFixtures.v2Xml(video.size, googleTimestamp, directory = motionDirectory, extra = extra)
             .replace("<rdf:Description rdf:about=''", "<rdf:Description rdf:about=''$vendor")
         return GoogleFixtures.jpeg(exifSegment(comment, littleEndian) + GoogleFixtures.xmpSegment(xml)) + video + tail
