@@ -15,6 +15,7 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
                 Condition(ConditionOperator.Equals, "input", Value.Text("one-video-no-audio-classified-mp4-mov-metadata-independent-sample-proof"))))) +
             listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "frameProfile", Value.Text("progressive-square-pixel-identity-transform-eight-bit-bt709-limited-sdr-to-standard-srgb-jpeg")),
+                Condition(ConditionOperator.Equals, "defaultImageQuality", Value.Text("ffmpeg-mjpeg-qscale-2-no-backend-quality-equivalence-claim")),
                 Condition(ConditionOperator.Equals, "selectionProof", Value.Text("unique-exact-integer-media-pts-decoder-showinfo-and-independent-jpeg-decode"))))) +
             listOf(CapabilityEntry(Operation.Trim, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "trimProfile", Value.Text("bounded-mp4-one-avc1-track-no-audio-no-reorder-idr-source-boundaries-no-hidden-content-no-encode")),

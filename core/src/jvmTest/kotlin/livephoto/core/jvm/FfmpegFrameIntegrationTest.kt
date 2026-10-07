@@ -19,7 +19,7 @@ class FfmpegFrameIntegrationTest {
         assumeTrue("No existing FFmpeg; real frame extraction was not run", found.ffmpegPath != null)
         return found
     }
-    private suspend fun fixture(found: BackendDiscovery, path: Path, colors: Boolean = true) {
+    internal suspend fun fixture(found: BackendDiscovery, path: Path, colors: Boolean = true) {
         val arguments = listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror",
             "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "8", "-vf", "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)'" +
                 (if (colors) ",setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709" else ""), "-fps_mode", "vfr",

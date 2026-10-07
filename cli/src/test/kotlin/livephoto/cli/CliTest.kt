@@ -93,4 +93,16 @@ class CliTest {
         assertEquals("{\"value\":\"1\",\"timescale\":90000}", Json.encode(Time(1, 90000u)))
         assertEquals("{\"offset\":\"18446744073709551615\",\"length\":\"0\"}", Json.encode(ByteRange(ULong.MAX_VALUE, 0uL)))
     }
+    @Test fun replacementKeyUpdateAndStrictPolicyAreOnlyForwarded() = blocking {
+        var received: ReplaceRequest? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> { received = request; return failure }
+        }
+        val args = listOf("replace-cover", "--input", "not-opened", "--frame-index", "0", "--format", "Jpeg", "--output-dir", "not-created")
+        assertEquals(3, Cli(core).run(args) {})
+        assertFalse(assertNotNull(received).updateKeyPosition)
+        assertEquals(3, Cli(core).run(args + listOf("--update-key", "--strict")) {})
+        assertTrue(assertNotNull(received).updateKeyPosition)
+        assertEquals(PreservationPolicy.Strict, assertNotNull(received).policy.preservation)
+    }
 }

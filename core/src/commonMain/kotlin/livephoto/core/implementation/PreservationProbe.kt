@@ -34,10 +34,10 @@ internal suspend fun codingDigest(session: SourceSession): Digest {
 }
 
 /** Ordinary XMP meaning and each non-XMP APP/COM byte string, without protocol bindings. */
-internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraFields: Set<String> = emptySet(), verifiedExifRewrite: Boolean = false): Digest {
+internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraFields: Set<String> = emptySet(), verifiedExifRewrite: Boolean = false, verifiedJfifHeader: ByteRange? = null): Digest {
     val hash = Sha256()
     fun text(value: String) { val bytes = Bytes(value.encodeToByteArray()); hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes) }
-    for (segment in session.jpeg!!.segments) if ((segment.marker in 0xe0..0xef || segment.marker == 0xfe) && segment.payloadKind != AppPayloadKind.Xmp && !(verifiedExifRewrite && segment.payloadKind == AppPayloadKind.Exif)) {
+    for (segment in session.jpeg!!.segments) if ((segment.marker in 0xe0..0xef || segment.marker == 0xfe) && segment.payloadKind != AppPayloadKind.Xmp && !(verifiedExifRewrite && segment.payloadKind == AppPayloadKind.Exif) && segment.range != verifiedJfifHeader) {
         text("raw:${segment.marker}")
         hash.update(Bytes(sha256Range(session.reader, segment.range).orThrow().value.encodeToByteArray()))
     }

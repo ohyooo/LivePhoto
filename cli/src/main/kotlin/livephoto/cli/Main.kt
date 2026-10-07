@@ -59,7 +59,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             val writes = setOf("create", "convert", "extract", "split", "repair", "set-key", "extract-frame", "replace-cover", "trim", "remux", "transcode")
             require(command in read + writes + setOf("capabilities", "media-capabilities")) { "Unknown command: $command" }
             val options = linkedMapOf<String, String>()
-            val flags = setOf("apply", "strict", "raw-carrier", "allow-transcode", "decode-check")
+            val flags = setOf("apply", "strict", "raw-carrier", "allow-transcode", "decode-check", "update-key")
             var i = 1
             while (i < args.size) {
                 val key = args[i++].removePrefix("--")
@@ -81,7 +81,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues")
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
                 "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource")
-                "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format")
+                "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format", "update-key", "strict")
                 "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode", "resource")
                 "remux" -> inputKeys + setOf("output-dir", "strict", "container", "resource")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
@@ -129,7 +129,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 }
                 "set-key" -> core.setKeyPhotoPosition(SetKeyRequest(source(), position(), policy, destination(), context))
                 "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))
-                "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), output = destination(), context = context))
+                "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), updateKeyPosition = "update-key" in options, policy = policy, output = destination(), context = context))
                 "trim" -> core.trim(TrimRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
                 "remux" -> core.remux(RemuxRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), VideoContainer.valueOf(required("container")), policy, destination(), context))
                 else -> core.transcode(TranscodeRequest(ResourceRef(source()), VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container"))), policy, destination(), context))

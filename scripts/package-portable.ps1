@@ -95,6 +95,24 @@ try {
             throw 'Portable frame result does not describe the requested derived image.'
         }
         Write-Host 'PORTABLE_FFMPEG_FRAME=SUCCESS'
+        # The freshly derived JPEG has no source EXIF/ICC/auxiliary dependencies.
+        # Use Core Create, never a script-side protocol writer, to build the fixture.
+        $replaceCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $frameFixture --target google.motionphoto.v2 --output-dir (Join-Path $verify 'replace carrier')
+        if ($LASTEXITCODE -ne 0) { throw "Portable replace carrier creation failed: $replaceCarrierJson" }
+        $replaceCarrier = ($replaceCarrierJson | ConvertFrom-Json).result.output.assets[0].path
+        $replaceJson = & $launcher replace-cover --input $replaceCarrier --frame-index 2 --format Jpeg --update-key --output-dir (Join-Path $verify 'replace result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real image replacement failed: $replaceJson" }
+        $replace = ($replaceJson | ConvertFrom-Json).result
+        if (-not ($replace.preservation.records | Where-Object { $_.guarantee -eq 'ImageDataPreserving' -and $_.outcome -eq 'Changed' }) -or
+            ($replace.execution | Where-Object transcoded -eq $true) -or
+            ([decimal]$replace.keyPhoto.position.value * 1000000 / $replace.keyPhoto.position.timescale) -ne 80000) {
+            throw 'Portable replacement did not disclose changed coding and explicit source-domain key synchronization.'
+        }
+        $replaceExtractJson = & $launcher extract --input $replace.output.assets[0].path --output-dir (Join-Path $verify 'replace extracted')
+        if ($LASTEXITCODE -ne 0 -or (Get-FileHash $frameFixture).Hash -ne (Get-FileHash ($replaceExtractJson | ConvertFrom-Json).result.output.assets[0].path).Hash) {
+            throw 'Portable replacement changed the original motion video bytes.'
+        }
+        Write-Host 'PORTABLE_FFMPEG_REPLACE=SUCCESS'
         $trimJson = & $launcher trim --input $remuxFixture --start-us 0 --end-us 80000 --mode LosslessOnly --strict --output-dir (Join-Path $verify 'trim result')
         if ($LASTEXITCODE -ne 0) { throw "Portable real lossless trim failed: $trimJson" }
         $trim = ($trimJson | ConvertFrom-Json).result
@@ -118,6 +136,9 @@ try {
         $frameJson = & $launcher extract-frame --input $referenceVideo --frame-index 0 --format Jpeg --output-dir (Join-Path $verify 'disabled frame')
         if ($LASTEXITCODE -ne 3 -or ($frameJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend frame gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_FRAME=UNAVAILABLE'
+        $replaceJson = & $launcher replace-cover --input $referenceImage --frame-index 0 --format Jpeg --output-dir (Join-Path $verify 'disabled replace')
+        if ($LASTEXITCODE -ne 3 -or ($replaceJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend replace gate failed.' }
+        Write-Host 'PORTABLE_FFMPEG_REPLACE=UNAVAILABLE'
         $trimJson = & $launcher trim --input $referenceVideo --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim')
         if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trim gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_TRIM=UNAVAILABLE'
