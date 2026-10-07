@@ -4,6 +4,7 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.google.GoogleFixtures
+import livephoto.core.implementation.RangeSource
 import livephoto.core.memory.*
 import kotlin.test.*
 
@@ -71,7 +72,10 @@ class AppleConvertTest {
                     try {
                         val identity = source.identity().orThrow()
                         val bytes = source.readAt(0uL, identity.size.toUInt()).orThrow().toByteArray()
-                        bytes[bytes.lastIndex] = 1 // Valid marker byte, but not the planned owned timed sample.
+                        val reader = BinaryReader(source, context)
+                        val facts = BmffVideoProbe(reader, allowTimedMetadata = true).probe(ByteRange(0uL, identity.size)).orThrow()
+                        val sample = facts.tracks.single { it.handler == "meta" }.samples.single()
+                        bytes[(sample.range.endExclusive - 1uL).toInt()] = 1 // Valid marker byte, but not the planned owned timed sample.
                         return CoreResult.Success(MemoryBinarySource(Bytes(bytes), identity.id, identity.generation))
                     } finally { source.close() }
                 }
@@ -98,5 +102,32 @@ class AppleConvertTest {
             val planned = core.convert(ConvertRequest(SourceSet.Single(source(GoogleFixtures.v2Photo())), ProtocolSelector(ProtocolIds.Apple, profile), output = output, context = context))
             assertEquals("CAPABILITY_PLANNED", assertIs<CoreResult.Failure>(planned).error.code.value)
         }
+    }
+
+    @Test fun canonicalJfifAndSingleMdatAllowAppleToGoogleRoundtripWithoutChangingCodedSamples(): Unit = runImmediate {
+        val jfif = GoogleFixtures.segment(0xe0, byteArrayOf(0x4a, 0x46, 0x49, 0x46, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0))
+        val plain = GoogleFixtures.v2Photo(timestamp = "40000")
+        val input = source(plain.copyOfRange(0, 2) + jfif + plain.copyOfRange(2, plain.size))
+        val apple = core.convert(ConvertRequest(SourceSet.Single(input), target, policy = strict(), output = MemoryOutputTransaction(context, "apple-jfif"), context = context)).orThrow()
+        try {
+            val reader = BinaryReader(apple.output.assets[1].readableSource!!, context)
+            val roots = BmffReader(reader).readBoxes(ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
+            assertEquals(1, roots.count { it.type == "mdat" })
+            val pair = SourceSet.Pair(apple.output.assets[0].readableSource!!, reader.source)
+            val converted = core.convert(ConvertRequest(pair, ProtocolSelector(ProtocolIds.GoogleV2), output = MemoryOutputTransaction(context, "apple-google-roundtrip"), context = context)).orThrow()
+            try {
+                assertTrue(converted.execution.none { it.transcoded })
+                val inspected = core.inspect(ReadRequest(SourceSet.Single(converted.output.assets.single().readableSource!!), context)).orThrow()
+                assertEquals(ProtocolIds.GoogleV2, inspected.detection.primaryProtocol?.protocol)
+                assertEquals(0, inspected.keyPhoto.position?.compareTo(Time(40, 1000u)))
+                val extent = inspected.layout.resources.single { it.kind == ResourceKind.Video }.extents.single().range
+                val outputReader = BinaryReader(converted.output.assets.single().readableSource!!, context)
+                val videoReader = BinaryReader(RangeSource(outputReader, extent), context)
+                val video = BmffVideoProbe(videoReader).probe(ByteRange(0uL, extent.length)).orThrow()
+                val original = BinaryReader(source(GoogleFixtures.video().bytes, "original-video"), context)
+                val facts = BmffVideoProbe(original).probe(ByteRange(0uL, original.identity().orThrow().size)).orThrow()
+                RemuxVerification.verify(original, facts, videoReader, video)
+            } finally { converted.output.assets.forEach { it.readableSource?.close() } }
+        } finally { apple.output.assets.forEach { it.readableSource?.close() } }
     }
 }

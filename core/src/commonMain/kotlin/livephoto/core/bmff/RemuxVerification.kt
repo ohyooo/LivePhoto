@@ -37,15 +37,7 @@ internal object RemuxVerification {
                     box.type == "udta" -> {
                         // FFmpeg writes a canonical empty iTunes metadata directory even in bitexact mode.
                         // Accept only this proven-empty envelope, never arbitrary ordinary metadata.
-                        val meta = boxes.readBoxes(box.payload, depth + 1u).orThrow().singleOrNull()
-                        if (meta?.type != "meta" || meta.payload.length < 4uL || reader.readU32(meta.payload.offset).orThrow() != 0u)
-                            fail("UNSAFE_METADATA_REWRITE", "Nonempty or unclassified user metadata cannot be remuxed", Stage.Plan)
-                        val nodes = boxes.readBoxes(ByteRange(meta.payload.offset + 4uL, meta.payload.length - 4uL), depth + 2u).orThrow()
-                        val handler = nodes.singleOrNull { it.type == "hdlr" }
-                        val items = nodes.singleOrNull { it.type == "ilst" }
-                        val expectedHandler = Bytes(ByteArray(8) + "mdirappl".encodeToByteArray() + ByteArray(9))
-                        if (nodes.size != 2 || items?.payload?.length != 0uL || handler == null || handler.payload.length != 25uL ||
-                            reader.readExactly(handler.payload.offset, 25u).orThrow() != expectedHandler)
+                        if (!EmptyMovieMetadata.matches(reader, boxes, box, depth))
                             fail("UNSAFE_METADATA_REWRITE", "User metadata envelope is not provably empty", Stage.Plan)
                     }
                     box.type in containers -> visit(box.payload, box.type, key, depth + 1u)

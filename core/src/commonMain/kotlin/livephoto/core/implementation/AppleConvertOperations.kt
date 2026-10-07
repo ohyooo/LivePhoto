@@ -31,7 +31,8 @@ internal object AppleConvertOperations {
         val budget = ParseBudget(context)
         val image = SourceSession.open(SourceSet.Single(inputs.first), context, budget).orThrow()
         val jpeg = image.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion currently requires JPEG", Stage.Plan)
-        if (image.bindings.isNotEmpty() || jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown })
+        val jfif = ReplaceOperations.canonicalJfif(image)
+        if (image.bindings.isNotEmpty() || jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown && it != jfif })
             fail("UNSAFE_METADATA_REWRITE", "Apple assembly cannot relocate unclassified APP or retain a source image binding", Stage.Plan)
         val videoReader = BinaryReader(inputs.second, context)
         val video = BmffVideoProbe(videoReader, budget).probe(ByteRange(0uL, videoReader.identity().orThrow().size)).orThrow()
@@ -93,7 +94,7 @@ internal object AppleConvertOperations {
                     AppleImageReader.read(reader, jpeg, ParseBudget(context)).orThrow()?.value != identifier)
                     fail("POSTCONDITION_FAILED", "Apple primary image failed exact unrequested-byte/CID verification", Stage.Verify)
                 imageId = id; imageIdentity = reader.identity().orThrow()
-                imageDigest = sha256Range(reader, ByteRange(0uL, imageIdentity!!.size)).orThrow()
+                imageDigest = sha256Range(reader, ByteRange(0uL, imageIdentity.size)).orThrow()
                 val snapshot = SourceSession.open(SourceSet.Single(reader.source), context, ParseBudget(context)).orThrow().snapshot
                 AssetVerification(ValidationReport(Verdict.Valid, Coverage.Complete, listOf(CheckResult("apple.image-cid", Layer.Protocol, Verdict.Valid, Coverage.Complete)), snapshot = snapshot), records(id, true))
             })

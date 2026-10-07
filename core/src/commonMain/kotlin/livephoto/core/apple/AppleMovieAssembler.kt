@@ -8,20 +8,34 @@ import livephoto.core.bmff.*
 internal class AppleMoviePlan internal constructor(
     val reader: BinaryReader, val media: VideoStructure, val originalMovie: BmffBox,
     val movie: Bytes, val timedMedia: Bytes, val identifier: String, val key: Time,
+    private val roots: List<BmffBox>, private val originalMdat: BmffBox,
 ) {
     val byteLength: ULong = checkedAdd(media.range.length, checkedAdd(movie.size.toULong(), timedMedia.size.toULong()))
+    private fun mdatHeader(): Bytes {
+        val length = checkedAdd(originalMdat.range.length, timedMedia.size.toULong())
+        return if (originalMdat.headerLength == 8uL) Bytes(unsignedBytes(length, 4, Endian.Big).toByteArray() + "mdat".encodeToByteArray())
+            else Bytes(unsignedBytes(1uL, 4, Endian.Big).toByteArray() + "mdat".encodeToByteArray() + unsignedBytes(length, 8, Endian.Big).toByteArray())
+    }
+    private fun relocated(offset: ULong): ULong = checkedAdd(offset, if (offset >= originalMdat.range.endExclusive) timedMedia.size.toULong() else 0uL)
     suspend fun write(writer: BinaryWriter) {
-        copyRange(reader, writer, ByteRange(0uL, originalMovie.range.offset), reader.context).orThrow()
-        val header = reader.readExactly(originalMovie.range.offset, originalMovie.headerLength.toUInt()).orThrow().toByteArray()
-        "free".encodeToByteArray().copyInto(header, 4)
-        writer.writeAll(Bytes(header)).orThrow()
-        var remaining = originalMovie.payload.length
-        while (remaining > 0uL) {
-            val count = minOf(65_536uL, remaining).toInt()
-            writer.writeAll(Bytes(ByteArray(count))).orThrow(); remaining -= count.toULong()
+        for (box in roots) when (box) {
+            originalMovie -> {
+                val header = reader.readExactly(box.range.offset, box.headerLength.toUInt()).orThrow().toByteArray()
+                "free".encodeToByteArray().copyInto(header, 4); writer.writeAll(Bytes(header)).orThrow()
+                var remaining = box.payload.length
+                while (remaining > 0uL) {
+                    val count = minOf(65_536uL, remaining).toInt()
+                    writer.writeAll(Bytes(ByteArray(count))).orThrow(); remaining -= count.toULong()
+                }
+            }
+            originalMdat -> {
+                writer.writeAll(mdatHeader()).orThrow()
+                copyRange(reader, writer, box.payload, reader.context).orThrow()
+                writer.writeAll(timedMedia).orThrow() // One mdat; every old media byte/range remains at its original offset.
+            }
+            else -> copyRange(reader, writer, box.range, reader.context).orThrow()
         }
-        copyRange(reader, writer, ByteRange(originalMovie.range.endExclusive, media.range.endExclusive - originalMovie.range.endExclusive), reader.context).orThrow()
-        writer.writeAll(movie).orThrow(); writer.writeAll(timedMedia).orThrow()
+        writer.writeAll(movie).orThrow()
         reader.validateIdentity().orThrow()
     }
 
@@ -31,20 +45,28 @@ internal class AppleMoviePlan internal constructor(
         if (parsed.container != media.container || parsed.movieTimescale != media.movieTimescale || parsed.movieDuration != media.movieDuration ||
             parsed.tracks.filter { it.handler != "meta" } != media.tracks || parsed.tracks.count { it.handler == "meta" } != 1)
             fail("POSTCONDITION_FAILED", "Apple assembly changed retained track/configuration/sample/timeline semantics", Stage.Verify)
-        for (range in listOf(ByteRange(0uL, originalMovie.range.offset), ByteRange(originalMovie.range.endExclusive, media.range.endExclusive - originalMovie.range.endExclusive)))
-            if (sha256Range(reader, range).orThrow() != sha256Range(output, range).orThrow()) fail("POSTCONDITION_FAILED", "Apple assembly changed original media/container bytes", Stage.Verify)
+        for (box in roots) {
+            if (box == originalMovie) continue
+            val range = if (box == originalMdat) box.payload else box.range
+            val staged = ByteRange(relocated(range.offset), range.length)
+            if (sha256Range(reader, range).orThrow() != sha256Range(output, staged).orThrow())
+                fail("POSTCONDITION_FAILED", "Apple assembly changed original media/container bytes", Stage.Verify)
+        }
+        if (output.readExactly(originalMdat.range.offset, originalMdat.headerLength.toUInt()).orThrow() != mdatHeader())
+            fail("POSTCONDITION_FAILED", "Apple mdat extent differs from its exact plan", Stage.Verify)
         val expected = reader.readExactly(originalMovie.range.offset, originalMovie.headerLength.toUInt()).orThrow().toByteArray()
         "free".encodeToByteArray().copyInto(expected, 4)
-        if (output.readExactly(originalMovie.range.offset, originalMovie.headerLength.toUInt()).orThrow() != Bytes(expected))
+        if (output.readExactly(relocated(originalMovie.range.offset), originalMovie.headerLength.toUInt()).orThrow() != Bytes(expected))
             fail("POSTCONDITION_FAILED", "Old movie header retirement differs from the plan", Stage.Verify)
-        var cursor = originalMovie.payload.offset
-        while (cursor < originalMovie.payload.endExclusive) {
-            val bytes = output.readBuffer(cursor, minOf(65_536uL, originalMovie.payload.endExclusive - cursor).toUInt()).orThrow()
+        var cursor = relocated(originalMovie.payload.offset)
+        val retiredEnd = checkedAdd(cursor, originalMovie.payload.length)
+        while (cursor < retiredEnd) {
+            val bytes = output.readBuffer(cursor, minOf(65_536uL, retiredEnd - cursor).toUInt()).orThrow()
             if (bytes.toByteArray().any { it != 0.toByte() }) fail("POSTCONDITION_FAILED", "Old movie authority was not retired", Stage.Verify)
             cursor += bytes.size.toULong()
         }
-        if (output.readExactly(media.range.length, movie.size.toUInt()).orThrow() != movie ||
-            output.readExactly(media.range.length + movie.size.toULong(), timedMedia.size.toUInt()).orThrow() != timedMedia)
+        if (output.readExactly(media.range.length + timedMedia.size.toULong(), movie.size.toUInt()).orThrow() != movie ||
+            output.readExactly(originalMdat.payload.endExclusive, timedMedia.size.toUInt()).orThrow() != timedMedia)
             fail("POSTCONDITION_FAILED", "Apple appended metadata differs from the exact assembly plan", Stage.Verify)
         if (AppleVideoReader.read(output, ParseBudget(output.context)).orThrow()?.value != identifier ||
             AppleVideoReader.key(output, parsed, ParseBudget(output.context)).orThrow().position?.compareTo(key) != 0)
@@ -73,6 +95,7 @@ internal object AppleMovieAssembler {
         val roots = boxes.readBoxes(media.range).orThrow()
         if (roots.any { reader.readU32(it.range.offset).orThrow() == 0u }) fail("CAPABILITY_UNSUPPORTED", "Size-to-EOF boxes cannot be followed by Apple append assembly", Stage.Plan)
         val originalMovie = roots.single { it.type == "moov" }
+        val originalMdat = roots.single { it.type == "mdat" }
         val children = boxes.readBoxes(originalMovie.payload, 1u).orThrow()
         budget.retain(checkedMultiply(originalMovie.range.length + 2048uL, 4uL))
         val originalPayload = reader.readExactly(originalMovie.payload.offset, checkedInt(originalMovie.payload.length).toUInt()).orThrow().toByteArray()
@@ -101,11 +124,11 @@ internal object AppleMovieAssembler {
             return box("trak", box("tkhd", tkhd) + edits + box("mdia", box("mdhd", mdhd) +
                 full("hdlr", u32(0uL) + "meta".encodeToByteArray() + ByteArray(12)) + minf))
         }
-        val prototype = box("moov", originalPayload + track(0uL) + metadata)
-        val offset = checkedAdd(size, checkedAdd(prototype.size.toULong(), 8uL))
-        val movie = Bytes(box("moov", originalPayload + track(offset) + metadata))
-        if (movie.size != prototype.size) fail("POSTCONDITION_FAILED", "Apple movie offset fixup changed its planned length", Stage.Plan)
-        val plan = AppleMoviePlan(reader, media, originalMovie, movie, Bytes(box("mdat", sample)), identifier, key)
+        if (originalMdat.headerLength !in setOf(8uL, 16uL) || originalMdat.headerLength == 8uL &&
+            checkedAdd(originalMdat.range.length, sample.size.toULong()) > UInt.MAX_VALUE.toULong())
+            fail("VALUE_NOT_REPRESENTABLE", "Apple mdat growth must not change the original header width or media offsets", Stage.Plan)
+        val movie = Bytes(box("moov", originalPayload + track(originalMdat.payload.endExclusive) + metadata))
+        val plan = AppleMoviePlan(reader, media, originalMovie, movie, Bytes(sample), identifier, key, roots, originalMdat)
         if (plan.byteLength > reader.context.limits.maxOutputBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Apple output exceeds the configured byte budget", Stage.Plan)
         reader.validateIdentity().orThrow()
         plan

@@ -18,7 +18,8 @@ internal object AppleClean {
         val reader = pair.imageReader
         val id = AppleImageReader.read(reader, jpeg, budget).orThrow() ?: unsafe("Apple image identifier is absent")
         val note = id.makerNote
-        if (reader.readU16(note.offset + 14uL).orThrow() != 1.toUShort() || id.range.offset != note.offset + 28uL || id.range.endExclusive != note.endExclusive)
+        val directoryEnd = if (id.range.offset == note.offset + 32uL && reader.readU32(note.offset + 28uL).orThrow() == 0u) 32uL else 28uL
+        if (reader.readU16(note.offset + 14uL).orThrow() != 1.toUShort() || id.range.offset != note.offset + directoryEnd || id.range.endExclusive != note.endExclusive)
             unsafe("Only a contiguous CID-only MakerNote can be cleaned; ordinary/private MakerNote fields are retained by rejecting this rewrite")
         for (segment in jpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }) {
             val payload = segment.payload!!
@@ -50,7 +51,9 @@ internal object AppleClean {
         val roots = parser.readBoxes(ByteRange(0uL, videoReader.identity().orThrow().size)).orThrow()
         val movie = roots.single { it.type == "moov" }
         val children = parser.readBoxes(movie.payload, 1u).orThrow()
-        if (children.any { it.type !in setOf("mvhd", "trak", "meta", "free") }) unsafe("Unclassified movie-level dependencies prevent track retirement")
+        if (children.any { it.type !in setOf("mvhd", "trak", "meta", "free", "udta") } ||
+            children.filter { it.type == "udta" }.any { !EmptyMovieMetadata.matches(videoReader, parser, it, 1u) })
+            unsafe("Unclassified movie-level dependencies prevent track retirement")
         val fields = parser.readBoxes(movieId.meta.payload, 2u).orThrow()
         if (fields.any { it.type !in setOf("hdlr", "keys", "ilst") }) unsafe("Movie metadata includes unclassified ordinary fields")
         val keys = fields.single { it.type == "keys" }

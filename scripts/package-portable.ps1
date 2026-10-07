@@ -114,6 +114,37 @@ try {
             throw 'Portable frame result does not describe the requested derived image.'
         }
         Write-Host 'PORTABLE_FFMPEG_FRAME=SUCCESS'
+        foreach ($appleVideo in @($remuxFixture, $aacFixture)) {
+            $appleIndex = if ($appleVideo -eq $remuxFixture) { 'video' } else { 'audio-first' }
+            $appleInputHash = (Get-FileHash $appleVideo).Hash
+            $appleCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $appleVideo --target google.motionphoto.v2 --frame-index 1 --strict --output-dir (Join-Path $verify "Apple source $appleIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable Apple source assembly failed: $appleCarrierJson" }
+            $appleCarrier = ($appleCarrierJson | ConvertFrom-Json).result.output.assets[0].path
+            $appleCarrierHash = (Get-FileHash $appleCarrier).Hash
+            $appleJson = & $launcher convert --input $appleCarrier --target apple.livephoto --profile jpeg-mp4 --strict --output-dir (Join-Path $verify "Apple pair $appleIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable Apple ConvertTo failed: $appleJson" }
+            $apple = ($appleJson | ConvertFrom-Json).result
+            if ($apple.output.assets.Count -ne 2 -or $apple.output.assets[0].role -ne 'PrimaryImage' -or $apple.output.assets[1].role -ne 'MotionVideo' -or
+                $apple.validation.verdict -ne 'Valid' -or $apple.validation.coverage -ne 'Complete' -or ($apple.execution | Where-Object transcoded -eq $true) -or
+                ($apple.preservation.records | Where-Object { $_.outcome -notin @('Verified','NotApplicable') })) { throw 'Portable Apple output lacks a verified complete atomic pair.' }
+            $appleImage = $apple.output.assets[0].path
+            $appleMovie = $apple.output.assets[1].path
+            $appleValidate = & $launcher validate --input $appleImage --pair-video $appleMovie --layers Structure,Protocol
+            if ($LASTEXITCODE -ne 0 -or ($appleValidate | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Portable Apple pair failed independent validation.' }
+            & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $appleMovie -map 0:v -map '0:a?' -sn -dn -f null -
+            if ($LASTEXITCODE -ne 0) { throw 'Portable Apple movie did not completely decode all audio/video.' }
+            $appleRoundtripJson = & $launcher convert --input $appleImage --pair-video $appleMovie --target google.motionphoto.v2 --output-dir (Join-Path $verify "Apple roundtrip $appleIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable Apple ConvertFrom failed: $appleRoundtripJson" }
+            $appleRoundtrip = ($appleRoundtripJson | ConvertFrom-Json).result.output.assets[0].path
+            $appleKeyJson = & $launcher get-key --input $appleRoundtrip
+            if ($LASTEXITCODE -ne 0 -or ($appleKeyJson | ConvertFrom-Json).result.position.value -ne '40000' -or ($appleKeyJson | ConvertFrom-Json).result.position.timescale -ne 1000000) { throw 'Portable Apple roundtrip lost the inherited exact key.' }
+            $appleExtractJson = & $launcher extract --input $appleRoundtrip --output-dir (Join-Path $verify "Apple roundtrip video $appleIndex")
+            if ($LASTEXITCODE -ne 0) { throw 'Portable Apple roundtrip raw video extraction failed.' }
+            $appleRoundtripVideo = ($appleExtractJson | ConvertFrom-Json).result.output.assets[0].path
+            & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $appleRoundtripVideo -map 0:v -map '0:a?' -sn -dn -f null -
+            if ($LASTEXITCODE -ne 0 -or (Get-FileHash $appleVideo).Hash -ne $appleInputHash -or (Get-FileHash $appleCarrier).Hash -ne $appleCarrierHash) { throw 'Portable Apple roundtrip failed decode or changed its borrowed sources.' }
+        }
+        Write-Host 'PORTABLE_APPLE_PAIR_ROUNDTRIP=SUCCESS'
         $transcodeFixture = Join-Path $verify 'transcode fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 8 -vf "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709" -fps_mode passthrough -c:v libx264 -preset ultrafast -crf 30 -bf 0 -g 3 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $transcodeFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable transcode fixture generation failed.' }

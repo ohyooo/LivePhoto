@@ -51,7 +51,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 if (operation in reads + writes) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
                 conditions = if (operation == Operation.ConvertTo && operation in writes) listOf(
-                    Condition(ConditionOperator.Equals, "assembly", Value.Text("unique-live-source-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-mp4-movie-known-or-explicit-key-no-trim-replacement")),
+                    Condition(ConditionOperator.Equals, "assembly", Value.Text("unique-live-source-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-except-exact-canonical-jfif-mp4-movie-known-or-explicit-key-no-trim-replacement")),
                     Condition(ConditionOperator.Equals, "publication", Value.Text("independent-two-asset-reread-and-asset-set-atomic-no-encoding"))) else listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("exact-id-jpeg-quicktime-meta-pair")),
                     Condition(ConditionOperator.Equals, "timedMetadata", Value.Text("bounded-mebx-samples-with-exact-edit-mapping"))) +
                     if (operation in writes && operation != Operation.ConvertTo) listOf(Condition(ConditionOperator.Equals, "cleanup", Value.Text("cid-only-maker-note-and-dedicated-cid-meta-and-still-time-tracks")),

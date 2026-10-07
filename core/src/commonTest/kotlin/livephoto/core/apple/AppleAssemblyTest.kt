@@ -69,4 +69,34 @@ class AppleAssemblyTest {
         val limited = AppleMovieAssembler.prepare(BinaryReader(source(video), bound), AppleFixtures.ID, Time.Zero, ParseBudget(bound))
         assertEquals("RESOURCE_LIMIT_EXCEEDED", assertIs<CoreResult.Failure>(limited).error.code.value)
     }
+
+    @Test fun onlyProvedEmptySecondaryMetadataIsAcceptedAndPreservedByClean(): Unit = runImmediate {
+        val nodes = GoogleFixtures.box("hdlr", ByteArray(8) + "mdirappl".encodeToByteArray() + ByteArray(9)) + GoogleFixtures.box("ilst", byteArrayOf())
+        val empty = GoogleFixtures.box("udta", GoogleFixtures.fullBox("meta", nodes))
+        val base = AppleFixtures.movie(ordinaryKey = false, singleMdat = true)
+        val reader = BinaryReader(source(base, "apple-base"), context)
+        val parser = BmffReader(reader)
+        val movie = parser.readBoxes(ByteRange(0uL, base.size.toULong())).orThrow().single { it.type == "moov" }
+        assertEquals(base.size.toULong(), movie.range.endExclusive)
+        val moviePayload = base.copyOfRange(movie.payload.offset.toInt(), movie.payload.endExclusive.toInt())
+        val prefix = base.copyOfRange(0, movie.range.offset.toInt())
+        val video = prefix + GoogleFixtures.box("moov", moviePayload + empty)
+        val pair = SourceSet.Pair(source(AppleFixtures.image(), "apple-image"), source(video, "apple-video"))
+        val session = SourceSession.open(pair, context, ParseBudget(context)).orThrow()
+        assertEquals(true, session.inspection.pairing?.matches)
+        val clean = AppleClean.prepare(session, ParseBudget(context)).orThrow()
+        val cleanReader = BinaryReader(clean.video, context)
+        val cleanParser = BmffReader(cleanReader)
+        val cleanMovie = cleanParser.readBoxes(ByteRange(0uL, cleanReader.identity().orThrow().size)).orThrow().single { it.type == "moov" }
+        val retained = cleanParser.readBoxes(cleanMovie.payload, 1u).orThrow().single { it.type == "udta" }
+        assertEquals(Bytes(empty), cleanReader.readExactly(retained.range.offset, retained.range.length.toUInt()).orThrow())
+        for (bad in listOf(
+            GoogleFixtures.box("udta", GoogleFixtures.fullBox("meta", nodes + GoogleFixtures.fullBox("keys", GoogleFixtures.u32(0u)))),
+            GoogleFixtures.box("udta", GoogleFixtures.fullBox("meta", nodes + GoogleFixtures.box("ilst", byteArrayOf()))),
+            GoogleFixtures.box("udta", GoogleFixtures.box("meta", byteArrayOf(0, 0, 0, 1) + nodes)))) {
+            val shadow = prefix + GoogleFixtures.box("moov", moviePayload + bad)
+            val result = SourceSession.open(SourceSet.Pair(source(AppleFixtures.image(), "image"), source(shadow, "video")), context, ParseBudget(context))
+            assertEquals("CONFLICTING_METADATA", assertIs<CoreResult.Failure>(result).error.code.value)
+        }
+    }
 }
