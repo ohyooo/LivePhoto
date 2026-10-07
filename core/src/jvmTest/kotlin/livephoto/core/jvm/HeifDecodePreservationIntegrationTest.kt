@@ -57,6 +57,10 @@ class HeifDecodePreservationIntegrationTest {
                 val inputPath = directory.resolve("primary $index.heic"); owned.add(inputPath); Files.write(inputPath, bytes)
                 assertEquals(originalDecode, decode(inputPath))
                 val input = BinaryReader(MemoryBinarySource(Bytes(bytes), SourceId("real-heif-$index")), context)
+                val decoded = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(input.source)), true, context)).orThrow()
+                assertEquals(ImageFormat.Heic, decoded.imageFormat)
+                assertEquals(Coverage.Partial, decoded.coverage)
+                assertTrue(decoded.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })
                 val before = sha256Range(input, ByteRange(0uL, bytes.size.toULong())).orThrow()
                 val plan = HeifMetaExpansion.prepare(input, 32u).orThrow()
                 val tx = MemoryOutputTransaction(context, "real-heif-expansion-$index")
@@ -69,6 +73,16 @@ class HeifDecodePreservationIntegrationTest {
                 staged.close(); tx.abort().orThrow() // Do not pretend this internal proof is a public publication.
                 val outputPath = directory.resolve("expanded $index.heic"); owned.add(outputPath); Files.write(outputPath, result.toByteArray())
                 assertEquals(originalDecode, decode(outputPath))
+                val stagedDecode = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(result, SourceId("heif-expanded-decode-$index")))), true, context)).orThrow()
+                assertTrue(stagedDecode.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })
+                if (index == 0) {
+                    val wrongDimensions = HeifFixtures.plain(codedSample = sample.toByteArray(), codecConfiguration = configuration.toByteArray(), width = 31u, height = 32u)
+                    val wrong = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(Bytes(wrongDimensions), SourceId("heif-wrong-ispe")))), true, context))
+                    assertEquals(IssueCode("POSTCONDITION_FAILED"), assertIs<CoreResult.Failure>(wrong).error.code)
+                    val oversized = HeifFixtures.plain(codedSample = sample.toByteArray(), codecConfiguration = configuration.toByteArray(), width = 5000u, height = 32u)
+                    val refused = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(Bytes(oversized), SourceId("heif-oversized-ispe")))), true, context))
+                    assertEquals(IssueCode("CAPABILITY_UNSUPPORTED"), assertIs<CoreResult.Failure>(refused).error.code)
+                }
                 assertEquals(before, sha256Range(input, ByteRange(0uL, bytes.size.toULong())).orThrow())
                 val report = DefaultLivePhotoCore().validateMedia(ValidationRequest(SourceSet.Single(input.source), context = context)).orThrow()
                 assertEquals(Coverage.NotRun, report.checks.single { it.id == "media.decode" }.coverage)

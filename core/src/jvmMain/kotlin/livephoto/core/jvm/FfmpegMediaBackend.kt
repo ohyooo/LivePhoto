@@ -10,7 +10,7 @@ import java.nio.file.Path
 internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
     override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("ffmpeg-external"),
         listOf(CapabilityEntry(Operation.Probe, Implementation.Experimental, conditions = listOf(
-            Condition(ConditionOperator.Equals, "decodeScope", Value.Text("bounded-jpeg-or-validated-bmff-video-and-audio"))))) +
+            Condition(ConditionOperator.Equals, "decodeScope", Value.Text("bounded-jpeg-or-validated-bmff-video-and-audio-or-closed-single-hvc1-heic-no-private-properties-sei-metadata-one-decoded-frame-at-most-4096x4096-and-64MiB-single-allocation"))))) +
             listOf(CapabilityEntry(Operation.Remux, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "input", Value.Text("one-video-classified-mp4-mov-no-audio-or-mp4-to-mp4-one-aac-lc-base-asc-canonical-roll-map-all-track-independent-sample-and-metadata-proof"))))) +
             listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
@@ -33,10 +33,13 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
         val identity = reader.identity().orThrow()
         val facts = DefaultLivePhotoCore().probe(request.copy(decodeCheck = false)).orThrow()
         if (!request.decodeCheck) return@attempt facts
-        if (facts.imageFormat != ImageFormat.Jpeg && facts.videoContainer !in setOf(VideoContainer.Mp4, VideoContainer.Mov))
+        val heic = facts.imageFormat == ImageFormat.Heic
+        if (facts.imageFormat != ImageFormat.Jpeg && !heic && facts.videoContainer !in setOf(VideoContainer.Mp4, VideoContainer.Mov))
             fail("CAPABILITY_UNSUPPORTED", "FFmpeg input demuxer is not authorized for this resource", Stage.Validate)
         if (facts.issues.any { it.severity == Severity.Error })
             fail("CORRUPTED_CONTAINER", "Invalid media must not reach the decoder", Stage.Validate)
+        if (heic && (facts.width == null || facts.height == null || facts.width > 4096u || facts.height > 4096u))
+            fail("CAPABILITY_UNSUPPORTED", "Finite HEIF decoding currently requires declared dimensions at most 4096x4096", Stage.Validate)
         if (facts.imageFormat == ImageFormat.Jpeg && JpegParser.parse(reader, ParseBudget(request.context)).orThrow().primary.length != identity.size)
             fail("INVALID_ARGUMENT", "FFmpeg accepts resolved JPEG resources, not composite carriers", Stage.Validate)
         if (identity.size > request.context.limits.maxSpoolBytes)
@@ -54,10 +57,13 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
                 }
             }
             reader.validateIdentity().orThrow()
-            val result = ExternalProcess.run(listOf(executable.toString(), "-nostdin", "-hide_banner", "-loglevel", "error", "-xerror",
+            val result = ExternalProcess.run(listOf(executable.toString()) + (if (heic) listOf("-max_alloc", "67108864") else emptyList()) +
+                listOf("-nostdin", "-hide_banner", "-loglevel", if (heic) "info" else "error", "-xerror",
                 "-abort_on", "empty_output+empty_output_stream", "-protocol_whitelist", "file", "-err_detect", "explode",
-                "-f", if (facts.imageFormat == ImageFormat.Jpeg) "mjpeg" else "mov", "-threads", "1", "-noautorotate",
-                "-i", file.toString(), "-map", "0:v", "-map", "0:a?", "-sn", "-dn", "-f", "null", "-"),
+                "-f", if (facts.imageFormat == ImageFormat.Jpeg) "mjpeg" else "mov", "-threads", "1", "-noautorotate") +
+                (if (heic) listOf("-max_pixels", "16777216", "-codec_whitelist", "hevc") else emptyList()) +
+                listOf("-i", file.toString(), "-map", "0:v", "-map", "0:a?", "-sn", "-dn") +
+                (if (heic) listOf("-vf", "showinfo=checksum=0", "-fps_mode", "passthrough") else emptyList()) + listOf("-f", "null", "-"),
                 timeoutMillis = 600_000L, context = request.context)
             reader.validateIdentity().orThrow()
             when {
@@ -66,6 +72,12 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
                 result.outputLimited -> fail("RESOURCE_LIMIT_EXCEEDED", "Media backend exceeded its diagnostic output budget", Stage.Validate)
                 result.ioFailed -> fail("IO_READ_FAILED", "Media backend did not exit with completely drained diagnostics", Stage.Validate)
                 result.code != 0 -> fail("DECODE_FAILED", "FFmpeg could not decode the entire selected media resource", Stage.Validate)
+            }
+            if (heic) {
+                val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$").findAll(result.output).map { it.value }.toList()
+                val dimensions = frames.singleOrNull()?.let { Regex("\\bs:(\\d+)x(\\d+)\\b").find(it) }
+                if (dimensions == null || dimensions.groupValues[1].toUIntOrNull() != facts.width || dimensions.groupValues[2].toUIntOrNull() != facts.height)
+                    fail("POSTCONDITION_FAILED", "HEIF decode must prove exactly one frame with the declared primary dimensions", Stage.Validate)
             }
             // Full A/V decode is not full metadata/color conformance; do not promote all facts to Complete.
             facts.copy(coverage = Coverage.Partial, issues = facts.issues + Issue(IssueCode("MEDIA_DECODE_COMPLETED"), Severity.Info, Layer.Media))

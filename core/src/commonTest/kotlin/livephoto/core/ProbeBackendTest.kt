@@ -1,6 +1,7 @@
 package livephoto.core
 
 import livephoto.core.google.GoogleFixtures
+import livephoto.core.heif.HeifFixtures
 import livephoto.core.memory.MemoryBinarySource
 import kotlin.test.*
 
@@ -9,6 +10,44 @@ class ProbeBackendTest {
     private fun input(bytes: ByteArray) = SourceSet.Single(MemoryBinarySource(Bytes(bytes), SourceId("probe-input")))
     private fun <T> value(result: CoreResult<T>): T = when (result) { is CoreResult.Success -> result.value; is CoreResult.Failure -> fail(result.error.toString()) }
     private fun code(result: CoreResult<*>) = assertIs<CoreResult.Failure>(result).error.code.value
+
+    @Test fun finiteHeicProbeKeepsWholeImageCarrierSeparateFromItsNonstandaloneItem(): Unit = runImmediate {
+        for (bytes in listOf(HeifFixtures.plain(), HeifFixtures.plain(multiple = true), HeifFixtures.plain(idat = true))) {
+            val source = input(bytes)
+            var calls = 0
+            val core = DefaultLivePhotoCore(Decoder { request ->
+                calls++
+                assertNull(request.media.resourceId); assertNull(request.media.snapshot)
+                val isolated = (request.media.input as SourceSet.Single).source
+                assertEquals(Bytes(bytes), value(isolated.readAt(0uL, bytes.size.toUInt())))
+                assertIs<CoreResult.Failure>(isolated.readAt(bytes.size.toULong(), 1u))
+                isolated.close()
+                CoreResult.Success(MediaFacts(imageFormat = ImageFormat.Heic, width = 1u, height = 1u, coverage = Coverage.Partial))
+            })
+            val structural = value(core.probe(ProbeRequest(ResourceRef(source), context = context)))
+            assertEquals(ImageFormat.Heic, structural.imageFormat); assertEquals(0, calls)
+            assertEquals(Coverage.Partial, value(core.probe(ProbeRequest(ResourceRef(source), true, context))).coverage)
+            assertEquals(1, calls)
+            assertEquals("CAPABILITY_UNSUPPORTED", code(core.probe(ProbeRequest(ResourceRef(source, ResourceId("heif:item:1")), true, context))))
+            assertEquals(1, calls)
+            assertIs<CoreResult.Success<SourceIdentity>>(source.source.identity())
+        }
+    }
+
+    @Test fun heicPrivateDependenciesAndSeiCannotReachDecoder(): Unit = runImmediate {
+        val core = DefaultLivePhotoCore(Decoder { error("Unclassified HEIF must not reach decoder") })
+        val sei = GoogleFixtures.u32(2u) + byteArrayOf(0x4e, 1)
+        for (bytes in listOf(HeifFixtures.plain(unknownProperty = true), HeifFixtures.plain(hidden = true), HeifFixtures.plain(extraSampleNal = sei),
+            HeifFixtures.plain() + GoogleFixtures.box("priv", byteArrayOf(1))))
+            assertEquals("CAPABILITY_UNSUPPORTED", code(core.probe(ProbeRequest(ResourceRef(input(bytes)), true, context))))
+    }
+
+    @Test fun finiteHeicStillRequiresBackendAndRejectsContradictoryDecodedDimensions(): Unit = runImmediate {
+        val request = ProbeRequest(ResourceRef(input(HeifFixtures.plain())), true, context)
+        assertEquals("CAPABILITY_UNSUPPORTED", code(DefaultLivePhotoCore().probe(request)))
+        val core = DefaultLivePhotoCore(Decoder { CoreResult.Success(MediaFacts(imageFormat = ImageFormat.Heic, width = 2u, height = 1u, coverage = Coverage.Partial)) })
+        assertEquals("POSTCONDITION_FAILED", code(core.probe(request)))
+    }
 
     @Test fun structuralProbeDoesNotCallDecoderAndDoesNotClaimCompleteCoverage(): Unit = runImmediate {
         val backend = Decoder { error("Structural probe must not decode") }

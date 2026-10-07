@@ -3,11 +3,13 @@ package livephoto.core.implementation
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
+import livephoto.core.heif.HeifCodedCarrier
 
 /** Resolve content and bounds before handing a borrowed, isolated resource to a decoder. */
 internal object ProbeOperations {
     suspend fun probe(request: ProbeRequest, backend: MediaBackend?): CoreResult<MediaFacts> = attempt {
-        val session = SourceSession.open(request.media.input, request.context, ParseBudget(request.context)).orThrow()
+        val budget = ParseBudget(request.context)
+        val session = SourceSession.open(request.media.input, request.context, budget).orThrow()
         if (request.media.snapshot != null && request.media.snapshot != session.snapshot)
             fail("SOURCE_CHANGED", "Resource snapshot no longer matches input")
         val requested = request.media.resourceId
@@ -18,6 +20,7 @@ internal object ProbeOperations {
         val reader: BinaryReader
         val range: ByteRange
         val facts: MediaFacts
+        var heifCarrier = false
         if (resource != null) {
             val extent = resource.extents.singleOrNull()
                 ?: fail("CAPABILITY_UNSUPPORTED", "Probe requires one complete media extent", Stage.Validate)
@@ -41,16 +44,21 @@ internal object ProbeOperations {
                 fail("INVALID_ARGUMENT", "Select an explicit media resource for this source set")
             reader = session.readers.single()
             range = ByteRange(0uL, reader.identity().orThrow().size)
-            facts = videoFacts(BmffVideoProbe(reader, ParseBudget(request.context)).probe(range).orThrow())
+            if (session.heifItems != null) {
+                HeifCodedCarrier.read(reader, budget, Stage.Validate).orThrow()
+                facts = session.inspection.media.firstOrNull { it.imageFormat == ImageFormat.Heic }
+                    ?: fail("CAPABILITY_UNSUPPORTED", "HEIF has no finite coded-image facts", Stage.Validate)
+                heifCarrier = true
+            } else facts = videoFacts(BmffVideoProbe(reader, budget).probe(range).orThrow())
         }
         session.recheck()
         if (!request.decodeCheck) return@attempt facts
-        if (facts.imageFormat != null && facts.imageFormat != ImageFormat.Jpeg)
+        if (facts.imageFormat != null && facts.imageFormat != ImageFormat.Jpeg && !(facts.imageFormat == ImageFormat.Heic && heifCarrier))
             fail("CAPABILITY_UNSUPPORTED", "Image item graph is not yet verified for decoder access", Stage.Validate)
         if (facts.issues.any { it.severity == Severity.Error })
             fail("CORRUPTED_CONTAINER", "Structural errors prevent decoder probing", Stage.Validate)
         val decoder = backend ?: fail("CAPABILITY_UNSUPPORTED", "No media decoder backend is configured", Stage.Validate)
-        // Never pass a whole carrier, pair, caller-provided ID, or stale snapshot to the backend.
+        // Isolate ordinary JPEG/video or the proven closed HEIC image carrier; never a live composite/pair/item view.
         val isolated = ResourceRef(SourceSet.Single(RangeSource(reader, range)))
         val result = decoder.probe(ProbeRequest(isolated, decodeCheck = true, context = request.context))
         // Recheck even a backend failure: no stale success/failure may describe changed input.

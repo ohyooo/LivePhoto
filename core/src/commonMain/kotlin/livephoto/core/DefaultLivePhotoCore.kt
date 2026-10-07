@@ -151,7 +151,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     }
     override fun getMediaCapabilities(): MediaCapabilities = MediaCapabilities(backend?.capabilities()?.backendIds ?: emptyList(),
         listOf(CapabilityEntry(Operation.Probe, Implementation.Experimental,
-            conditions = listOf(Condition(ConditionOperator.Equals, "structuralScope", Value.Text("verified-jpeg-or-bounded-bmff-resource")),
+            conditions = listOf(Condition(ConditionOperator.Equals, "structuralScope", Value.Text("verified-jpeg-or-bounded-bmff-resource-or-closed-single-hvc1-heic-carrier")),
                 Condition(ConditionOperator.Equals, "decodeCheck", Value.Text(if (backend == null) "unsupported-without-decoder" else "injected-backend-with-resource-and-identity-guards"))),
             verification = listOf(Verification.SourceReviewed))) +
             listOf(if (backend?.capabilities()?.operations?.any { it.operation == Operation.Remux && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } == true)
