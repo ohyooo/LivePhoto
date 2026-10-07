@@ -50,6 +50,40 @@ class AppleConvertIntegrationTest {
             val frame = try { core.extractFrame(ExtractFrameRequest(ResourceRef(SourceSet.Single(plainVideo)), CoverPosition.FrameIndex(1uL), ImageEncoding(ImageFormat.Jpeg), MemoryOutputTransaction(context, "apple-real-frame"), context)).orThrow() }
                 finally { plainVideo.close() }
             try {
+                val movPath = directory.resolve("explicit streamcopy fixture.mov"); owned.add(movPath)
+                command(listOf("-i", video.toString(), "-map", "0:v:0", "-c", "copy", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0", movPath.toString()))
+                val movInput = FileBinarySource(movPath)
+                try {
+                    val original = BinaryReader(movInput, context)
+                    val facts = BmffVideoProbe(original).probe(ByteRange(0uL, movInput.size().orThrow())).orThrow()
+                    assertEquals(VideoContainer.Mov, facts.container)
+                    val before = sha256Range(original, facts.range).orThrow()
+                    val apple = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, movInput,
+                        ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
+                        policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-mov-create"), context = context)).orThrow()
+                    try {
+                        var pair = SourceSet.Pair(apple.output.assets[0].readableSource!!, apple.output.assets[1].readableSource!!)
+                        val firstMovie = BinaryReader(pair.video, context)
+                        val firstHash = sha256Range(firstMovie, ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                        val derived = mutableListOf<OperationResult>()
+                        try {
+                            for (index in listOf(1uL, 0uL)) {
+                                val changed = core.setKeyPhotoPosition(SetKeyRequest(pair, CoverPosition.FrameIndex(index), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                                    output = MemoryOutputTransaction(context, "apple-real-mov-key-$index"), context = context)).orThrow()
+                                derived += changed
+                                assertEquals(VideoContainer.Mov, changed.output.assets[1].videoContainer)
+                                pair = SourceSet.Pair(changed.output.assets[0].readableSource!!, changed.output.assets[1].readableSource!!)
+                                val reader = BinaryReader(pair.video, context)
+                                val changedFacts = BmffVideoProbe(reader, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                                RemuxVerification.verify(original, facts, reader, changedFacts.copy(tracks = changedFacts.tracks.filter { it.handler != "meta" }))
+                                val outputPath = directory.resolve("apple mov key $index.mov"); owned.add(outputPath)
+                                save(pair.video, outputPath); decode(outputPath)
+                            }
+                            assertEquals(firstHash, sha256Range(BinaryReader(pair.video, context), ByteRange(0uL, pair.video.size().orThrow())).orThrow())
+                            assertEquals(before, sha256Range(original, facts.range).orThrow())
+                        } finally { derived.forEach { result -> result.output.assets.forEach { it.readableSource?.close() } } }
+                    } finally { apple.output.assets.forEach { it.readableSource?.close() } }
+                } finally { movInput.close() }
                 for ((index, inputPath) in listOf(video, muxed).withIndex()) {
                     val input = FileBinarySource(inputPath)
                     try {

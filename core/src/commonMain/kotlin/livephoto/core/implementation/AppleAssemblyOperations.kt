@@ -25,7 +25,11 @@ internal object AppleAssemblyOperations {
     }
 
     private suspend fun prepare(request: AssemblyRequest, original: SourceSession?, inputs: Pair<BinarySource, BinarySource>, identifier: String): Prepared {
-        if (request.target != target) fail("CAPABILITY_PLANNED", "Apple assembly requires the explicit jpeg-mp4 profile", Stage.Plan)
+        val requestedContainer = when {
+            request.target == target -> VideoContainer.Mp4
+            request.creating && request.target == ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")) -> VideoContainer.Mov
+            else -> fail("CAPABILITY_PLANNED", "Apple assembly requires an implemented explicit JPEG movie profile", Stage.Plan)
+        }
         if (request.edits?.trim != null || request.edits?.replacementFrame != null)
             fail("CAPABILITY_UNSUPPORTED", "Apple assembly media edits lack an independent preservation proof", Stage.Plan)
         val context = request.context
@@ -50,12 +54,12 @@ internal object AppleAssemblyOperations {
         if (inputs.first === inputs.second || image.snapshot.identities.any { it.id == videoIdentity.id })
             fail("INVALID_ARGUMENT", "Apple assembly source identities must be distinct", Stage.Plan)
         val video = BmffVideoProbe(videoReader, budget).probe(ByteRange(0uL, videoReader.identity().orThrow().size)).orThrow()
-        if (video.container != VideoContainer.Mp4 || request.preference.imageFormat?.let { it != ImageFormat.Jpeg } == true ||
+        if (video.container != requestedContainer || request.preference.imageFormat?.let { it != ImageFormat.Jpeg } == true ||
             request.preference.videoContainer?.let { it != video.container } == true ||
             request.preference.videoCodec?.let { codec -> video.tracks.filter { it.handler == "vide" }.any { it.codec != codec } } == true ||
             request.preference.audioCodec?.let { codec -> video.tracks.filter { it.handler == "soun" }.any { it.audioCodec != codec } } == true ||
             request.preference.dynamicRange != DynamicRangePolicy.Preserve)
-            fail("CAPABILITY_UNSUPPORTED", "Apple assembly only preserves existing JPEG/MP4 media and color semantics", Stage.Plan)
+            fail("CAPABILITY_UNSUPPORTED", "Apple assembly preserves existing JPEG and the profile's existing movie container/color semantics; it does not remux", Stage.Plan)
         val key = if (request.edits?.keyPosition != null) selectKey(video, request.edits.keyPosition).position!!
             else if (request.creating) selectKey(video, null).position!!
             else original?.inspection?.keyPhoto?.position ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion requires a known source key or an explicit selected frame", Stage.Plan)
@@ -134,7 +138,7 @@ internal object AppleAssemblyOperations {
                 val snapshot = SourceSession.open(SourceSet.Single(reader.source), context, ParseBudget(context)).orThrow().snapshot
                 AssetVerification(ValidationReport(Verdict.Valid, Coverage.Complete, listOf(CheckResult("apple.image-cid", Layer.Protocol, Verdict.Valid, Coverage.Complete)), snapshot = snapshot), records(id, true))
             })
-        val videoAsset = StagedAsset(OutputAssetSpec(AssetRole.MotionVideo, mime = "video/mp4"), container = VideoContainer.Mp4,
+        val videoAsset = StagedAsset(OutputAssetSpec(AssetRole.MotionVideo, mime = videoFacts(movie.media).mime!!), container = movie.media.container,
             write = movie::write,
             verify = { id, reader ->
                 movie.verify(reader)
@@ -148,7 +152,7 @@ internal object AppleAssemblyOperations {
                     if (identity != imageIdentity || sha256Range(imageReader, ByteRange(0uL, identity.size)).orThrow() != imageDigest)
                         fail("POSTCONDITION_FAILED", "Apple primary image changed before joint verification", Stage.Verify)
                     val pair = SourceSession.open(SourceSet.Pair(imageSource, reader.source), context, ParseBudget(context)).orThrow()
-                    val validation = validateSession(pair, listOf(Layer.Structure, Layer.Protocol), target = target).orThrow()
+                    val validation = validateSession(pair, listOf(Layer.Structure, Layer.Protocol), target = request.target).orThrow()
                     if (pair.applePair == null || pair.inspection.pairing?.matches != true || validation.verdict != Verdict.Valid || validation.coverage != Coverage.Complete ||
                         pair.inspection.keyPhoto.position?.compareTo(movie.key) != 0)
                         fail("POSTCONDITION_FAILED", "Apple pair failed independent full structure/protocol/key verification", Stage.Verify)

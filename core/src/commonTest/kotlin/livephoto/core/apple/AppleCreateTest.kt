@@ -55,12 +55,15 @@ class AppleCreateTest {
         }
     }
     @Test fun unknownExifGenericProfilesPreferencesAndNonAtomicOutputNeverStage(): Unit = runImmediate {
-        for (profile in listOf(null, ProfileId("jpeg-mov"), ProfileId("heic-mov"))) {
+        for (profile in listOf(null, ProfileId("heic-mov"))) {
             val tx = MemoryOutputTransaction(context, "apple-create-planned-$profile")
             val req = request(tx).copy(target = ProtocolSelector(ProtocolIds.Apple, profile))
             assertEquals(IssueCode("CAPABILITY_PLANNED"), assertIs<CoreResult.Failure>(core.create(req)).error.code)
             assertTrue(tx.query().orThrow().assetIds.isEmpty())
         }
+        val wrongContainer = MemoryOutputTransaction(context, "apple-create-mov-requires-mov")
+        assertEquals(IssueCode("CAPABILITY_UNSUPPORTED"), assertIs<CoreResult.Failure>(core.create(request(wrongContainer).copy(target = ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov"))))).error.code)
+        assertTrue(wrongContainer.query().orThrow().assetIds.isEmpty())
         val tx = MemoryOutputTransaction(context, "apple-create-gates")
         val base = request(tx)
         val duplicate = base.copy(video = source(GoogleFixtures.video().bytes, "apple-create-image"))

@@ -12,8 +12,8 @@ internal object AppleKeyOperations {
         val pair = session.applePair ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey needs a complete pair", Stage.Plan)
         val media = session.videos[ProtocolIds.Apple]
             ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey requires an independently parsed compatible movie", Stage.Plan)
-        if (media.container != VideoContainer.Mp4 || session.inspection.issues.any { it.severity == Severity.Error })
-            fail("CAPABILITY_UNSUPPORTED", "Apple SetKey only implements a valid JPEG/MP4 pair", Stage.Plan)
+        if (media.container !in setOf(VideoContainer.Mp4, VideoContainer.Mov) || session.inspection.issues.any { it.severity == Severity.Error })
+            fail("CAPABILITY_UNSUPPORTED", "Apple SetKey only implements a valid JPEG/MP4 or JPEG/MOV pair", Stage.Plan)
         val budget = ParseBudget(request.context)
         AppleClean.prepare(session, budget).orThrow() // Closed ownership/dependency gate; these cleanup views are never published.
         val track = media.tracks.singleOrNull { it.handler == "meta" }
@@ -56,7 +56,7 @@ internal object AppleKeyOperations {
     }
     suspend fun plan(request: SetKeyRequest, session: SourceSession): CoreResult<ExecutionPlan> = attempt {
         val prepared = prepare(request, session)
-        val target = ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4"))
+        val target = ProtocolSelector(ProtocolIds.Apple, ProfileId(if (session.videos[ProtocolIds.Apple]?.container == VideoContainer.Mov) "jpeg-mov" else "jpeg-mp4"))
         ExecutionPlan(session.snapshot, target, listOf(PlanStep(Stage.WriteProtocol, listOf(Operation.SetKey), emptyList(),
             "Fixed-width metadata edit/tkhd duration patch; byte-identical primary; jointly verify pair before commit")),
             PreservationReport(changes = prepared.changes), CapabilitySet(Availability.Conditional,
@@ -75,7 +75,8 @@ internal object AppleKeyOperations {
             imageId = id; imageIdentity = reader.identity().orThrow(); imageHash = sha256Range(reader, ByteRange(0uL, imageIdentity.size)).orThrow()
             result
         })
-        val video = StagedAsset(OutputAssetSpec(AssetRole.MotionVideo, mime = "video/mp4"), container = VideoContainer.Mp4,
+        val media = session.videos[ProtocolIds.Apple] ?: fail("CAPABILITY_UNSUPPORTED", "Apple key movie facts are unavailable", Stage.Plan)
+        val video = StagedAsset(OutputAssetSpec(AssetRole.MotionVideo, mime = videoFacts(media).mime!!), container = media.container,
             write = { writer -> copyRange(prepared.fixed, writer, ByteRange(0uL, prepared.fixed.identity().orThrow().size), request.context).orThrow() },
             verify = { id, reader ->
                 val size = reader.identity().orThrow().size
