@@ -25,7 +25,7 @@ Validate: [--layers Structure,Protocol,Media]
 Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred]
 Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
 Probe: [--resource ID] [--decode-check] (never downloads media tools)
-Remux/transcode: --container Mp4|Mov; transcode --codec Avc|Hevc --allow-transcode
+Remux/transcode: --container Mp4|Mov; remux [--resource ID]; transcode --codec Avc|Hevc --allow-transcode
 Common: --strict, --max-bytes N (default 1 GiB), --help, --version
 
 Output is JSON. Exit: 0 success, 2 arguments, 3 Core/IO failure, 4 invalid validation/blocked repair.
@@ -81,7 +81,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
                 "extract-frame", "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format")
                 "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode")
-                "remux" -> inputKeys + setOf("output-dir", "strict", "container")
+                "remux" -> inputKeys + setOf("output-dir", "strict", "container", "resource")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
                 "validate" -> inputKeys + setOf("layers")
                 "probe" -> inputKeys + setOf("resource", "decode-check")
@@ -129,7 +129,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source()), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))
                 "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), output = destination(), context = context))
                 "trim" -> core.trim(TrimRequest(ResourceRef(source()), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
-                "remux" -> core.remux(RemuxRequest(ResourceRef(source()), VideoContainer.valueOf(required("container")), policy, destination(), context))
+                "remux" -> core.remux(RemuxRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), VideoContainer.valueOf(required("container")), policy, destination(), context))
                 else -> core.transcode(TranscodeRequest(ResourceRef(source()), VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container"))), policy, destination(), context))
             }
             emit(Json.encode(result, output))

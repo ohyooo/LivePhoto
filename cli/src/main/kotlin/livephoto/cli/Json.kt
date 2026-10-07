@@ -27,7 +27,9 @@ internal object Json {
         is Receipt -> encode(mapOf("state" to value.state, "assetIds" to value.assetIds, "atomicity" to value.atomicity, "durability" to value.durability), output)
         is CoreResult.Success<*> -> encode(mapOf("result" to value.value), output)
         is CoreResult.Failure -> encode(mapOf("error" to value.error), output)
-        is OutputAsset -> encode(mapOf("id" to value.id, "role" to value.role, "mime" to value.mime, "byteLength" to value.byteLength, "digest" to value.digest, "path" to output?.assetPath(value.id)?.toString()), output)
+        is OutputAsset -> encode(mapOf("id" to value.id, "role" to value.role, "mime" to value.mime,
+            "imageFormat" to value.imageFormat, "videoContainer" to value.videoContainer,
+            "byteLength" to value.byteLength, "digest" to value.digest, "path" to output?.assetPath(value.id)?.toString()), output)
         else -> {
             require(value.javaClass.packageName == "livephoto.core") { "Not a Core result DTO" }
             val fields = value.javaClass.declaredFields.filter { !it.isSynthetic && !Modifier.isStatic(it.modifiers) }

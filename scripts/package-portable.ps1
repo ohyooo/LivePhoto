@@ -72,11 +72,28 @@ try {
             throw "Portable existing-FFmpeg decode failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=SUCCESS'
+        # Explicitly generated fixture: its encoding is not part of the remux operation.
+        $remuxFixture = Join-Path $verify 'remux fixture.mp4'
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'color=c=black:s=16x16:r=25' -frames:v 4 -c:v libx264 -preset ultrafast -bf 0 -g 2 -pix_fmt yuv420p -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $remuxFixture
+        if ($LASTEXITCODE -ne 0) { throw 'Portable remux fixture generation failed.' }
+        $remuxJson = & $launcher remux --input $remuxFixture --container Mov --strict --output-dir (Join-Path $verify 'remux result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable real remux failed: $remuxJson" }
+        $remux = ($remuxJson | ConvertFrom-Json).result
+        if ($remux.output.assets[0].videoContainer -ne 'Mov' -or ($remux.execution | Where-Object transcoded -eq $true) -or
+            -not ($remux.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Verified' })) {
+            throw 'Portable remux did not return verified no-encoding evidence.'
+        }
+        Write-Host 'PORTABLE_FFMPEG_REMUX=SUCCESS'
     } else {
         if ($LASTEXITCODE -ne 3 -or ($probeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
             throw "Portable missing-backend gate failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=UNAVAILABLE'
+        $remuxJson = & $launcher remux --input $referenceVideo --container Mov --output-dir (Join-Path $verify 'disabled remux')
+        if ($LASTEXITCODE -ne 3 -or ($remuxJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
+            throw 'Portable missing-backend remux gate failed.'
+        }
+        Write-Host 'PORTABLE_FFMPEG_REMUX=UNAVAILABLE'
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }

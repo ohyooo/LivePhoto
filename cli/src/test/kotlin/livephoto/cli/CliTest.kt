@@ -6,6 +6,14 @@ import java.nio.file.Path
 import kotlin.test.*
 
 class CliTest {
+    @Test fun outputFormattingIncludesCoreFormatsWithoutSerializingHandles() {
+        val asset = OutputAsset(AssetId("output"), AssetRole.MotionVideo, accessReference = "private-adapter-reference", byteLength = 1uL,
+            mime = "video/quicktime", videoContainer = VideoContainer.Mov, digest = Digest("0".repeat(64)))
+        val json = Json.encode(asset)
+        assertTrue(json.contains("\"videoContainer\":\"Mov\""))
+        assertTrue(json.contains("\"imageFormat\":null"))
+        assertFalse(json.contains("private-adapter-reference"))
+    }
     private val failure = CoreResult.Failure(CoreError(IssueCode("TEST_SENTINEL"), Stage.Plan, "test"))
     @Test fun helpVersionAndCapabilitiesWorkWithoutFiles() = blocking {
         for (args in listOf(listOf("--help"), listOf("--version"), listOf("capabilities", "--target", "google.microvideo.v1"), listOf("media-capabilities"))) {
