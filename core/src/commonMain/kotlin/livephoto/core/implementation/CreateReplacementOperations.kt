@@ -11,8 +11,8 @@ internal object CreateReplacementOperations {
     private suspend fun prepare(request: CreateRequest, backend: MediaBackend?, inheritedKey: KeyPhotoResult?): Prepared {
         RequestValidation.validate(request).orThrow()
         val replacement = request.edits?.replacementFrame ?: fail("INVALID_ARGUMENT", "Replacement edits required", Stage.Plan)
-        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2))
-            fail("CAPABILITY_UNSUPPORTED", "Derived-image Create currently requires a Google JPEG target", Stage.Plan)
+        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern))
+            fail("CAPABILITY_UNSUPPORTED", "Derived-image edits require an implemented JPEG target with classified key semantics", Stage.Plan)
         if (request.policy.preservation == PreservationPolicy.Strict || request.policy.requiredGuarantees.any { it in setOf(Guarantee.ImageDataPreserving, Guarantee.ExactExtraction) })
             fail("PRESERVATION_REQUIREMENT_FAILED", "Explicit replacement conflicts with strict/exact/image-data preservation", Stage.Plan)
         if (backend?.capabilities()?.operations?.none { it.operation == Operation.ExtractFrame && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } != false)

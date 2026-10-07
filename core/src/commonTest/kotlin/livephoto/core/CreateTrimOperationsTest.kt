@@ -98,7 +98,7 @@ class CreateTrimOperationsTest {
         val tx = MemoryOutputTransaction(context, "create-trim-gates")
         assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore().create(request(tx))).error.code.value)
         val backend = Backend(); val core = DefaultLivePhotoCore(backend)
-        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.create(request(tx).copy(target = ProtocolSelector(ProtocolIds.Samsung)))).error.code.value)
+        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.create(request(tx).copy(target = ProtocolSelector(ProtocolIds.Huawei)))).error.code.value)
         // Replacement is now implemented, but strict image preservation still rejects before decoding.
         assertEquals("PRESERVATION_REQUIREMENT_FAILED", assertIs<CoreResult.Failure>(core.create(request(tx).copy(edits = EditSpec(spec, replacementFrame = CoverPosition.FrameIndex(0uL))))).error.code.value)
         assertEquals(0, backend.calls)

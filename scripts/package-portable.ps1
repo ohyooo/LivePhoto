@@ -168,6 +168,23 @@ try {
         $exactCompositeDecode = & $launcher probe --input ($exactConvertedVideo | ConvertFrom-Json).result.output.assets[0].path --decode-check
         if ($LASTEXITCODE -ne 0) { throw "Portable Exact Convert derived video failed decoding: $exactCompositeDecode" }
         Write-Host 'PORTABLE_FFMPEG_EXACT_CREATE_CONVERT=SUCCESS'
+        foreach ($vendorTarget in @('oplus.olive', 'samsung.motionphoto', 'vivo.motionphoto')) {
+            $vendorEditCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $transcodeFixture --target $vendorTarget --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --frame-index 2 --replacement-frame-index 7 --output-dir (Join-Path $verify "vendor exact create $vendorTarget")
+            if ($LASTEXITCODE -ne 0) { throw "Portable vendor Exact Create failed: $vendorEditCreateJson" }
+            $vendorEditConvertJson = & $launcher convert --input ($exactCarrierJson | ConvertFrom-Json).result.output.assets[0].path --target $vendorTarget --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --output-dir (Join-Path $verify "vendor exact convert $vendorTarget")
+            if ($LASTEXITCODE -ne 0) { throw "Portable vendor Exact Convert failed: $vendorEditConvertJson" }
+            foreach ($kind in @('create', 'convert')) {
+                $vendorEditJson = if ($kind -eq 'create') { $vendorEditCreateJson } else { $vendorEditConvertJson }
+                $vendorEdited = ($vendorEditJson | ConvertFrom-Json).result
+                if (([decimal]$vendorEdited.keyPhoto.position.value * 1000000 / $vendorEdited.keyPhoto.position.timescale) -ne 40000 -or
+                    -not ($vendorEdited.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Changed' })) { throw 'Vendor edit lost source-domain key or falsely claimed original bitstream.' }
+                $vendorEditVideo = & $launcher extract --input $vendorEdited.output.assets[0].path --output-dir (Join-Path $verify "vendor exact extracted $vendorTarget $kind")
+                if ($LASTEXITCODE -ne 0) { throw 'Vendor edited carrier extraction failed.' }
+                $vendorEditDecode = & $launcher probe --input ($vendorEditVideo | ConvertFrom-Json).result.output.assets[0].path --decode-check
+                if ($LASTEXITCODE -ne 0) { throw "Vendor edited video failed full decoding: $vendorEditDecode" }
+            }
+        }
+        Write-Host 'PORTABLE_FFMPEG_VENDOR_EDITS=SUCCESS'
         $trimCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $remuxFixture --target google.microvideo.v1 --start-us 80000 --end-us 160000 --mode LosslessOnly --frame-index 3 --output-dir (Join-Path $verify 'trim create result')
         if ($LASTEXITCODE -ne 0) { throw "Portable real trim Create failed: $trimCreateJson" }
         $trimCreate = ($trimCreateJson | ConvertFrom-Json).result

@@ -66,7 +66,7 @@ class ExactTrimTest {
         val live = MemoryBinarySource(Bytes(GoogleFixtures.v1Photo(bytes, timestamp = "80000")), SourceId("exact-convert-live"))
         val spec = exact.copy(range = TimeRange(Time(40, 1000u), Time(120, 1000u)))
         val policy = MutationPolicy(transcode = TranscodePolicy.Explicit)
-        for (target in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) for (convert in listOf(false, true)) {
+        for (target in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern)) for (convert in listOf(false, true)) {
             val output = MemoryOutputTransaction(context, "exact-composite-$target-$convert")
             val backend = EncodedBackend("") {}; val core = DefaultLivePhotoCore(backend)
             val request = CreateRequest(image, video, ProtocolSelector(target), edits = EditSpec(spec, CoverPosition.FrameIndex(2uL)), policy = policy, output = output, context = context)

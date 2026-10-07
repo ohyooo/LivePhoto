@@ -53,7 +53,7 @@ class FfmpegTrimIntegrationTest {
                 } finally { result.operation.output.assets.forEach { it.readableSource?.close() } }
                 val image = MemoryBinarySource(Bytes(GoogleFixtures.jpeg()), SourceId("exact-composite-image"))
                 val live = MemoryBinarySource(Bytes(GoogleFixtures.v1Photo(Files.readAllBytes(file), timestamp = "160000")), SourceId("exact-composite-live"))
-                for (target in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) for (convert in listOf(false, true)) for (replacement in listOf(false, true)) {
+                for (target in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern)) for (convert in listOf(false, true)) for (replacement in listOf(false, true)) {
                     val tx = MemoryOutputTransaction(context, "real-exact-composite-$target-$convert-$replacement")
                     val edits = EditSpec(trim = spec, keyPosition = if (convert) null else CoverPosition.FrameIndex(4uL),
                         replacementFrame = if (replacement) CoverPosition.FrameIndex(10uL) else null)

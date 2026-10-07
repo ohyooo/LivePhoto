@@ -49,11 +49,11 @@ class CreateReplacementOperationsTest {
         }
         val core = DefaultLivePhotoCore(backend)
         val spec = TrimSpec(TimeRange(Time(80, 1000u), Time(160, 1000u)), TrimMode.LosslessOnly)
-        for (convert in listOf(false, true)) {
-            val tx = MemoryOutputTransaction(context, "replacement-plus-trim-$convert")
+        for (target in listOf(ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern)) for (convert in listOf(false, true)) {
+            val tx = MemoryOutputTransaction(context, "replacement-plus-trim-$target-$convert")
             val edits = EditSpec(spec, CoverPosition.FrameIndex(3uL), CoverPosition.FrameIndex(1uL))
-            val result = (if (convert) core.convert(ConvertRequest(SourceSet.Single(source(GoogleFixtures.v1Photo(original, "120000"), "replace-trim-convert")), ProtocolSelector(ProtocolIds.GoogleV2), edits = edits, output = tx, context = context))
-                else core.create(request(tx).copy(video = source(original, "replace-trim-video"), edits = edits))).orThrow()
+            val result = (if (convert) core.convert(ConvertRequest(SourceSet.Single(source(GoogleFixtures.v1Photo(original, "120000"), "replace-trim-convert")), ProtocolSelector(target), edits = edits, output = tx, context = context))
+                else core.create(request(tx).copy(video = source(original, "replace-trim-video"), target = ProtocolSelector(target), edits = edits))).orThrow()
             try {
                 assertEquals(0, result.keyPhoto!!.position!!.compareTo(Time(40, 1000u)))
                 val change = result.preservation.changes.single { it.selector == "primaryImage" }
@@ -62,7 +62,7 @@ class CreateReplacementOperationsTest {
                 assertEquals(GuaranteeOutcome.Verified, result.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
             } finally { result.output.assets.forEach { it.readableSource?.close() } }
         }
-        assertEquals(2, frame.calls); assertEquals(2, trim.calls)
+        assertEquals(8, frame.calls); assertEquals(8, trim.calls)
     }
     @Test fun policyMetadataAndMissingBackendRejectBeforeDecoderOrPublicWrite(): Unit = runImmediate {
         val backend = ReplaceOperationsTest.FrameBackend(); val core = DefaultLivePhotoCore(backend)

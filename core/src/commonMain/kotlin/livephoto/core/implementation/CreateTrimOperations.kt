@@ -12,8 +12,8 @@ internal object CreateTrimOperations {
     private suspend fun prepare(request: CreateRequest, backend: MediaBackend?, inheritedKey: KeyPhotoResult?): Prepared {
         RequestValidation.validate(request).orThrow()
         val spec = request.edits?.trim ?: fail("INVALID_ARGUMENT", "Trim orchestration requires trim edits", Stage.Plan)
-        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) || request.edits.replacementFrame != null)
-            fail("CAPABILITY_UNSUPPORTED", "This orchestration profile supports trim/key-only Google JPEG Create", Stage.Plan)
+        if (request.target.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern) || request.edits.replacementFrame != null)
+            fail("CAPABILITY_UNSUPPORTED", "Trim/key edits require an implemented JPEG target with classified key semantics", Stage.Plan)
         if (backend?.capabilities()?.operations?.none { it.operation == Operation.Trim && it.implementation in setOf(Implementation.Experimental, Implementation.Supported) } != false)
             fail("CAPABILITY_UNSUPPORTED", "Create/Convert trim requires an available verified trim backend", Stage.Plan)
         val image = BinaryReader(request.image, request.context); image.identity().orThrow()

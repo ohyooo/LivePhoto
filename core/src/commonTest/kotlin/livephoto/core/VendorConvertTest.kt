@@ -83,4 +83,26 @@ class VendorConvertTest {
         assertIs<CoreResult.Failure>(core.convert(ConvertRequest(SourceSet.Single(collision), ProtocolSelector(ProtocolIds.Oplus), output = tx, context = context)))
         assertEquals(TransactionState.Open, tx.query().orThrow().state); assertTrue(tx.committedAssets().isEmpty())
     }
+    @Test fun losslessVendorEditsRetainSamplesAndUseFinalVideoLength(): Unit = runImmediate {
+        val video = CreateTrimOperationsTest().fourSampleVideo()
+        val image = source(GoogleFixtures.jpeg(), "vendor-trim-image")
+        val live = source(GoogleFixtures.v1Photo(video, timestamp = "120000"), "vendor-trim-live")
+        val spec = TrimSpec(TimeRange(Time(80, 1000u), Time(160, 1000u)), TrimMode.LosslessOnly)
+        for (target in targets) for (convert in listOf(false, true)) {
+            val output = MemoryOutputTransaction(context, "vendor-lossless-$target-$convert")
+            val backend = CreateTrimOperationsTest.Backend(); val engine = DefaultLivePhotoCore(backend)
+            val run = if (convert) engine.convert(ConvertRequest(SourceSet.Single(live), ProtocolSelector(target), edits = EditSpec(trim = spec), output = output, context = context))
+                else engine.create(CreateRequest(image, source(video, "vendor-trim-video"), ProtocolSelector(target), edits = EditSpec(spec, CoverPosition.FrameIndex(3uL)), output = output, context = context))
+            val result = assertIs<CoreResult.Success<OperationResult>>(run, run.toString()).value
+            try {
+                val after = session(result.output.assets.single().readableSource!!)
+                assertEquals(target, after.inspection.detection.primaryProtocol!!.protocol)
+                assertEquals(0, result.keyPhoto!!.position!!.compareTo(Time(40, 1000u)))
+                val range = after.bindings.single { it.protocol == target }.video!!
+                assertEquals(Bytes(GoogleFixtures.video().bytes), after.reader.readExactly(range.offset, range.length.toUInt()).orThrow())
+                assertEquals(GuaranteeOutcome.Verified, result.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
+                assertTrue(result.execution.none { it.transcoded })
+            } finally { result.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
 }
