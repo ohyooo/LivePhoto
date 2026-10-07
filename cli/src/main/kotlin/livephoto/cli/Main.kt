@@ -26,7 +26,7 @@ Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
 Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for frame index]
 Extract-frame: [--resource ID] (select an embedded video in a live-photo carrier)
 Validate: [--layers Structure,Protocol,Media]
-Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred]
+Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred|LosslessOnly|Exact] [--allow-transcode]
 Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
 Probe: [--resource ID] [--decode-check] (never downloads media tools)
 Remux/transcode: --container Mp4|Mov; remux [--resource ID]; transcode --codec Avc|Hevc --allow-transcode
@@ -87,7 +87,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
                 "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource")
                 "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format", "update-key", "strict")
-                "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode", "resource")
+                "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode", "resource", "allow-transcode")
                 "remux" -> inputKeys + setOf("output-dir", "strict", "container", "resource")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
                 "validate" -> inputKeys + setOf("layers")

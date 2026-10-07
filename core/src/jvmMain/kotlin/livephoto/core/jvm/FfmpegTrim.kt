@@ -3,14 +3,14 @@ package livephoto.core.jvm
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
-import livephoto.core.implementation.planLosslessTrim
+import livephoto.core.implementation.planTrim
 import livephoto.core.implementation.microseconds
 import livephoto.core.implementation.videoFacts
 import livephoto.core.implementation.verifyTrimDurationHeaders
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Streamcopy only, closed-IDR AVC/no-audio subset; output must match the independent source plan. */
+/** Lossless-first trim; exact encoding only with independently selected and authorized source boundaries. */
 internal object FfmpegTrim {
     suspend fun run(executable: Path, job: BackendJob): CoreResult<BackendResult> = attempt {
         if (job.operation != Operation.Trim) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
@@ -21,7 +21,9 @@ internal object FfmpegTrim {
         val reader = BinaryReader(source, job.context)
         val identity = reader.identity().orThrow()
         val video = BmffVideoProbe(reader).probe(ByteRange(0uL, identity.size)).orThrow()
-        val plan = planLosslessTrim(reader, video, job.trim ?: fail("INVALID_ARGUMENT", "Missing trim specification"))
+        val selected = planTrim(reader, video, job.trim ?: fail("INVALID_ARGUMENT", "Missing trim specification"), job.policy)
+        if (selected.encoded) return@attempt FfmpegTranscode.run(executable, job).orThrow()
+        val plan = selected.boundaries
         val metadata = RemuxVerification.metadata(reader, video, trimDurationsVerifiedSeparately = true)
         if (video.container != VideoContainer.Mp4 || video.movieTimescale > Int.MAX_VALUE.toUInt() || plan.track.timescale > Int.MAX_VALUE.toUInt())
             fail("LOSSLESS_TRIM_UNAVAILABLE", "FFmpeg trim currently requires a bounded MP4 source", Stage.Plan)

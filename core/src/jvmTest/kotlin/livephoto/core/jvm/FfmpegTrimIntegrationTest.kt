@@ -17,6 +17,41 @@ class FfmpegTrimIntegrationTest {
         assumeTrue("No existing FFmpeg; real lossless trim was not run", found.ffmpegPath != null)
         return found
     }
+    @Test fun realExactNonSyncTrimRequiresExplicitAuthorizationAndFullyDecodes(): Unit = runImmediate {
+        val found = discovery(); val directory = Files.createTempDirectory("livephoto-exact-trim-"); val file = directory.resolve("source.mp4")
+        try {
+            val generated = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror",
+                "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "12", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
+                "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "3", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-use_editlist", "0",
+                "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", file.toString()), 60_000L)
+            assertEquals(0, generated.code, generated.output)
+            val input = FileBinarySource(file)
+            try {
+                val reader = BinaryReader(input, context); val range = ByteRange(0uL, reader.identity().orThrow().size); val hash = sha256Range(reader, range).orThrow()
+                val before = BmffVideoProbe(reader).probe(range).orThrow(); assertFalse(before.tracks.single().samples[1].isSync)
+                val core = DefaultLivePhotoCore(found.backend)
+                val spec = TrimSpec(TimeRange(Time(40, 1000u), Time(280, 1000u)), TrimMode.Exact)
+                val forbidden = MemoryOutputTransaction(context, "exact-forbid")
+                assertEquals("EXACT_TRIM_UNAVAILABLE", assertIs<CoreResult.Failure>(core.trim(TrimRequest(ResourceRef(SourceSet.Single(input)), spec, output = forbidden, context = context))).error.code.value)
+                assertTrue(forbidden.committedAssets().isEmpty())
+                val output = MemoryOutputTransaction(context, "exact-encoded")
+                val request = TrimRequest(ResourceRef(SourceSet.Single(input)), spec, MutationPolicy(transcode = TranscodePolicy.Explicit), output, context)
+                core.plan(request).orThrow(); assertEquals(TransactionState.Open, output.query().orThrow().state)
+                val run = core.trim(request)
+                val result = assertIs<CoreResult.Success<TrimResult>>(run, run.toString()).value
+                try {
+                    assertTrue(result.wasTranscoded); assertFalse(result.wasBitstreamPreserved); assertFalse(result.wasRemuxed); assertFalse(result.retainedHiddenContent)
+                    assertEquals(0, result.actualStart.compareTo(spec.range.start)); assertEquals(0, result.actualEnd.compareTo(spec.range.end))
+                    assertEquals(GuaranteeOutcome.Changed, result.operation.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
+                    val asset = result.operation.output.assets.single(); val out = BinaryReader(asset.readableSource!!, context)
+                    val after = BmffVideoProbe(out).probe(ByteRange(0uL, out.identity().orThrow().size)).orThrow()
+                    assertEquals(6, after.tracks.single().samples.size); assertTrue(after.tracks.single().samples.first().isSync)
+                    assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(asset.readableSource)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                } finally { result.operation.output.assets.forEach { it.readableSource?.close() } }
+                assertEquals(hash, sha256Range(reader, range).orThrow())
+            } finally { input.close() }
+        } finally { Files.deleteIfExists(file); Files.delete(directory) }
+    }
     @Test fun realClosedGopTrimKeepsSelectedSamplesWithoutEncodingOrHiddenContent(): Unit = runImmediate {
         val found = discovery(); val directory = Files.createTempDirectory("livephoto-trim-fixture-"); val file = directory.resolve("closed gop.mp4")
         try {

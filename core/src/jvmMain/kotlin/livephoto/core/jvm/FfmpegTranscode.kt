@@ -11,14 +11,18 @@ import java.nio.file.Path
 /** Explicit software AVC profile. No automatic install, hidden stream loss, HDR/CFR/resize or fallback. */
 internal object FfmpegTranscode {
     suspend fun run(executable: Path, job: BackendJob): CoreResult<BackendResult> = attempt {
-        if (job.operation != Operation.Transcode) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
+        if (job.operation !in setOf(Operation.Transcode, Operation.Trim)) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
         job.validate().orThrow()
-        val encoding = job.videoEncoding ?: fail("INVALID_ARGUMENT", "Missing video encoding", Stage.Plan)
+        val encoding = if (job.operation == Operation.Trim) VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4)
+            else job.videoEncoding ?: fail("INVALID_ARGUMENT", "Missing video encoding", Stage.Plan)
         val ref = job.inputs.single(); val source = (ref.input as? SourceSet.Single)?.source ?: fail("INVALID_ARGUMENT", "Transcode requires one isolated video")
         if (ref.resourceId != null || ref.snapshot != null) fail("INVALID_ARGUMENT", "Core must resolve the transcode resource")
         val reader = BinaryReader(source, job.context); val identity = reader.identity().orThrow()
         val video = BmffVideoProbe(reader).probe(ByteRange(0uL, identity.size)).orThrow(); val track = transcodeProfile(video, encoding)
-        RemuxVerification.metadata(reader, video, transcodeAvcConfiguration = true)
+        val trim = if (job.operation == Operation.Trim) planTrim(reader, video, job.trim!!, job.policy).also {
+            if (!it.encoded) fail("INVALID_ARGUMENT", "Lossless trim must not invoke an encoder", Stage.Plan)
+        } else null
+        RemuxVerification.metadata(reader, video, trimDurationsVerifiedSeparately = trim != null, transcodeAvcConfiguration = true)
         if (checkedMultiply(checkedMultiply(track.width!!.toULong(), track.height!!.toULong()), 4uL) > job.context.limits.maxMetadataBytes)
             fail("RESOURCE_LIMIT_EXCEEDED", "Decoded frame exceeds bounded verification budget", Stage.Plan)
         if (identity.size >= job.context.limits.maxSpoolBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Transcode input leaves no temporary output budget", Stage.Plan)
@@ -41,7 +45,8 @@ internal object FfmpegTranscode {
             // Refuse unknown source pixel semantics BEFORE invoking any encoder.
             val sourceDecode = ExternalProcess.run(decode(input) + listOf("-vf", filter, "-fps_mode", "passthrough", "-f", "null", "-"), 600_000L, job.context)
             checkProcess(sourceDecode, reader, "DECODE_FAILED"); verifyTrace(sourceDecode.output, track)
-            val encoded = ExternalProcess.run(decode(input) + listOf("-vf", "settb=expr=1/${track.timescale},setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
+            val trimFilter = trim?.boundaries?.let { "trim=start_pts=${it.startTicks}:end_pts=${it.startTicks + it.durationTicks},setpts=PTS-${it.startTicks}," } ?: ""
+            val encoded = ExternalProcess.run(decode(input) + listOf("-vf", "settb=expr=1/${track.timescale},${trimFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
                 "-fps_mode", "passthrough", "-enc_time_base:v", "1:${track.timescale}", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-bf", "0", "-g", "30", "-threads:v", "1", "-pix_fmt", "+yuv420p",
                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-avoid_negative_ts", "disabled", "-use_editlist", "0",
                 "-map_metadata", "0", "-map_chapters", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0",
@@ -54,7 +59,8 @@ internal object FfmpegTranscode {
             val staged = FileBinarySource(output)
             try {
                 val outputReader = BinaryReader(staged, job.context); val actual = BmffVideoProbe(outputReader).probe(ByteRange(0uL, size)).orThrow()
-                verifyTranscode(reader, video, outputReader, actual, encoding)
+                if (trim == null) verifyTranscode(reader, video, outputReader, actual, encoding)
+                else verifyEncodedTrim(reader, trim.boundaries, outputReader, actual)
                 val decodedOutput = ExternalProcess.run(decode(output) + listOf("-vf", filter, "-fps_mode", "passthrough", "-f", "null", "-"), 600_000L, job.context)
                 checkProcess(decodedOutput, reader, "DECODE_FAILED"); verifyTrace(decodedOutput.output, actual.tracks.single())
                 val facts = videoFacts(actual); reader.validateIdentity().orThrow()
@@ -63,7 +69,8 @@ internal object FfmpegTranscode {
                 finally { handle.sink.close().orThrow() }
                 reader.validateIdentity().orThrow()
                 BackendResult(listOf(StagedAsset(handle.id, AssetRole.MotionVideo, "video/mp4", size)), listOf(facts), listOf(
-                    ExecutionRecord(Stage.Transcode, "ffmpeg-external", "Explicit software libx264 medium/CRF18/bf0; whole source/output progressive square-pixel eight-bit BT.709 limited SDR decode and exact VFR sample timeline verified; not bitstream preserving", true, false, false, videoFacts(video), facts)))
+                    ExecutionRecord(if (trim == null) Stage.Transcode else Stage.Trim, "ffmpeg-external", "Authorized software libx264 medium/CRF18/bf0; whole source/output SDR decode and exact selected sample timeline verified; not bitstream preserving", true, false, false, videoFacts(video), facts)),
+                    tracks = trim?.let { listOf(it.trackTrim) } ?: emptyList(), timelineMap = trim?.boundaries?.mapping ?: emptyList())
             } finally { staged.close() }
         } catch (fault: CoreFault) { throw fault }
         catch (_: Exception) { fail("IO_READ_FAILED", "Transcode temporary media IO failed", Stage.Transcode) }

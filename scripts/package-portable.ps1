@@ -138,6 +138,18 @@ try {
         $trimDecode = & $launcher probe --input $trim.operation.output.assets[0].path --decode-check
         if ($LASTEXITCODE -ne 0) { throw "Portable trimmed video could not be decoded: $trimDecode" }
         Write-Host 'PORTABLE_FFMPEG_TRIM=SUCCESS'
+        $exactForbidden = & $launcher trim --input $transcodeFixture --start-us 40000 --end-us 400000 --mode Exact --output-dir (Join-Path $verify 'exact forbidden')
+        if ($LASTEXITCODE -ne 3 -or ($exactForbidden | ConvertFrom-Json).error.code.value -ne 'EXACT_TRIM_UNAVAILABLE') { throw 'Portable Exact silently encoded without authorization.' }
+        $exactJson = & $launcher trim --input $transcodeFixture --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --output-dir (Join-Path $verify 'exact trim result')
+        if ($LASTEXITCODE -ne 0) { throw "Portable authorized Exact VFR trim failed: $exactJson" }
+        $exact = ($exactJson | ConvertFrom-Json).result
+        if (-not $exact.wasTranscoded -or $exact.wasBitstreamPreserved -or $exact.wasRemuxed -or $exact.retainedHiddenContent -or
+            ([decimal]$exact.actualStart.value * 1000000 / $exact.actualStart.timescale) -ne 40000 -or
+            ([decimal]$exact.actualEnd.value * 1000000 / $exact.actualEnd.timescale) -ne 400000 -or
+            -not ($exact.operation.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Changed' })) { throw 'Portable Exact did not disclose changed coding and precise boundaries.' }
+        $exactDecode = & $launcher probe --input $exact.operation.output.assets[0].path --decode-check
+        if ($LASTEXITCODE -ne 0) { throw "Portable Exact output failed full decoding: $exactDecode" }
+        Write-Host 'PORTABLE_FFMPEG_EXACT_TRIM=SUCCESS'
         $trimCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $remuxFixture --target google.microvideo.v1 --start-us 80000 --end-us 160000 --mode LosslessOnly --frame-index 3 --output-dir (Join-Path $verify 'trim create result')
         if ($LASTEXITCODE -ne 0) { throw "Portable real trim Create failed: $trimCreateJson" }
         $trimCreate = ($trimCreateJson | ConvertFrom-Json).result
