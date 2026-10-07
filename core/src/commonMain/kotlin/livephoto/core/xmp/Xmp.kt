@@ -47,6 +47,10 @@ internal data class XmpCollection(
 }
 
 internal object XmpReader {
+    fun parseReserved(bytes: Bytes, context: Context, budget: ParseBudget): CoreResult<XmpPacket> = attemptNow {
+        packet(XmlParser.parseReserved(bytes, context, budget).orThrow())
+    }
+
     fun parse(bytes: Bytes, context: Context): CoreResult<XmpPacket> = attemptNow {
         val document = XmlParser.parse(bytes, context).orThrow()
         packet(document)

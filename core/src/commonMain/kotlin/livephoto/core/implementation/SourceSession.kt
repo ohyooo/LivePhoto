@@ -84,7 +84,7 @@ internal class SourceSession internal constructor(
                         val videoRegion = Region(videoId(binding.protocol), identity.id, binding.video!!, ResourceKind.Video, binding.protocol)
                         val regions = mutableListOf(primaryRegion, videoRegion)
                         val resources = mutableListOf(Resource(primaryRegion.id, primaryRegion.kind, listOf(primaryRegion), false), Resource(videoRegion.id, videoRegion.kind, listOf(videoRegion), true))
-                        val heif = heic.itemGraph?.let { inspectHeifItems(identity, it, budget) }
+                        val heif = heic.itemGraph?.let { inspectHeifItems(reader, it, budget) }
                         if (heif != null) { regions += heif.regions; resources += heif.resources }
                         for ((index, record) in heic.directory.records.withIndex()) {
                             budget.item(); budget.retain(96uL)
@@ -97,7 +97,7 @@ internal class SourceSession internal constructor(
                         val metadata = mutableListOf(MetadataEntry("samsung:mpv2:pointer-mode", value = heic.pointerMode?.let { Value.Text(it) }, owner = Ownership.SourceProtocol,
                             location = Location(source = identity.id, range = heic.directory.motionRecord!!.payloadRange, selector = "samsung:mpv2:pointer-mode"), origin = FactOrigin.Parsed))
                         if (heif != null) metadata += heif.metadata
-                        val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources, heif?.relationships ?: emptyList()), media, metadata, binding.key, issues = binding.issues)
+                        val inspection = InspectionResult(snapshot, detection, Layout(identities, regions, resources, heif?.relationships ?: emptyList()), media, metadata, binding.key, issues = binding.issues + (heif?.issues ?: emptyList()))
                         reader.validateIdentity().orThrow()
                         return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory, heifItems = heic.itemGraph)
                     }

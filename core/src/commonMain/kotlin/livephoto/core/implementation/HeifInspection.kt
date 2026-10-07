@@ -5,10 +5,11 @@ import livephoto.core.binary.*
 import livephoto.core.heif.*
 
 internal data class HeifInspectionFragment(val regions: List<Region>, val resources: List<Resource>,
-    val metadata: List<MetadataEntry>, val relationships: List<Relationship>)
+    val metadata: List<MetadataEntry>, val relationships: List<Relationship>, val issues: List<Issue>)
 
 /** Item bytes are never mislabeled as independent image carriers; string payloads are not logged. */
-internal fun inspectHeifItems(identity: SourceIdentity, graph: HeifItemGraph, budget: ParseBudget): HeifInspectionFragment {
+internal suspend fun inspectHeifItems(reader: BinaryReader, graph: HeifItemGraph, budget: ParseBudget): HeifInspectionFragment {
+    val identity = reader.identity().orThrow()
     if (identity != graph.locations.identity) fail("SOURCE_CHANGED", "HEIF inspection graph belongs to a different source")
     val regions = mutableListOf<Region>()
     val resources = mutableListOf<Resource>()
@@ -55,5 +56,18 @@ internal fun inspectHeifItems(identity: SourceIdentity, graph: HeifItemGraph, bu
             relationships += Relationship(kind, itemId(reference.from), itemId(destination), mapOf("heifReferenceType" to Value.Text(reference.type)))
         }
     }
-    return HeifInspectionFragment(frozenList(regions), frozenList(resources), frozenList(metadata), frozenList(relationships))
+    val facts = HeifMetadataReader.read(reader, graph, budget).orThrow()
+    for (item in facts.items) {
+        budget.item(); budget.retain(256uL)
+        val selector = "heif:item:${item.id}:metadata-format"
+        val location = Location(source = identity.id, range = graph.infos.single { it.id == item.id }.box.range, selector = selector)
+        metadata += MetadataEntry(selector, value = Value.Text(if (item.tiff != null) "Exif/TIFF" else "XMP/RDF"),
+            owner = Ownership.StandardImage, location = location, origin = FactOrigin.Parsed)
+        item.tiff?.let { tiff ->
+            budget.item(); budget.retain(128uL)
+            metadata += MetadataEntry("heif:item:${item.id}:tiff-ifd-count", value = Value.Number(tiff.ifds.size.toString()),
+                owner = Ownership.StandardImage, location = location, origin = FactOrigin.Parsed)
+        }
+    }
+    return HeifInspectionFragment(frozenList(regions), frozenList(resources), frozenList(metadata), frozenList(relationships), facts.issues)
 }

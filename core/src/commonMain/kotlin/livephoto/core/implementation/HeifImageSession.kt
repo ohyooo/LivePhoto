@@ -33,7 +33,8 @@ internal object HeifImageSession {
         val primaryType = graph.infos.single { it.id == graph.primary }.type
         val format = when (primaryType) { "hvc1", "hev1" -> ImageFormat.Heic; "av01" -> ImageFormat.Avif; else -> ImageFormat.HeifOther }
         val mime = when (format) { ImageFormat.Heic -> "image/heic"; ImageFormat.Avif -> "image/avif"; else -> "image/heif" }
-        val fragment = inspectHeifItems(identity, graph, budget)
+        val fragment = inspectHeifItems(reader, graph, budget)
+        issues += fragment.issues
         val detection = DetectionResult(if (plain) Disposition.NonLive else Disposition.Unknown, matches = emptyList(), issues = frozenList(issues), snapshot = snapshot)
         val facts = MediaFacts(imageFormat = format, mime = mime, width = image?.declaredWidth, height = image?.declaredHeight, coverage = Coverage.Partial, issues = frozenList(issues))
         val inspection = InspectionResult(snapshot, detection, Layout(snapshot.identities, fragment.regions, fragment.resources, fragment.relationships),
