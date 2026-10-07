@@ -60,6 +60,24 @@ try {
     if ($LASTEXITCODE -ne 3) { throw 'Portable IO/error exit-code smoke test failed' }
     $referenceImage = Join-Path $repository 'reference/video.jpg'
     $referenceVideo = Join-Path $repository 'reference/video.mp4'
+    $mediaJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'missing-ffmpeg.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Portable media discovery failed.' }
+    $media = ($mediaJson | ConvertFrom-Json).result
+    if (-not ($media.discoveryIssues | Where-Object { $_.code.value -eq 'FFMPEG_EXPLICIT_PATH_UNAVAILABLE' })) {
+        throw 'Portable media discovery did not report the unavailable explicit tool.'
+    }
+    $probeJson = & $launcher probe --input $referenceVideo --decode-check
+    if ($media.ffmpegPath) {
+        if ($LASTEXITCODE -ne 0 -or -not ((($probeJson | ConvertFrom-Json).result.issues) | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) {
+            throw "Portable existing-FFmpeg decode failed: $probeJson"
+        }
+        Write-Host 'PORTABLE_FFMPEG_DECODE=SUCCESS'
+    } else {
+        if ($LASTEXITCODE -ne 3 -or ($probeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
+            throw "Portable missing-backend gate failed: $probeJson"
+        }
+        Write-Host 'PORTABLE_FFMPEG_DECODE=UNAVAILABLE'
+    }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }
     $created = $createdJson | ConvertFrom-Json

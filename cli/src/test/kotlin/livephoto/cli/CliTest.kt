@@ -1,6 +1,8 @@
 package livephoto.cli
 
 import livephoto.core.*
+import livephoto.core.jvm.BackendDiscovery
+import java.nio.file.Path
 import kotlin.test.*
 
 class CliTest {
@@ -45,5 +47,24 @@ class CliTest {
         assertEquals("\"a\\n\\\"\\\\\"", Json.encode("a\n\"\\"))
         assertTrue(Json.encode(ByteRange(ULong.MAX_VALUE, 0uL)).contains("18446744073709551615"))
         assertFalse(Json.encode(GenerationToken("secret")).contains("secret"))
+    }
+    @Test fun backendPathIsForwardedAndOrdinaryCommandsDoNotDiscoverTools() = blocking {
+        var path: Path? = null
+        var calls = 0
+        val cli = Cli(discover = { path = it; calls++; BackendDiscovery(null, null, emptyList()) })
+        assertEquals(0, cli.run(listOf("--help")) {})
+        assertEquals(0, cli.run(listOf("capabilities", "--target", "google.microvideo.v1")) {})
+        assertEquals(0, calls)
+        assertEquals(0, cli.run(listOf("media-capabilities", "--ffmpeg", "tools with spaces/ffmpeg.exe")) {})
+        assertEquals(Path.of("tools with spaces/ffmpeg.exe"), path)
+        assertEquals(1, calls)
+    }
+    @Test fun decodeCheckIsAnExplicitProbeRequestFlag() = blocking {
+        var decode = false
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> { decode = request.decodeCheck; return failure }
+        }
+        assertEquals(3, Cli(core).run(listOf("probe", "--input", "not-opened", "--decode-check")) {})
+        assertTrue(decode)
     }
 }

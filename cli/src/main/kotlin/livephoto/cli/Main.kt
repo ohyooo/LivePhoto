@@ -23,6 +23,8 @@ Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
 Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for frame index]
 Validate: [--layers Structure,Protocol,Media]
 Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred]
+Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
+Probe: [--resource ID] [--decode-check] (never downloads media tools)
 Remux/transcode: --container Mp4|Mov; transcode --codec Avc|Hevc --allow-transcode
 Common: --strict, --max-bytes N (default 1 GiB), --help, --version
 
@@ -43,7 +45,8 @@ internal fun <T> blocking(block: suspend () -> T): T {
     return completion!!.getOrThrow()
 }
 
-internal class Cli(private val core: LivePhotoCore = DefaultLivePhotoCore()) {
+internal class Cli(private val providedCore: LivePhotoCore? = null,
+    private val discover: (Path?) -> BackendDiscovery = { JvmMediaBackends.discover(it) }) {
     suspend fun run(args: List<String>, emit: (String) -> Unit): Int {
         if (args.isEmpty() || args == listOf("--help") || args == listOf("help")) { emit(HELP); return 0 }
         if (args == listOf("--version")) { emit("LivePhoto 0.1.0"); return 0 }
@@ -55,7 +58,7 @@ internal class Cli(private val core: LivePhotoCore = DefaultLivePhotoCore()) {
             val writes = setOf("create", "convert", "extract", "split", "repair", "set-key", "extract-frame", "replace-cover", "trim", "remux", "transcode")
             require(command in read + writes + setOf("capabilities", "media-capabilities")) { "Unknown command: $command" }
             val options = linkedMapOf<String, String>()
-            val flags = setOf("apply", "strict", "raw-carrier", "allow-transcode")
+            val flags = setOf("apply", "strict", "raw-carrier", "allow-transcode", "decode-check")
             var i = 1
             while (i < args.size) {
                 val key = args[i++].removePrefix("--")
@@ -66,7 +69,8 @@ internal class Cli(private val core: LivePhotoCore = DefaultLivePhotoCore()) {
             val inputKeys = setOf("input", "pair-video")
             val positionKeys = setOf("frame-index", "time-us", "track-id")
             val targetKeys = setOf("target", "profile")
-            val allowed = common + when (command) {
+            val mediaCommands = setOf("probe", "media-capabilities", "extract-frame", "replace-cover", "trim", "remux", "transcode")
+            val allowed = common + (if (command in mediaCommands) setOf("ffmpeg") else emptySet()) + when (command) {
                 "capabilities" -> targetKeys
                 "media-capabilities" -> emptySet()
                 "create" -> setOf("image", "video", "output-dir", "strict") + targetKeys
@@ -80,10 +84,13 @@ internal class Cli(private val core: LivePhotoCore = DefaultLivePhotoCore()) {
                 "remux" -> inputKeys + setOf("output-dir", "strict", "container")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
                 "validate" -> inputKeys + setOf("layers")
-                "probe" -> inputKeys + setOf("resource")
+                "probe" -> inputKeys + setOf("resource", "decode-check")
                 else -> inputKeys
             }
             require(options.keys.all { it in allowed }) { "Unknown or inapplicable option: ${options.keys.first { it !in allowed }}" }
+            val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options)
+            val discovery = if (providedCore == null && needsBackend) discover(options["ffmpeg"]?.let(Path::of)) else null
+            val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
             fun required(name: String): String = options[name] ?: errorArgument("Missing --$name")
             val maxBytes = options["max-bytes"]?.toULong() ?: 1_073_741_824uL
             require(maxBytes in 1uL..Long.MAX_VALUE.toULong()) { "Invalid byte budget" }
@@ -102,13 +109,14 @@ internal class Cli(private val core: LivePhotoCore = DefaultLivePhotoCore()) {
                 transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid)
             val result: CoreResult<*> = when (command) {
                 "capabilities" -> CoreResult.Success(core.getProtocolCapabilities(target()))
-                "media-capabilities" -> CoreResult.Success(core.getMediaCapabilities())
+                "media-capabilities" -> CoreResult.Success(mapOf("capabilities" to core.getMediaCapabilities(),
+                    "ffmpegPath" to discovery?.ffmpegPath?.toString(), "discoveryIssues" to (discovery?.issues ?: emptyList<Issue>())))
                 "detect" -> core.detect(ReadRequest(source(), context))
                 "inspect" -> core.inspect(ReadRequest(source(), context))
                 "analyze" -> core.analyze(AnalyzeRequest(source(), context = context))
                 "validate" -> core.validate(ValidationRequest(source(), layers = options["layers"]?.split(',')?.map { Layer.valueOf(it) } ?: listOf(Layer.Structure, Layer.Protocol, Layer.Media), context = context))
                 "get-key" -> core.getKeyPhotoPosition(ReadRequest(source(), context))
-                "probe" -> core.probe(ProbeRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), context = context))
+                "probe" -> core.probe(ProbeRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), decodeCheck = "decode-check" in options, context = context))
                 "create" -> core.create(CreateRequest(file("image"), file("video"), target(), policy = policy, output = destination(), context = context))
                 "convert" -> core.convert(ConvertRequest(source(), target(), policy = policy, output = destination(), context = context))
                 "extract" -> core.extract(ExtractRequest(source(), options["resources"]?.split(',')?.map(::ResourceId) ?: emptyList(), includeRawCarrier = options.containsKey("raw-carrier"), output = destination(), context = context))
