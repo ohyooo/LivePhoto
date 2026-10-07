@@ -37,7 +37,7 @@ internal object GoogleJpegWriter {
         }
         var bytes = if (packet == null) XmpWriter.create(updates.filterValues { it != null }.mapValues { it.value!! }, context).orThrow()
             else XmpWriter.merge(packet, updates, context).orThrow()
-        if (target.protocol == ProtocolIds.GoogleV2) bytes = addDirectory(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context, primaryPadding, motionPadding)
+        if (target.protocol == ProtocolIds.GoogleV2) bytes = GoogleDirectoryWriter.append(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context, primaryPadding, motionPadding)
         patch(jpeg, bytes, additionalPatches)
     }
 
@@ -105,22 +105,4 @@ internal object GoogleJpegWriter {
         return XmpReader.parse(XmlWriter.write(document, context).orThrow(), context).orThrow()
     }
 
-    private fun addDirectory(packet: XmpPacket, length: ULong, mime: String, context: Context, primaryPadding: ULong, motionPadding: ULong?): Bytes {
-        fun name(prefix: String, uri: String, local: String): XmlName = XmlName("$prefix:$local", ExpandedName(uri, local))
-        fun item(semantic: String, type: String, bytes: ULong?): XmlElement {
-            val attributes = mutableListOf(XmlAttribute(name("i", ITEM_URI, "Semantic"), semantic), XmlAttribute(name("i", ITEM_URI, "Mime"), type))
-            if (bytes != null) attributes += XmlAttribute(name("i", ITEM_URI, "Length"), bytes.toString())
-            if (semantic == "Primary" && primaryPadding != 0uL) attributes += XmlAttribute(name("i", ITEM_URI, "Padding"), primaryPadding.toString())
-            if (semantic == "MotionPhoto" && motionPadding != null) attributes += XmlAttribute(name("i", ITEM_URI, "Padding"), motionPadding.toString())
-            val content = XmlElement(name("c", CONTAINER_URI, "Item"), attributes, mapOf("c" to CONTAINER_URI, "i" to ITEM_URI), emptyList())
-            return XmlElement(name("r", RDF_URI, "li"), listOf(XmlAttribute(name("r", RDF_URI, "parseType"), "Resource")), emptyMap(), listOf(content))
-        }
-        val sequence = XmlElement(name("r", RDF_URI, "Seq"), emptyList(), mapOf("r" to RDF_URI), listOf(item("Primary", "image/jpeg", null), item("MotionPhoto", mime, length)))
-        val directory = XmlElement(name("c", CONTAINER_URI, "Directory"), emptyList(), mapOf("c" to CONTAINER_URI), listOf(sequence))
-        val first = packet.descriptions.first()
-        fun transform(element: XmlElement): XmlElement = if (element === first) element.copy(children = element.children + directory)
-            else element.copy(children = element.children.map { if (it is XmlElement) transform(it) else it })
-        val root = transform(packet.document.root)
-        return XmlWriter.write(XmlDocument(root, packet.document.nodes.map { if (it === packet.document.root) root else it }), context).orThrow()
-    }
 }

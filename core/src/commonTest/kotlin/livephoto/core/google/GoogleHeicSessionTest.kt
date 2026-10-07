@@ -142,10 +142,10 @@ class GoogleHeicSessionTest {
         core.extract(ExtractRequest(input(fixture.bytes), emptyList(), output = output, context = context)).orThrow()
         assertEquals(Bytes(fixture.video), output.committedAssets().values.single())
     }
-    @Test fun readCapabilitiesAreExperimentalAndWritesAndDeviceEvidenceAreNotClaimed() {
+    @Test fun readAndFiniteCreateAreExperimentalButBroaderWritesAndDeviceEvidenceAreNotClaimed() {
         val capabilities = core.getProtocolCapabilities(target)
         for (operation in capabilities.operations) {
-            assertEquals(if (operation.operation in setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)) Implementation.Experimental else Implementation.Planned,
+            assertEquals(if (operation.operation in setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey, Operation.Create)) Implementation.Experimental else Implementation.Planned,
                 operation.implementation)
             assertTrue(operation.verification.none { it == Verification.DeviceTested })
         }

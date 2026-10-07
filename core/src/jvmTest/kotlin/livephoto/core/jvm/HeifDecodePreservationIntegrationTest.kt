@@ -86,6 +86,23 @@ class HeifDecodePreservationIntegrationTest {
                 metadataSource.close(); metadataTx.abort().orThrow()
                 val metadataPath = directory.resolve("with XMP $index.heic"); owned.add(metadataPath); Files.write(metadataPath, metadataBytes.toByteArray())
                 assertEquals(originalDecode, decode(metadataPath))
+                val createdTx = MemoryOutputTransaction(context, "real-heif-public-create-$index")
+                val motionSource = FileBinarySource(movie)
+                try {
+                    val created = DefaultLivePhotoCore().create(CreateRequest(input.source, motionSource,
+                        ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("heic")), output = createdTx, context = context)).orThrow()
+                    assertEquals(Coverage.Partial, created.validation.coverage)
+                    val compositeBytes = createdTx.committedAssets().values.single()
+                    val compositePath = directory.resolve("public motion $index.heic"); owned.add(compositePath); Files.write(compositePath, compositeBytes.toByteArray())
+                    assertEquals(originalDecode, decode(compositePath))
+                    val composite = SourceSet.Single(MemoryBinarySource(compositeBytes, SourceId("real-motion-heic-$index")))
+                    val extract = MemoryOutputTransaction(context, "real-heif-public-extract-$index")
+                    DefaultLivePhotoCore().extract(ExtractRequest(composite, emptyList(), output = extract, context = context)).orThrow()
+                    val extractedBytes = extract.committedAssets().values.single()
+                    assertContentEquals(Files.readAllBytes(movie), extractedBytes.toByteArray())
+                    val extractedPath = directory.resolve("raw motion $index.mp4"); owned.add(extractedPath); Files.write(extractedPath, extractedBytes.toByteArray())
+                    assertEquals(originalDecode, decode(extractedPath))
+                } finally { motionSource.close() }
                 val stagedDecode = DefaultLivePhotoCore(found.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(MemoryBinarySource(result, SourceId("heif-expanded-decode-$index")))), true, context)).orThrow()
                 assertTrue(stagedDecode.issues.any { it.code == IssueCode("MEDIA_DECODE_COMPLETED") })
                 if (index == 0) {
