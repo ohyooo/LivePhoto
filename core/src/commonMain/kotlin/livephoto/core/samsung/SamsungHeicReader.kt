@@ -4,9 +4,10 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.implementation.*
+import livephoto.core.heif.*
 
 internal data class SamsungHeicFacts(val binding: CarrierBinding, val video: VideoStructure?, val directory: SefDirectory,
-    val primary: ByteRange, val boxes: List<BmffBox>, val pointerMode: String?)
+    val primary: ByteRange, val boxes: List<BmffBox>, val pointerMode: String?, val itemGraph: HeifItemGraph?)
 
 /** Establishes complete box/SEF/media ranges. HEIF image-item decoding and rewriting are not claimed. */
 internal object SamsungHeicReader {
@@ -27,6 +28,17 @@ internal object SamsungHeicReader {
         if (readUnsigned(fullbox, Endian.Big) != 0uL) fail("UNSUPPORTED_CONTAINER", "HEIF meta version/flags are not implemented")
         val metaBoxes = parser.readBoxes(ByteRange(meta.payload.offset + 4uL, meta.payload.length - 4uL), 1u).orThrow()
         if (metaBoxes.count { it.type == "pitm" } != 1 || metaBoxes.count { it.type == "iloc" } != 1 || metaBoxes.count { it.type == "iinf" } != 1) fail("CORRUPTED_CONTAINER", "HEIF primary item tables are absent or ambiguous")
+        val graphResult = HeifItemGraphReader.read(reader, boxes, budget)
+        val graph = when (graphResult) {
+            is CoreResult.Success -> graphResult.value
+            is CoreResult.Failure -> {
+                if (graphResult.error.code.value in setOf("CANCELLED", "SOURCE_CHANGED", "IO_READ_FAILED", "RESOURCE_LIMIT_EXCEEDED", "UNEXPECTED_EOF")) throw CoreFault(graphResult.error)
+                null
+            }
+        }
+        val graphIssues = if (graphResult is CoreResult.Failure) listOf(Issue(graphResult.error.code,
+            if (graphResult.error.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER")) Severity.Warning else Severity.Error,
+            Layer.Structure, graphResult.error.location ?: Location(source = identity.id, range = meta.range))) else emptyList()
         val children = parser.readBoxes(mpvd.payload, 1u).orThrow()
         val nested = children.filter { it.type == "sefd" }
         val sefd = (topSefd + nested).singleOrNull() ?: fail("AMBIGUOUS_LAYOUT", "Samsung HEIC has no unique sefd")
@@ -65,11 +77,11 @@ internal object SamsungHeicReader {
             if (videoResult.error.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "VIDEO_CODEC_NOT_SUPPORTED", "AUDIO_CODEC_NOT_SUPPORTED")) Severity.Warning else Severity.Error,
             Layer.Media, videoResult.error.location)) else emptyList()
         val issues = listOf(Issue(IssueCode("CAPABILITY_UNSUPPORTED"), Severity.Warning, Layer.Structure,
-            Location(source = identity.id, range = meta.range), observed = Value.Text("HEIF item references/codec configuration and decode checks are not implemented"))) +
-            mediaIssues + (if (directory.version != 107u || "absolute" !in candidates.values.single()) listOf(Issue(IssueCode("UNKNOWN_PROTOCOL_VARIANT"), Severity.Warning, Layer.Protocol)) else emptyList()) +
+            Location(source = identity.id, range = meta.range), observed = Value.Text("HEIF codec/derived item interpretation and decode checks are not implemented"))) +
+            graphIssues + mediaIssues + (if (directory.version != 107u || "absolute" !in candidates.values.single()) listOf(Issue(IssueCode("UNKNOWN_PROTOCOL_VARIANT"), Severity.Warning, Layer.Protocol)) else emptyList()) +
             if (directory.legacyDialect) listOf(Issue(IssueCode("SEF_DIRECTORY_INVALID"), Severity.Error, Layer.Protocol)) else emptyList()
         val binding = CarrierBinding(ProtocolIds.Samsung, mediaRange, issues = issues, profile = ProfileId("heic-sef-mpv2"))
         val primaryEnd = minOf(mpvd.range.offset, topSefd.firstOrNull()?.range?.offset ?: mpvd.range.offset)
-        SamsungHeicFacts(binding, video, directory, ByteRange(0uL, primaryEnd), boxes, candidates.values.single().joinToString("|"))
+        SamsungHeicFacts(binding, video, directory, ByteRange(0uL, primaryEnd), boxes, candidates.values.single().joinToString("|"), graph)
     }
 }

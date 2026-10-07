@@ -1,6 +1,8 @@
 package livephoto.core.samsung
 
 import livephoto.core.*
+import livephoto.core.binary.*
+import livephoto.core.bmff.*
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.memory.*
 import kotlin.test.*
@@ -12,6 +14,53 @@ class SamsungHeicTest {
     private val target = ProtocolSelector(ProtocolId("samsung.motionphoto"), ProfileId("heic-sef-mpv2"))
     private fun input(bytes: ByteArray) = SourceSet.Single(MemoryBinarySource(Bytes(bytes), SourceId("samsung-heic")))
     private data class Fixture(val bytes: ByteArray, val videoStart: Int, val pointerStart: Int, val mpvdStart: Int)
+
+    @Test
+    fun itemInspectionExposesRawCodestreamWithoutClaimingAnIndependentHeicCarrier(): Unit = runImmediate {
+        val fixture = fixture()
+        val inspected = value(core.inspect(ReadRequest(input(fixture.bytes), context)))
+        val item = inspected.layout.resources.single { it.id == ResourceId("heif:item:1") }
+        assertFalse(item.standalone)
+        assertEquals(ResourceKind.Unknown, item.kind)
+        assertEquals(Value.Text("hvc1"), inspected.metadata.single { it.selector == "heif:item:1:type" }.value)
+        assertEquals(Value.Number("1"), inspected.metadata.single { it.selector == "heif:primary-item-id" }.value)
+        val raw = MemoryOutputTransaction(context, "heif-raw-item")
+        value(core.extract(ExtractRequest(input(fixture.bytes), listOf(item.id), inspected.snapshot, output = raw, context = context)))
+        assertEquals(Bytes(GoogleFixtures.video(hevc = true).samples.first()), raw.committedAssets().values.single())
+        assertTrue(inspected.media.first().coverage != Coverage.Complete)
+        assertTrue(inspected.detection.matches.none { it.strength == MatchStrength.Strong })
+    }
+
+    @Test
+    fun corruptImageExtentIsReportedWithoutDiscardingAnIndependentlyTrustedMotionRange(): Unit = runImmediate {
+        val fixture = fixture()
+        val reader = BinaryReader(MemoryBinarySource(Bytes(fixture.bytes), SourceId("heif-bounds")), context)
+        val parser = BmffReader(reader)
+        val meta = parser.readBoxes(ByteRange(0uL, fixture.bytes.size.toULong())).orThrow().single { it.type == "meta" }
+        val iloc = parser.readBoxes(ByteRange(meta.payload.offset + 4uL, meta.payload.length - 4uL)).orThrow().single { it.type == "iloc" }
+        val damaged = fixture.bytes.copyOf().also { GoogleFixtures.u32(UInt.MAX_VALUE).copyInto(it, iloc.payload.offset.toInt() + 14) }
+        val inspected = value(core.inspect(ReadRequest(input(damaged), context)))
+        assertTrue(inspected.issues.any { it.code == IssueCode("OFFSET_OUT_OF_BOUNDS") && it.severity == Severity.Error })
+        assertTrue(inspected.layout.resources.none { it.id == ResourceId("heif:item:1") })
+        val movie = inspected.layout.resources.single { it.kind == ResourceKind.Video }
+        val raw = MemoryOutputTransaction(context, "heif-corrupt-image-raw-video")
+        value(core.extract(ExtractRequest(input(damaged), listOf(movie.id), inspected.snapshot, output = raw, context = context)))
+        assertEquals(Bytes(GoogleFixtures.video().bytes), raw.committedAssets().values.single())
+    }
+
+    @Test
+    fun sharedItemResourcesAreExplicitAndCannotBePublishedTwiceAsDifferentBytes(): Unit = runImmediate {
+        val bytes = fixture(shared = true).bytes
+        val inspected = value(core.inspect(ReadRequest(input(bytes), context)))
+        val items = inspected.layout.resources.filter { it.id.value.startsWith("heif:item:") }
+        assertEquals(2, items.size)
+        assertEquals(listOf(items[1].id), items[0].sharedWith)
+        assertEquals(listOf(items[0].id), items[1].sharedWith)
+        assertEquals(items[0].extents.single().range, items[1].extents.single().range)
+        val output = MemoryOutputTransaction(context, "heif-shared-aliases")
+        assertEquals(IssueCode("INVALID_ARGUMENT"), assertIs<CoreResult.Failure>(core.extract(ExtractRequest(input(bytes), items.map { it.id }, inspected.snapshot, output = output, context = context))).error.code)
+        assertTrue(output.committedAssets().isEmpty())
+    }
 
     @Test
     fun absoluteAndAbiOnlyRelativePointersExposeExactVideoWithIncompleteImageCoverage(): Unit = runImmediate {
@@ -66,17 +115,19 @@ class SamsungHeicTest {
         assertTrue(transaction.committedAssets().isEmpty())
     }
 
-    private fun fixture(relative: Boolean = false, nested: Boolean = true): Fixture {
+    private fun fixture(relative: Boolean = false, nested: Boolean = true, shared: Boolean = false): Fixture {
         val ftyp = GoogleFixtures.box("ftyp", "heic".encodeToByteArray() + GoogleFixtures.u32(0u) + "heicmif1".encodeToByteArray())
         val codedStill = GoogleFixtures.video(hevc = true).samples.first()
         fun meta(imageOffset: UInt): ByteArray {
             val handler = GoogleFixtures.fullBox("hdlr", GoogleFixtures.u32(0u) + "pict".encodeToByteArray() + ByteArray(12) + byteArrayOf(0))
             val primary = GoogleFixtures.fullBox("pitm", GoogleFixtures.bytes(0, 1))
             val item = GoogleFixtures.box("infe", GoogleFixtures.bytes(2, 0, 0, 0, 0, 1, 0, 0) + "hvc1Primary\u0000".encodeToByteArray())
-            val info = GoogleFixtures.fullBox("iinf", GoogleFixtures.bytes(0, 1) + item)
-            val locations = GoogleFixtures.fullBox("iloc", GoogleFixtures.bytes(0x44, 0, 0, 1, 0, 1, 0, 0, 0, 1) + GoogleFixtures.u32(imageOffset) + GoogleFixtures.u32(codedStill.size.toUInt()))
+            val secondItem = if (shared) GoogleFixtures.box("infe", GoogleFixtures.bytes(2, 0, 0, 1, 0, 2, 0, 0) + "hvc1Shared\u0000".encodeToByteArray()) else byteArrayOf()
+            val info = GoogleFixtures.fullBox("iinf", GoogleFixtures.bytes(0, if (shared) 2 else 1) + item + secondItem)
+            fun location(id: Int) = GoogleFixtures.bytes(0, id, 0, 0, 0, 1) + GoogleFixtures.u32(imageOffset) + GoogleFixtures.u32(codedStill.size.toUInt())
+            val locations = GoogleFixtures.fullBox("iloc", GoogleFixtures.bytes(0x44, 0, 0, if (shared) 2 else 1) + location(1) + if (shared) location(2) else byteArrayOf())
             val properties = GoogleFixtures.box("ipco", GoogleFixtures.fullBox("ispe", GoogleFixtures.u32(1u) + GoogleFixtures.u32(1u)) + GoogleFixtures.box("hvcC", GoogleFixtures.video(hevc = true).configuration))
-            val associations = GoogleFixtures.fullBox("ipma", GoogleFixtures.u32(1u) + GoogleFixtures.bytes(0, 1, 2, 0x81, 0x82))
+            val associations = GoogleFixtures.fullBox("ipma", GoogleFixtures.u32(if (shared) 2u else 1u) + GoogleFixtures.bytes(0, 1, 2, 0x81, 0x82) + if (shared) GoogleFixtures.bytes(0, 2, 2, 0x81, 0x82) else byteArrayOf())
             return GoogleFixtures.fullBox("meta", handler + primary + info + locations + GoogleFixtures.box("iprp", properties + associations))
         }
         val prefix = ftyp + meta((ftyp.size + meta(0u).size + 8).toUInt()) + GoogleFixtures.box("mdat", codedStill)
