@@ -19,6 +19,28 @@ class MediaBackendDiscoveryTest {
         try { block(directory) } finally { Files.list(directory).use { paths -> paths.forEach(Files::delete) }; Files.delete(directory) }
     }
 
+    @Test fun executablePreflightHasBoundedColdStartBudgetAndNeverUsesAShell() {
+        val path = Path.of("chosen ffmpeg & literal.exe")
+        var calls = 0
+        assertTrue(JvmMediaBackends.verifyFfmpeg(path) { arguments, timeout ->
+            calls++
+            assertEquals(listOf(path.toString(), "-version"), arguments)
+            assertEquals(15_000L, timeout)
+            ProcessResult(0, "ffmpeg version synthetic-test\n")
+        })
+        assertEquals(1, calls)
+    }
+
+    @Test fun executablePreflightNeverAcceptsIncompleteOrFailedVersionEvidence() {
+        val success = ProcessResult(0, "ffmpeg version synthetic-test\n")
+        for (result in listOf(success.copy(code = 1), success.copy(code = null), success.copy(output = "other program\nffmpeg version shadow"),
+            success.copy(outputLimited = true), success.copy(ioFailed = true), success.copy(timedOut = true), success.copy(cancelled = true))) {
+            var calls = 0
+            assertFalse(JvmMediaBackends.verifyFfmpeg(Path.of("synthetic-executable")) { _, _ -> calls++; result })
+            assertEquals(1, calls) // Discovery must not silently retry a failed process.
+        }
+    }
+
     @Test fun explicitExecutablePrecedesPathAndPathPrecedesSystem() = withDirectory { directory ->
         val explicit = executable(directory, "chosen tool.exe")
         executable(directory, executableName)

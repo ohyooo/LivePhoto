@@ -18,11 +18,15 @@ public object JvmMediaBackends {
      * Unsupported operations may fall through; decode/IO/policy errors never trigger a retry.
      */
     public fun discover(ffmpegPath: Path? = null, systemBackends: List<MediaBackend> = WindowsMediaFoundationBackend.available()): BackendDiscovery =
-        discover(ffmpegPath, System.getenv("PATH") ?: "", System.getProperty("os.name").startsWith("Windows"), systemBackends) { path ->
-            val result = ExternalProcess.run(listOf(path.toString(), "-version"), timeoutMillis = 3_000L)
-            result.code == 0 && !result.outputLimited && !result.ioFailed && !result.timedOut && !result.cancelled &&
-                result.output.lineSequence().firstOrNull()?.startsWith("ffmpeg version ") == true
-        }
+        discover(ffmpegPath, System.getenv("PATH") ?: "", System.getProperty("os.name").startsWith("Windows"), systemBackends, ::verifyFfmpeg)
+
+    internal fun verifyFfmpeg(path: Path, run: (List<String>, Long) -> ProcessResult = { arguments, timeout -> ExternalProcess.run(arguments, timeout) }): Boolean {
+        // Cold-start DLL loading / antivirus on Windows can exceed three seconds. This is a
+        // bounded read-only version check, not an operation retry or a media-decode timeout.
+        val result = run(listOf(path.toString(), "-version"), 15_000L)
+        return result.code == 0 && !result.outputLimited && !result.ioFailed && !result.timedOut && !result.cancelled &&
+            result.output.lineSequence().firstOrNull()?.startsWith("ffmpeg version ") == true
+    }
 
     internal fun discover(explicit: Path?, searchPath: String, windows: Boolean, systems: List<MediaBackend>,
         verify: (Path) -> Boolean): BackendDiscovery {

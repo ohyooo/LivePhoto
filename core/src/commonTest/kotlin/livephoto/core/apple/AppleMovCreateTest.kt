@@ -98,6 +98,8 @@ class AppleMovCreateTest {
             val plan = core.plan(request).orThrow()
             assertEquals(target, plan.target); assertTrue(output.query().orThrow().assetIds.isEmpty())
             assertTrue(plan.capabilities.operations.any { it.operation == Operation.ConvertTo && it.implementation == Implementation.Experimental })
+            assertEquals(core.getProtocolCapabilities(target).operations.single { it.operation == Operation.ConvertTo },
+                plan.capabilities.operations.single { it.operation == Operation.ConvertTo })
             val result = core.convert(request).orThrow()
             try {
                 assertEquals(VideoContainer.Mov, result.output.assets[1].videoContainer)
@@ -129,6 +131,59 @@ class AppleMovCreateTest {
         assertEquals("SOURCE_NOT_LIVE", assertIs<CoreResult.Failure>(core.convert(standalone)).error.code.value)
         for (profile in listOf(null, ProfileId("heic-mov"))) {
             assertEquals("CAPABILITY_PLANNED", assertIs<CoreResult.Failure>(core.convert(request.copy(target = ProtocolSelector(ProtocolIds.Apple, profile)))).error.code.value)
+        }
+    }
+
+    @Test fun movConvertSecondAssetFailureAndCodedSampleCorruptionAbortWholePair(): Unit = runImmediate {
+        for (corrupt in listOf(false, true)) {
+            val carrier = GoogleFixtures.v2Photo(movie(false), timestamp = "40000")
+            val input = source(carrier, "mov-fault-source-$corrupt")
+            val base = MemoryOutputTransaction(context, "mov-fault-$corrupt")
+            var creates = 0; var commits = 0
+            val output = object : OutputTransaction by base {
+                override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> {
+                    if (++creates == 2 && !corrupt) return CoreResult.Failure(CoreError(IssueCode("IO_WRITE_FAILED"), Stage.WriteProtocol, "Injected second asset failure"))
+                    return base.create(spec)
+                }
+                override suspend fun commit(): CoreResult<Receipt> { commits++; return base.commit() }
+                override suspend fun openStaged(id: AssetId): CoreResult<BinarySource> {
+                    val staged = base.openStaged(id).orThrow()
+                    if (!corrupt || id.value != "asset-1") return CoreResult.Success(staged)
+                    try {
+                        val identity = staged.identity().orThrow()
+                        val bytes = staged.readAt(0uL, identity.size.toUInt()).orThrow().toByteArray()
+                        val facts = BmffVideoProbe(BinaryReader(staged, context), allowTimedMetadata = true)
+                            .probe(ByteRange(0uL, identity.size)).orThrow()
+                        // Keep every box/table valid while violating retained coded-media proof.
+                        val offset = (facts.tracks.single { it.handler == "vide" }.samples.first().range.endExclusive - 1uL).toInt()
+                        bytes[offset] = (bytes[offset].toInt() xor 1).toByte()
+                        return CoreResult.Success(MemoryBinarySource(Bytes(bytes), identity.id, identity.generation))
+                    } finally { staged.close() }
+                }
+            }
+            val result = core.convert(ConvertRequest(SourceSet.Single(input), target, policy = strict, output = output, context = context))
+            assertEquals(if (corrupt) "POSTCONDITION_FAILED" else "IO_WRITE_FAILED", assertIs<CoreResult.Failure>(result).error.code.value)
+            assertEquals(2, creates); assertEquals(0, commits)
+            assertEquals(TransactionState.Aborted, base.query().orThrow().state); assertTrue(base.committedAssets().isEmpty())
+            assertEquals(Bytes(carrier), bytes(input))
+        }
+    }
+
+    @Test fun movConvertUnsupportedEditsPreferencesAndOutputBudgetNeverStage(): Unit = runImmediate {
+        val input = source(GoogleFixtures.v2Photo(movie(false), timestamp = "40000"), "mov-policy-source")
+        val base = MemoryOutputTransaction(context, "mov-policy-output")
+        val request = ConvertRequest(SourceSet.Single(input), target, policy = strict, output = base, context = context)
+        val nonAtomic = object : OutputTransaction by base { override fun capabilities() = base.capabilities().copy(assetSetAtomic = false) }
+        val cases = listOf(
+            request.copy(preference = MediaPreference(videoContainer = VideoContainer.Mp4)) to "CAPABILITY_UNSUPPORTED",
+            request.copy(preference = MediaPreference(imageFormat = ImageFormat.Heic)) to "CAPABILITY_UNSUPPORTED",
+            request.copy(edits = EditSpec(replacementFrame = CoverPosition.FrameIndex(0uL))) to "CAPABILITY_UNSUPPORTED",
+            request.copy(output = nonAtomic) to "ATOMIC_PUBLICATION_UNAVAILABLE",
+            request.copy(context = context.copy(limits = context.limits.copy(maxOutputBytes = 1uL))) to "RESOURCE_LIMIT_EXCEEDED")
+        for ((req, code) in cases) {
+            assertEquals(code, assertIs<CoreResult.Failure>(core.plan(req)).error.code.value)
+            assertEquals(code, assertIs<CoreResult.Failure>(core.convert(req)).error.code.value)
+            assertTrue(base.query().orThrow().assetIds.isEmpty()); assertTrue(base.committedAssets().isEmpty())
         }
     }
 }

@@ -88,8 +88,8 @@ internal object AppleAssemblyOperations {
             PlanStep(Stage.WriteProtocol, listOf(Operation.ConvertTo), emptyList(), "Assemble formal image CID and movie CID/timed sample; preserve retained coded tracks"),
             PlanStep(Stage.Verify, listOf(Operation.Validate), emptyList(), "Independently verify both staged assets and their matching pair before one commit")),
             predictedPreservation = PreservationReport(),
-            capabilities = CapabilitySet(Availability.Conditional, listOf(CapabilityEntry(Operation.ConvertTo, Implementation.Experimental,
-                conditions = listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("jpeg-mp4-no-existing-exif-classified-movie-exact-key-asset-set-atomic")))))))
+            capabilities = CapabilitySet(Availability.Conditional, listOf(DefaultLivePhotoCore().getProtocolCapabilities(request.target)
+                .operations.single { it.operation == Operation.ConvertTo })))
     }
 
     suspend fun plan(request: CreateRequest): CoreResult<ExecutionPlan> = attempt {
