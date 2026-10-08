@@ -1,0 +1,134 @@
+{
+  "format": "LPBFIX01",
+  "version": 1,
+  "storage": "gzip; unsigned big-endian total length; records 0: literal length + bytes, 1: declared base offset + length, 255: end. Reconstructed length and SHA-256 must match the manifest. No protocol fields are synthesized.",
+  "assets": [
+    {
+      "name": "video_HUAWEI_MovingPhoto_HEIC+MP4 (H.265).heic",
+      "size": 9186059,
+      "sha256": "981020c898088513457b7c1b084137b46af31a7306edeab86ae7ee220efcb1e9",
+      "base": "reference/video.mp4",
+      "fixture": "video_HUAWEI_MovingPhoto_HEIC+MP4 (H.265).heic.fixture.gz"
+    },
+    {
+      "name": "video_HUAWEI_MovingPhoto_HEIC+MP4.heic",
+      "size": 9186059,
+      "sha256": "981020c898088513457b7c1b084137b46af31a7306edeab86ae7ee220efcb1e9",
+      "base": "reference/video.mp4",
+      "fixture": "video_HUAWEI_MovingPhoto_HEIC+MP4.heic.fixture.gz"
+    },
+    {
+      "name": "video_HUAWEI_MovingPhoto_JPEG+MP4.jpg",
+      "size": 8415305,
+      "sha256": "5a18ece1f01972118a8d7c5566169dc53b6b9003dab917480ba2590e1f9a30ca",
+      "base": "reference/video.mp4",
+      "fixture": "video_HUAWEI_MovingPhoto_JPEG+MP4.jpg.fixture.gz"
+    },
+    {
+      "name": "video_MicroVideo_JPEG+MOV.jpg",
+      "size": 8415920,
+      "sha256": "347a2c85ffa4f5ae708c8ad27c095a566492589ce739e5093abfc6c8beda711d",
+      "base": "reference/video.mp4",
+      "fixture": "video_MicroVideo_JPEG+MOV.jpg.fixture.gz"
+    },
+    {
+      "name": "video_MicroVideo_JPEG+MP4.jpg",
+      "size": 8415866,
+      "sha256": "ebaec2aaf97c031086a5cc520c931e98a3751ade80a970b35dd6efcb6b68dde3",
+      "base": "reference/video.mp4",
+      "fixture": "video_MicroVideo_JPEG+MP4.jpg.fixture.gz"
+    },
+    {
+      "name": "video_MotionPhoto_HEIC+MOV.heic",
+      "size": 9187197,
+      "sha256": "93f19dbf7c7492f2c209a5ac20d638dd9d867708d198445200465041202658a7",
+      "base": "reference/video.mp4",
+      "fixture": "video_MotionPhoto_HEIC+MOV.heic.fixture.gz"
+    },
+    {
+      "name": "video_MotionPhoto_JPEG+MOV.jpg",
+      "size": 8416383,
+      "sha256": "fc4be53da351b60fa22086d9816871ab3fcec01ec9e166a72fbf82a3f6ba96cb",
+      "base": "reference/video.mp4",
+      "fixture": "video_MotionPhoto_JPEG+MOV.jpg.fixture.gz"
+    },
+    {
+      "name": "video_MotionPhoto_JPEG+MP4.jpg",
+      "size": 8416323,
+      "sha256": "58a79cde719a29791faedefee38ed75b1f71bfecfa572ebad282d1b708ad718f",
+      "base": "reference/video.mp4",
+      "fixture": "video_MotionPhoto_JPEG+MP4.jpg.fixture.gz"
+    },
+    {
+      "name": "video_OPPO_OLive_JPEG+MP4.jpg",
+      "size": 8416706,
+      "sha256": "3308749b84e583bd4b4f008b20e1dd475939d6a758b45d3981c456404ed4ec5b",
+      "base": "reference/video.mp4",
+      "fixture": "video_OPPO_OLive_JPEG+MP4.jpg.fixture.gz"
+    },
+    {
+      "name": "video_Samsung_MotionPhoto_HEIC+MP4.heic",
+      "size": 9187261,
+      "sha256": "a35b272569dcd71662f3b7b5af36cbb5603e16dd87e2c71e9d724576ab87aba2",
+      "base": "reference/video.mp4",
+      "fixture": "video_Samsung_MotionPhoto_HEIC+MP4.heic.fixture.gz"
+    },
+    {
+      "name": "video_Samsung_MotionPhoto_JPEG+MP4.jpg",
+      "size": 8416428,
+      "sha256": "e20aff7a2570c94df9a6c3e01a8ad10e14658e504b6465dcdb8d8f2972f9d9c3",
+      "base": "reference/video.mp4",
+      "fixture": "video_Samsung_MotionPhoto_JPEG+MP4.jpg.fixture.gz"
+    },
+    {
+      "name": "video_vivo_LivePhoto_JPEG+MP4.jpg",
+      "size": 8417190,
+      "sha256": "faabeac84a6abfc0ec0e6be705448bb03656c8a9db6898983e0e0a3b608d99e0",
+      "base": "reference/video.mp4",
+      "fixture": "video_vivo_LivePhoto_JPEG+MP4.jpg.fixture.gz"
+    },
+    {
+      "name": "apple-heic-mov.image.heic",
+      "size": 1067811,
+      "sha256": "1884067aaa1e7802a2eb7da2ca97131d4d9455b75b091909392597d5087d7695",
+      "base": "reference/video.mp4",
+      "fixture": "apple-heic-mov.image.heic.fixture.gz"
+    },
+    {
+      "name": "apple-heic-mov.video.mov",
+      "size": 18756585,
+      "sha256": "43333bf6034639c8da4dbdbcccdc3ba9be1f0e9cb3dcaeed423cefa9fb36b930",
+      "base": "apple-jpeg-mov.video.mov",
+      "fixture": "apple-heic-mov.video.mov.fixture.gz"
+    },
+    {
+      "name": "apple-jpeg-mov.image.jpg",
+      "size": 296851,
+      "sha256": "8b2cf267cb7347e4acbdcadc8f7e769e7a686d8d42e6a298f44db497d3f00faf",
+      "base": "reference/video.mp4",
+      "fixture": "apple-jpeg-mov.image.jpg.fixture.gz"
+    },
+    {
+      "name": "apple-jpeg-mov.video.mov",
+      "size": 18756585,
+      "sha256": "5331fee3f8eb79811ec0f481e7d4f4f2f52c2b5277d1e60192dd9107f2d4121d",
+      "base": "reference/video.mp4",
+      "fixture": "apple-jpeg-mov.video.mov.fixture.gz"
+    },
+    {
+      "name": "vivo-legacy.image.jpg",
+      "size": 297018,
+      "sha256": "2bbc412b26c86a08b363d70ed3b8ca81411fca57a027923ceef6a5bca70509c2",
+      "base": "reference/video.mp4",
+      "fixture": "vivo-legacy.image.jpg.fixture.gz"
+    },
+    {
+      "name": "vivo-legacy.video.mp4",
+      "size": 16964,
+      "sha256": "ccecbf73a0f5f7708758add26ca8c21a7e22a4d513c6cfbf0586b9d28cb68398",
+      "base": "reference/video.mp4",
+      "fixture": "vivo-legacy.video.mp4.fixture.gz"
+    }
+  ],
+  "scope": "Compatibility regression samples, not device certification."
+}

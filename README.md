@@ -374,6 +374,10 @@ Windows 系统 API 专项验收还可设置 `LIVEPHOTO_REQUIRE_WINDOWS_MEDIA=tru
 
 reference 测试使用仓库中的 `reference/video.jpg`、`reference/video.mp4` 和 `reference/livephoto.jpg`，检查封装、提取及保留结果；不会要求参考成品中的 embedded MOV 必须与独立原 MP4 相同。用户报告可识别不等于本项目已完成所有设备验收。
 
+协议兼容回归包含 **12 个单文件组合及 3 组配对，共 18 个资产**。`core/src/jvmTest/resources/protocol-compatibility/v1/` 保存无损字节差分、完整 SHA-256 和资产清单；测试还原并校验整文件，再检查多重匹配、非规范字段与原样视频提取。差分只引用参考视频或其它已校验资产中完全相同的字节，不重写协议字段。包含 **16 个回归测试**，无需网络或额外工具运行，不增加产品运行时依赖。
+
+这些样本也用于暴露差异，不强行期待全为 Valid：Google V2 的 secondary `Padding=0`、Samsung 旧式 SEF footer 必须明确报告；Huawei HEIC + trailer 和部分 MOV 仍有当前 Core 解析范围缺口。部分 Apple 样本将 MakerNote 放在 IFD0，本 Core 当前只授权正式 ExifIFD；vivo 旧式配对存在 sample/header duration 边界，需要继续核查。文件名中的 `H.265` 不是实际 codec 证明。样本不代表真实设备相册兼容。
+
 ### 打包 Windows 便携应用
 
 完成 `:cli:installDist` 和 `:core:jvmTest` 后，在项目根目录执行：
@@ -394,7 +398,7 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 - `LivePhoto-...`：应用归档与 SHA-256；打包成功后上传，下载运行选这个。
 - `build-outputs-...`：JAR 与 JVM 分发包。
-- `build-reports-...`：测试报告、XML、合成 fixture、Gradle 和便携日志；构建失败时也尝试上传已有报告。
+- `build-reports-...`：测试报告、XML、合成 fixture、兼容回归素材包及哈希清单、Gradle 和便携日志；构建失败时也尝试上传已有报告。
 
 两平台成功通常共 6 个 artifacts。CI 可能没有 FFmpeg，不能把它的协议/便携测试等同于配置完整媒体后端的集成验收，也不能把缺失工具后的 skip 当作该媒体操作成功。
 
@@ -406,7 +410,9 @@ Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/Li
 
 随后 [`18f8122`](https://github.com/ohyooo/LivePhoto/commit/18f81223adc4933b69abc0570745d13ba9b030be) 补充独立合成 CID 字段边界回归：36/37 字节与单个 NUL 保持、额外终止符/混合 timed metadata/身份别名拒绝。该批次实际全量 **713 tests，0 failures / errors / skips**；只改测试及 fixture helper，不扩展业务能力。[对应 CI 37742738670](https://github.com/ohyooo/LivePhoto/actions/runs/37742738670) 成功，6 个非空、未过期 artifacts 已核对。
 
-当前 Windows 有限 MOV 系统 Probe 扩展：实际全量 **714 tests，0 failures / errors / skips**，包含 B 帧/VFR、音轨拒绝，以及现有 FFmpeg 明确封装 MOV 后只用系统后端完整解码。人工 qt brand fixture 仅为合成容器结构＋真实 AVC samples，单独标明其范围，不能当作相机原片或通用 remux 证明。该批次完整 Windows 便携验收成功，新提交的 CI/产物仍待核对。
+Windows 有限 MOV 系统 Probe 扩展：[`91cec67`](https://github.com/ohyooo/LivePhoto/commit/91cec677bb13f8df74c31e851e29a133a5f7954e) 实际全量 **714 tests，0 failures / errors / skips**，包含 B 帧/VFR、音轨拒绝，以及现有 FFmpeg 明确封装 MOV 后只用系统后端完整解码。人工 qt brand fixture 仅为合成容器结构＋真实 AVC samples，单独标明其范围，不能当作相机原片或通用 remux 证明。完整 Windows 便携验收与[对应 CI 37743888829](https://github.com/ohyooo/LivePhoto/actions/runs/37743888829) 成功，6 个非空、未过期 artifacts 已核对。
+
+协议兼容素材批次此前全量验证 **730 tests，0 failures / errors / skips**，含 16 个回归测试；整文件哈希与素材保持不变。最新提交的 Windows/Linux 构建、测试和上传结果以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 为准；解析缺口另列 TODO，不能把素材覆盖等同于所有协议兼容完成。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -431,7 +437,7 @@ Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/Li
 | Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | Generic/HEIC 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限重配对批次已完成 | 有限 SafeMetadataOnly；ExplicitRePair 两侧权威、预览、allowlist、回滚、幂等；便携及 CI 验收 | ExplicitRemux、复杂 MakerNote/metadata profile 未实现 |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
-| MediaBackend | 部分完成；MOV 系统 Probe CI 核对中 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe；完整解码与 Windows 便携验收 | MOV 新 CI 核对；系统媒体编辑、其它 OS 官方 API 适配 |
+| MediaBackend | 部分完成；有限 MOV Probe 已交付 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe；完整解码、便携包与 CI 验收 | 系统媒体编辑、其它 OS 官方 API 适配 |
 | CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
@@ -476,11 +482,13 @@ Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/Li
 
 ### 剩余范围清单
 
-- [ ] **下一项：其它显式 Repair 模式及 Apple 写入扩展。** 有限 ExplicitRePair 已交付；ExplicitRemux 与更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
+- [x] 接入 12 个单文件组合及 3 组配对的兼容回归测试，校验 18 个资产的整文件 SHA-256；不算 L4 设备认证。
+- [ ] **下一项：核查兼容素材暴露的读取边界。** MOV/vivo 的 `mdhd` 与 `stts` 时长差异须结合 CTS/edit 与官方语义核对；Huawei HEIC + trailer 的包络和 Apple IFD0 MakerNote 的有限兼容读取也需确认，不猜容差，不自动授权旧结构写入。
+- [ ] 其它显式 Repair 模式及 Apple 写入扩展：有限 ExplicitRePair 已交付；ExplicitRemux 与更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。
-- [ ] Windows 有限 MOV 系统 Probe 扩展：实际测试与新 Windows 便携包验收通过，待对应 CI 产物核对；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
+- [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
