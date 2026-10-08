@@ -53,6 +53,22 @@ class FfmpegRemuxIntegrationTest {
                         val right = BinaryReader(second.output.assets.single().readableSource!!, context)
                         RemuxVerification.verify(left, BmffVideoProbe(left).probe(ByteRange(0uL, left.identity().orThrow().size)).orThrow(),
                             right, BmffVideoProbe(right).probe(ByteRange(0uL, right.identity().orThrow().size)).orThrow())
+                        for ((index, operation) in listOf(first, second).withIndex()) {
+                            val neutral = operation.output.assets.single().readableSource!!
+                            val neutralReader = BinaryReader(neutral, context)
+                            val hash = sha256Range(neutralReader, ByteRange(0uL, neutral.size().orThrow())).orThrow()
+                            val cleaned = core.split(SplitRequest(SourceSet.Single(neutral), policy = MutationPolicy(preservation = PreservationPolicy.Strict,
+                                requiredGuarantees = listOf(Guarantee.ExactExtraction, Guarantee.BitstreamPreserving, Guarantee.MetadataPreserving)),
+                                output = MemoryOutputTransaction(context, "real-neutral-movie-$index"), context = context)).orThrow()
+                            try {
+                                val output = cleaned.output.assets.single().readableSource!!
+                                assertEquals(operation.output.assets.single().videoContainer, cleaned.output.assets.single().videoContainer)
+                                assertEquals(hash, sha256Range(BinaryReader(output, context), ByteRange(0uL, output.size().orThrow())).orThrow())
+                                assertTrue(cleaned.preservation.changes.isEmpty()); assertTrue(cleaned.execution.none { it.transcoded || it.remuxed })
+                                assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(output)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                                assertEquals(hash, sha256Range(neutralReader, ByteRange(0uL, neutral.size().orThrow())).orThrow())
+                            } finally { cleaned.output.assets.forEach { it.readableSource?.close() } }
+                        }
                         assertEquals(before, sha256Range(left, ByteRange(0uL, left.identity().orThrow().size)).orThrow())
                     } finally { second.output.assets.forEach { it.readableSource?.close() } }
                 } finally { first.output.assets.forEach { it.readableSource?.close() } }

@@ -146,6 +146,7 @@ internal object GoogleOperations {
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()
         }
         if (session.heifItems != null) return@attempt GoogleHeicSplitOperations.split(request, session, budget).orThrow()
+        if (NeutralMovieClean.accepts(session)) return@attempt NeutralMovieClean.split(request, session, budget).orThrow()
         if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_PROTOCOL", "Clean needs one trusted resource graph")
         val oplus = session.bindings.any { it.protocol == ProtocolIds.Oplus }
         val vivo = session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()
@@ -230,6 +231,7 @@ internal object GoogleOperations {
         } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
             if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_LAYOUT", "Clean plan needs one trusted resource graph")
             if (session.heifItems != null) GoogleHeicSplitOperations.preflight(request, session, budget)
+            else if (NeutralMovieClean.accepts(session)) NeutralMovieClean.preflight(session, budget)
             else if (session.applePair != null) AppleClean.prepare(session, budget).orThrow()
             else if (session.legacyPair != null) VivoPairOperations.preflightClean(session) else if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
         }
@@ -243,7 +245,7 @@ internal object GoogleOperations {
         val policy = when (request) { is CreateRequest -> request.policy; is SplitRequest -> request.policy; else -> MutationPolicy() }
         val outputCaps = output.capabilities()
         if (!outputCaps.canReadStaged || policy.atomicity == Atomicity.AssetSetRequired && !outputCaps.assetSetAtomic || policy.existingOutput == ExistingOutput.Replace && !outputCaps.replacesAtomically) fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Plan cannot satisfy requested transaction guarantees")
-        val implemented = (session.jpeg != null || request is SplitRequest && request.mode == SplitMode.Clean && session.heifItems != null || operation == Operation.ExtractRaw && (session.bindings.isNotEmpty() || session.heifItems != null)) && (target == null || target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern, ProtocolIds.Huawei) && (target.profile == null || target.profile == ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else if (target.protocol == ProtocolIds.Samsung) "jpeg-sef-mpv3" else if (target.protocol == ProtocolIds.Huawei) "basic60" else "jpeg")))
+        val implemented = (session.jpeg != null || request is SplitRequest && request.mode == SplitMode.Clean && (session.heifItems != null || NeutralMovieClean.accepts(session)) || operation == Operation.ExtractRaw && (session.bindings.isNotEmpty() || session.heifItems != null)) && (target == null || target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus, ProtocolIds.Samsung, ProtocolIds.VivoModern, ProtocolIds.Huawei) && (target.profile == null || target.profile == ProfileId(if (target.protocol == ProtocolIds.Oplus) "jpeg-no-tail" else if (target.protocol == ProtocolIds.Samsung) "jpeg-sef-mpv3" else if (target.protocol == ProtocolIds.Huawei) "basic60" else "jpeg")))
         val entry = CapabilityEntry(operation, if (!implemented) Implementation.Unsupported else if (operation == Operation.ExtractRaw && session.jpeg != null) Implementation.Supported else Implementation.Experimental,
             conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text(session.inspection.media.firstOrNull()?.mime ?: "unknown"))), verification = listOf(Verification.SourceReviewed))
         ExecutionPlan(snapshot, target, listOf(PlanStep(Stage.Verify, listOf(Operation.Validate), session.inspection.layout.resources.map { it.id }, "Verify staging and source identities before atomic publication")),

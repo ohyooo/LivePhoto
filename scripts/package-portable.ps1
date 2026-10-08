@@ -197,6 +197,27 @@ try {
             throw 'Portable remux did not return verified no-encoding evidence.'
         }
         Write-Host 'PORTABLE_FFMPEG_REMUX=SUCCESS'
+        foreach ($neutralPath in @($remuxFixture, $remux.output.assets[0].path)) {
+            $neutralIndex = if ($neutralPath -eq $remuxFixture) { 'mp4' } else { 'mov' }
+            $neutralHash = (Get-FileHash $neutralPath -Algorithm SHA256).Hash
+            $cleanJson = & $launcher split --input $neutralPath --strict --output-dir (Join-Path $verify "neutral clean $neutralIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable neutral movie Clean failed: $cleanJson" }
+            $clean = ($cleanJson | ConvertFrom-Json).result
+            if ($clean.output.assets.Count -ne 1 -or $clean.output.assets[0].role -ne 'MotionVideo' -or
+                (Get-FileHash $clean.output.assets[0].path -Algorithm SHA256).Hash -ne $neutralHash -or
+                @($clean.preservation.changes).Count -ne 0 -or ($clean.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or
+                ($clean.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) {
+                throw 'Portable neutral movie Clean violated file-exact/no-edit preservation'
+            }
+            $repeatJson = & $launcher split --input $clean.output.assets[0].path --strict --output-dir (Join-Path $verify "neutral repeat $neutralIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable repeated movie Clean failed: $repeatJson" }
+            $repeat = ($repeatJson | ConvertFrom-Json).result
+            if ((Get-FileHash $repeat.output.assets[0].path -Algorithm SHA256).Hash -ne $neutralHash -or
+                (Get-FileHash $neutralPath -Algorithm SHA256).Hash -ne $neutralHash) { throw 'Movie Clean was not byte-exact/idempotent or changed input' }
+            & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -i $repeat.output.assets[0].path -map 0:v -f null -
+            if ($LASTEXITCODE -ne 0) { throw 'Cleaned neutral movie failed complete AV decode' }
+        }
+        Write-Host 'PORTABLE_NEUTRAL_MOVIE_CLEAN=SUCCESS scope=bounded-mp4-mov-byte-exact-idempotence-not-device'
         # Explicit synthetic AAC encode + fixture mux, separate from the forbidden-encoding Core remux.
         $aacElementary = Join-Path $verify 'encoded AAC fixture.aac'
         $aacFixture = Join-Path $verify 'audio first MP4 fixture.mp4'
