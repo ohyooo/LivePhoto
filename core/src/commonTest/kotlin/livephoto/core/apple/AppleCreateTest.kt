@@ -58,7 +58,7 @@ class AppleCreateTest {
         for (profile in listOf(null, ProfileId("heic-mov"))) {
             val tx = MemoryOutputTransaction(context, "apple-create-planned-$profile")
             val req = request(tx).copy(target = ProtocolSelector(ProtocolIds.Apple, profile))
-            assertEquals(IssueCode("CAPABILITY_PLANNED"), assertIs<CoreResult.Failure>(core.create(req)).error.code)
+            assertEquals(IssueCode(if (profile == null) "CAPABILITY_UNSUPPORTED" else "CAPABILITY_PLANNED"), assertIs<CoreResult.Failure>(core.create(req)).error.code)
             assertTrue(tx.query().orThrow().assetIds.isEmpty())
         }
         val wrongContainer = MemoryOutputTransaction(context, "apple-create-mov-requires-mov")

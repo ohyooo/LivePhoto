@@ -85,7 +85,47 @@ class AppleMovCreateTest {
         assertEquals(Implementation.Experimental, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.Create }.implementation)
         assertEquals(Implementation.Experimental, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.SetKey }.implementation)
         assertEquals(Implementation.Experimental, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.ConvertTo }.implementation)
-        assertEquals(Implementation.Planned, core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple)).operations.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Experimental, core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple)).operations.single { it.operation == Operation.Create }.implementation)
+    }
+
+    @Test fun defaultCreateResolvesFiniteMovProfileWithoutBackendOrImplicitConversion(): Unit = runImmediate {
+        for (hevc in listOf(false, true)) for (explicit in listOf(false, true)) {
+            val req = request("apple-default-create-$hevc-$explicit", hevc).copy(target = ProtocolSelector(ProtocolIds.Apple),
+                edits = if (explicit) EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)) else null)
+            val before = bytes(req.video)
+            assertEquals(target, core.plan(req).orThrow().target)
+            assertTrue(req.output.query().orThrow().assetIds.isEmpty())
+            val result = core.create(req).orThrow()
+            try {
+                assertEquals(listOf(AssetRole.PrimaryImage, AssetRole.MotionVideo), result.output.assets.map { it.role })
+                assertEquals(VideoContainer.Mov, result.output.assets[1].videoContainer)
+                assertTrue(result.execution.none { it.remuxed || it.transcoded })
+                assertEquals(Verdict.Valid, result.validation.verdict); assertEquals(Coverage.Complete, result.validation.coverage)
+                val pair = SourceSet.Pair(result.output.assets[0].readableSource!!, result.output.assets[1].readableSource!!)
+                val inspected = core.inspect(ReadRequest(pair, context)).orThrow()
+                assertEquals(target, inspected.detection.primaryProtocol); assertEquals(true, inspected.pairing?.matches)
+                assertEquals(0, inspected.keyPhoto.position!!.compareTo(if (explicit) Time.Zero else Time(40, 1000u)))
+                val left = BinaryReader(req.video, context); val right = BinaryReader(pair.video, context)
+                val after = BmffVideoProbe(right, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                RemuxVerification.verify(left, BmffVideoProbe(left).probe(ByteRange(0uL, before.size.toULong())).orThrow(),
+                    right, after.copy(tracks = after.tracks.filter { it.handler != "meta" }))
+                assertEquals(before, bytes(req.video))
+            } finally { result.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
+
+    @Test fun defaultCreateRefusesMp4LiveSourcesUnclassifiedMetadataAndNonatomicOutputBeforeStaging(): Unit = runImmediate {
+        val req = request("apple-default-gates").copy(target = ProtocolSelector(ProtocolIds.Apple))
+        val nonAtomic = object : OutputTransaction by req.output { override fun capabilities() = req.output.capabilities().copy(assetSetAtomic = false) }
+        for (blocked in listOf(req.copy(video = source(GoogleFixtures.video().bytes, "default-mp4")),
+            req.copy(image = source(GoogleFixtures.v2Photo(), "default-live")),
+            req.copy(image = source(GoogleFixtures.jpeg(GoogleFixtures.segment(0xe3, byteArrayOf(1))), "default-private")),
+            req.copy(image = source(AppleFixtures.image(), "default-exif")), req.copy(output = nonAtomic),
+            req.copy(preference = MediaPreference(videoContainer = VideoContainer.Mp4)))) {
+            assertIs<CoreResult.Failure>(core.plan(blocked)); assertIs<CoreResult.Failure>(core.create(blocked))
+            assertTrue(req.output.query().orThrow().assetIds.isEmpty())
+        }
+        assertEquals(Implementation.Planned, core.getProtocolCapabilities(req.target).operations.single { it.operation == Operation.ConvertTo }.implementation)
     }
     @Test fun movConvertUsesLiveSourceGateAndKeepsEveryOriginalAvSample(): Unit = runImmediate {
         for (hevc in listOf(false, true)) for (v2 in listOf(false, true)) for (explicit in listOf(false, true)) {

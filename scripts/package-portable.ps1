@@ -615,6 +615,33 @@ try {
         Write-Host 'PORTABLE_APPLE_CREATE_SETKEY=SUCCESS scope=bounded-jpeg-mp4-not-device-compatibility'
         $movSource = $remux.output.assets[0].path
         $movSourceHash = (Get-FileHash $movSource).Hash
+        $defaultApplePath = $env:Path
+        try {
+            $env:Path = ''
+            $defaultCapsJson = & $launcher capabilities --target apple.livephoto
+            if ($LASTEXITCODE -ne 0) { throw 'Default Apple capability query failed.' }
+            $defaultCaps = ($defaultCapsJson | ConvertFrom-Json).result.operations
+            if (($defaultCaps | Where-Object operation -eq 'Create').implementation -ne 'Experimental' -or
+                ($defaultCaps | Where-Object operation -eq 'ConvertTo').implementation -ne 'Planned') { throw 'Default Create promoted an unrelated conversion entrance.' }
+            $defaultJson = & $launcher create --image $frame.operation.output.assets[0].path --video $movSource --target apple.livephoto --frame-index 0 --strict --output-dir (Join-Path $verify 'Apple default Create no backend')
+            if ($LASTEXITCODE -ne 0) { throw "Default Apple finite Create failed: $defaultJson" }
+            $defaultApple = ($defaultJson | ConvertFrom-Json).result
+            if (@($defaultApple.output.assets).Count -ne 2 -or $defaultApple.output.assets[1].videoContainer -ne 'Mov' -or
+                ($defaultApple.execution | Where-Object { $_.remuxed -or $_.transcoded }) -or
+                ($defaultApple.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) { throw 'Default Create lacks unencoded two-asset preservation.' }
+            $defaultImage = $defaultApple.output.assets[0].path; $defaultMovie = $defaultApple.output.assets[1].path
+            $defaultValidate = & $launcher validate --input $defaultImage --pair-video $defaultMovie --layers Structure,Protocol
+            if ($LASTEXITCODE -ne 0 -or ($defaultValidate | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Default Apple pair validation failed.' }
+            $defaultKey = & $launcher get-key --input $defaultImage --pair-video $defaultMovie
+            if ($LASTEXITCODE -ne 0 -or ($defaultKey | ConvertFrom-Json).result.position.value -ne 0) { throw 'Default Apple Create changed selected key.' }
+            $defaultRejectDirectory = Join-Path $verify 'Default Apple MP4 refused'
+            $defaultRejected = & $launcher create --image $frame.operation.output.assets[0].path --video $referenceVideo --target apple.livephoto --strict --output-dir $defaultRejectDirectory
+            if ($LASTEXITCODE -ne 3 -or ($defaultRejected | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED' -or
+                (Test-Path $defaultRejectDirectory)) { throw 'Default Apple Create silently remuxed MP4 or published refused output.' }
+        } finally { $env:Path = $defaultApplePath }
+        & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $defaultMovie -map 0:v -map '0:a?' -sn -dn -f null -
+        if ($LASTEXITCODE -ne 0 -or (Get-FileHash $movSource).Hash -ne $movSourceHash) { throw 'Default Apple MOV did not decode or source changed.' }
+        Write-Host 'PORTABLE_APPLE_DEFAULT_CREATE=SUCCESS scope=finite-jpeg-mov-no-backend-no-remux-not-heic-or-device-proof'
         $movCreateJson = & $launcher create --image $frame.operation.output.assets[0].path --video $movSource --target apple.livephoto --profile jpeg-mov --frame-index 0 --strict --output-dir (Join-Path $verify 'Apple direct MOV create')
         if ($LASTEXITCODE -ne 0) { throw "Portable Apple MOV Create failed: $movCreateJson" }
         $movCreate = ($movCreateJson | ConvertFrom-Json).result

@@ -29,6 +29,7 @@ internal object AppleAssemblyOperations {
         val requestedContainer = when {
             request.target == target -> VideoContainer.Mp4
             request.target == ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")) -> VideoContainer.Mov
+            request.creating && request.target == ProtocolSelector(ProtocolIds.Apple) -> VideoContainer.Mov
             else -> fail("CAPABILITY_PLANNED", "Apple assembly requires an implemented explicit JPEG movie profile", Stage.Plan)
         }
         if (request.edits?.trim != null || request.edits?.replacementFrame != null)
@@ -95,7 +96,8 @@ internal object AppleAssemblyOperations {
     suspend fun plan(request: CreateRequest): CoreResult<ExecutionPlan> = attempt {
         RequestValidation.validate(request).orThrow()
         val prepared = prepare(request.assembly(), null, request.image to request.video, "00000000-0000-4000-8000-000000000000")
-        ExecutionPlan(prepared.snapshot, request.target, listOf(
+        val resolvedTarget = if (request.target.profile == null) request.target.copy(profile = ProfileId("jpeg-mov")) else request.target
+        ExecutionPlan(prepared.snapshot, resolvedTarget, listOf(
             PlanStep(Stage.WriteProtocol, listOf(Operation.Create), emptyList(), "Ordinary media to matching Apple image/movie CID and exact key metadata sample; no source Live Photo required"),
             PlanStep(Stage.Verify, listOf(Operation.Validate), emptyList(), "Independently reread both assets, retained coded media and complete pair before one commit")),
             PreservationReport(), CapabilitySet(Availability.Conditional, listOf(DefaultLivePhotoCore().getProtocolCapabilities(request.target).operations.single { it.operation == Operation.Create })))

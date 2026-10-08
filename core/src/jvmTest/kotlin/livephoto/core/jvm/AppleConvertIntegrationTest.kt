@@ -128,6 +128,8 @@ class AppleConvertIntegrationTest {
                             assertEquals(before, sha256Range(original, facts.range).orThrow())
                         } finally { converted.output.assets.forEach { it.readableSource?.close() } }
                     } finally { liveMov.output.assets.forEach { it.readableSource?.close() } }
+                    val defaultPath = directory.resolve("apple default create.mov"); owned.add(defaultPath)
+                    verifyDefaultCreate(core, frame.operation.output.assets.single().readableSource!!, movInput, defaultPath, ::save, ::decode)
                     val apple = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, movInput,
                         ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
                         policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-mov-create"), context = context)).orThrow()
@@ -224,5 +226,34 @@ class AppleConvertIntegrationTest {
                 }
             } finally { frame.operation.output.assets.forEach { it.readableSource?.close() } }
         } finally { owned.asReversed().forEach { Files.deleteIfExists(it) }; Files.delete(directory) }
+    }
+    // Keep this coroutine separate: the round-trip test is already close to the JVM method-size limit.
+    private suspend fun verifyDefaultCreate(
+        core: DefaultLivePhotoCore,
+        image: BinarySource,
+        video: BinarySource,
+        outputPath: Path,
+        save: suspend (BinarySource, Path) -> Unit,
+        decode: suspend (Path) -> Unit,
+    ) {
+        val original = BinaryReader(video, context)
+        val facts = BmffVideoProbe(original).probe(ByteRange(0uL, video.size().orThrow())).orThrow()
+        val before = sha256Range(original, facts.range).orThrow()
+        val defaultApple = core.create(CreateRequest(image, video,
+            ProtocolSelector(ProtocolIds.Apple), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
+            policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-default-create"), context = context)).orThrow()
+        try {
+            assertEquals(VideoContainer.Mov, defaultApple.output.assets[1].videoContainer)
+            assertTrue(defaultApple.execution.none { it.remuxed || it.transcoded })
+            val pair = SourceSet.Pair(defaultApple.output.assets[0].readableSource!!, defaultApple.output.assets[1].readableSource!!)
+            val created = BinaryReader(pair.video, context)
+            val after = BmffVideoProbe(created, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+            RemuxVerification.verify(original, facts, created, after.copy(tracks = after.tracks.filter { it.handler != "meta" }))
+            val inspected = core.inspect(ReadRequest(pair, context)).orThrow()
+            assertEquals(true, inspected.pairing?.matches)
+            assertEquals(0, inspected.keyPhoto.position!!.compareTo(Time.Zero))
+            save(pair.video, outputPath); decode(outputPath)
+            assertEquals(before, sha256Range(original, facts.range).orThrow())
+        } finally { defaultApple.output.assets.forEach { it.readableSource?.close() } }
     }
 }

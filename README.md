@@ -163,21 +163,21 @@ Linux（Bash/Zsh）：
 
 `set-key` 修改协议意义的 key/presentation 位置，**不会重新生成封面图**。Apple 修改入口只接受已确认的有限结构，不能将任意相机原片视为可写。
 
-普通媒体创建 Apple 需要**显式 profile**，并满足 JPEG metadata 与原视频容器的分类门禁：
+普通媒体创建 Apple 默认使用有限 `jpeg-mov` profile，并满足 JPEG metadata 与原视频容器的分类门禁。输入必须是已分类的普通 JPEG＋MOV；不接受已有 Live Photo 或无法安全合并的 EXIF/MakerNote：
 
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe create --image '.\plain.jpg' --video '.\plain.mov' --target apple.livephoto --profile jpeg-mov --output-dir '.\out-apple-create'
+.\LivePhoto\LivePhoto.exe create --image '.\plain.jpg' --video '.\plain.mov' --target apple.livephoto --output-dir '.\out-apple-create'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto create --image './plain.jpg' --video './plain.mov' --target apple.livephoto --profile jpeg-mov --output-dir './out-apple-create'
+./LivePhoto/bin/LivePhoto create --image './plain.jpg' --video './plain.mov' --target apple.livephoto --output-dir './out-apple-create'
 ```
 
-不会隐式把 MP4 改成 MOV；MP4 输入应查询并使用 `jpeg-mp4`。省略 Apple profile 的 Generic Create 仍是 `Planned`，HEIC Create/ConvertTo 也未实现。
+可显式指定 `--profile jpeg-mov`，效果相同。不需要媒体后端，也不会隐式把 MP4 改成 MOV；MP4 输入必须显式使用 `--profile jpeg-mp4`。默认 Create 为 `Experimental`，不代表任意相机 JPEG/MakerNote 的 Generic Create 已完成；默认 ConvertTo 仍为 `Planned`，转换须指定已实现的 profile，HEIC Create/ConvertTo 也未实现。
 
 ### 修复：先预览，再明确写入
 
@@ -440,7 +440,9 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 
 有限 vivo ExplicitRemux 扩展批次：全量 **751 tests，0 failures / errors / skips**，包含版本一原字段、已知/未知 key、VFR samples 保留及复杂 profile/GainMap/未知 vendor/错误时长拒绝；真实 AVC Samsung/vivo 双协议修复后提取、逐 sample 核对和完整解码均成功。新完整 Windows 便携验收成功，包含两协议显式路径修复、key 保持、空 PATH 幂等与无后端拒绝。提交后的 CI/6 artifacts 以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 对应提交为准，不借用 Samsung 上一批产物；复杂 vivo 与真机验收仍未完成。
 
-有限 Huawei basic60 ExplicitRemux 扩展批次：Gradle 9.8.1 下全量 **755 tests，0 failures / errors / skips**；真实 AVC 三协议修复、原始 sample 验证与完整解码通过。新增完整 JPEG/普通注释/尾标原始字节、未知 key 单位保持，扩展拒绝、尾标篡改、写失败、取消与预算不足不发布的回归。新完整 Windows 便携包验收通过；提交后 CI 及 artifacts 以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 对应提交为准，不借用上一批结果，也不代表设备兼容。
+有限 Huawei basic60 ExplicitRemux 扩展批次：[`d91d23e`](https://github.com/ohyooo/LivePhoto/commit/d91d23e6c7ad5f4af2ca4a5657cec6db556fc9d2)，Gradle 9.8.1 下全量 **755 tests，0 failures / errors / skips**；真实 AVC 三协议修复、原始 sample 验证与完整解码通过。新增完整 JPEG/普通注释/尾标原始字节、未知 key 单位保持，扩展拒绝、尾标篡改、写失败、取消与预算不足不发布的回归。新完整 Windows 便携包验收通过；[对应 CI 37804198168](https://github.com/ohyooo/LivePhoto/actions/runs/37804198168) 两平台成功，6 个非空、未过期 artifacts 已核对；不代表设备兼容。
+
+Apple 有限默认 Create 入口：新全量 **757 tests，0 failures / errors / skips**。省略 profile 只接入普通 JPEG＋MOV 的已有 assembler，计划解析为 `jpeg-mov`；保持样本、配置、时间线及源文件不变，不执行 remux/转码。包含 AVC/HEVC 合成正负例、真实 AVC MOV 独立样本验证与完整解码。新完整 Windows 便携验收成功，新增空 PATH 创建、key 保持、MP4 拒绝且不发布输出的 smoke；提交后的 CI/artifacts 待核验，不使用上一批结果证明本批交付完成。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -462,7 +464,7 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | Generic/HEIC 写入、更多原片与跨协议路径 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入，默认 Create 限 JPEG＋MOV；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | 复杂 Generic/HEIC 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；有限 MOV Probe 已交付 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe；完整解码、便携包与 CI 验收 | 系统媒体编辑、其它 OS 官方 API 适配 |
@@ -517,7 +519,8 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 - [x] Huawei basic60 JPEG 有限 ExplicitRemux：全量/三协议真实媒体与新便携验收通过，完整原图与前 40 字节尾标保持；未知时间单位仍报告，HEIC/Honor/扩展不授权修复。
 - [ ] 继续核查兼容读取边界：MOV/vivo 的 `mdhd` 与 `stts` 差异须结合 CTS/edit 与官方语义核对；Apple IFD0 MakerNote 的有限兼容读取需独立确认，不猜容差，不自动授权旧结构写入。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
-- [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
+- [ ] Apple 有限默认 JPEG＋MOV Create 的对应 CI 与 artifacts 验收（代码、757 项全量测试与新完整 Windows 便携包已通过）。
+- [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。

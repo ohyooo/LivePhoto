@@ -66,7 +66,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
             val writes = setOf(Operation.SplitClean, Operation.ConvertFrom, Operation.SetKey, Operation.Repair) + if (actual.profile == ProfileId("jpeg-mp4")) setOf(Operation.ConvertTo, Operation.Create)
-                else if (target.profile != null) setOf(Operation.Create, Operation.ConvertTo) else emptySet()
+                else if (target.profile != null) setOf(Operation.Create, Operation.ConvertTo) else setOf(Operation.Create)
             val movieProfile = if (actual.profile == ProfileId("jpeg-mp4")) "mp4" else "mov"
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 if (operation in reads + writes) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,

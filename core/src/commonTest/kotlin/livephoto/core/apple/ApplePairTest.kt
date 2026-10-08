@@ -75,9 +75,11 @@ class ApplePairTest {
         }
     }
 
-    @Test fun createPlannedDoesNotDisablePairReading(): Unit = runImmediate {
+    @Test fun finiteDefaultCreateAndPlannedHeicDoNotDisablePairReading(): Unit = runImmediate {
         val capabilities = core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple)).operations
-        assertEquals(Implementation.Planned, capabilities.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Experimental, capabilities.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Planned, core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple, ProfileId("heic-mov"))).operations.single { it.operation == Operation.Create }.implementation)
+        assertEquals(Implementation.Planned, capabilities.single { it.operation == Operation.ConvertTo }.implementation)
         assertEquals(Implementation.Experimental, capabilities.single { it.operation == Operation.Inspect }.implementation)
         assertEquals(Disposition.Live, value(core.detect(ReadRequest(pair(), context))).disposition)
     }
