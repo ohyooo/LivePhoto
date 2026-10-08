@@ -4,8 +4,9 @@ upstream
 **/build/
 .validation/
 .DS_Store
-# Documentation and specifications stay local; only approved test media are tracked.
+# Specifications/logs stay local; the root README and approved test media are tracked.
 *.md
+!/README.md
 /docs/
 /reference/*
 !/reference/video.jpg
