@@ -20,4 +20,7 @@ tasks.named<Test>("jvmTest") {
     outputs.dir(layout.buildDirectory.dir("portable-heic-fixtures"))
     outputs.dir(layout.buildDirectory.dir("portable-windows-fixtures"))
     outputs.dir(layout.buildDirectory.dir("portable-apple-heif-fixtures"))
+    outputs.dir(layout.buildDirectory.dir("reports/huawei-heic-fixtures"))
+    outputs.dir(layout.buildDirectory.dir("reports/samsung-remux-fixtures"))
+    outputs.dir(layout.buildDirectory.dir("reports/vivo-remux-fixtures"))
 }
