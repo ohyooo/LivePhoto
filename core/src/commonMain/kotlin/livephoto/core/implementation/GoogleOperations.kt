@@ -12,7 +12,8 @@ import livephoto.core.huawei.*
 import livephoto.core.apple.*
 
 internal object GoogleOperations {
-    suspend fun create(request: CreateRequest, originalInputs: List<BinaryReader> = emptyList(), sourceChanges: List<Change> = emptyList(), sourceKey: KeyPhotoResult? = null, metadataUnproven: Boolean = false): CoreResult<OperationResult> = attempt {
+    suspend fun create(request: CreateRequest, originalInputs: List<BinaryReader> = emptyList(), sourceChanges: List<Change> = emptyList(), sourceKey: KeyPhotoResult? = null, metadataUnproven: Boolean = false,
+        verifyAdditional: (suspend (SourceSession) -> Unit)? = null): CoreResult<OperationResult> = attempt {
         RequestValidation.validate(request).orThrow()
         if (Guarantee.ExactExtraction in request.policy.requiredGuarantees) fail("PRESERVATION_REQUIREMENT_FAILED", "Create constructs a new composite asset; whole-asset exact extraction is not applicable", Stage.Plan)
         if (request.context.limits.maxSources < 2u) fail("RESOURCE_LIMIT_EXCEEDED", "Create requires two input sources")
@@ -67,6 +68,7 @@ internal object GoogleOperations {
                 val outputCoding = codingDigest(staged)
                 val outputMetadata = ordinaryDigest(staged, verifiedExifRewrite = oplus)
                 if (videoDigest != extractedDigest || coding != outputCoding || metadata != outputMetadata) fail("POSTCONDITION_FAILED", "Create changed unrequested video, image coding, or ordinary metadata", Stage.Verify)
+                verifyAdditional?.invoke(staged)
                 AssetVerification(report, listOf(
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "Create constructs a new composite carrier; no whole-carrier exact extraction claim"),
                     GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.Verified, videoDigest, extractedDigest, "Embedded resource ${videoId(binding.protocol).value}: complete encoded video suffix bytes unchanged"),

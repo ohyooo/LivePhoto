@@ -123,6 +123,17 @@ class CliTest {
         assertEquals(Path.of("tools with spaces/ffmpeg.exe"), path)
         assertEquals(1, calls)
     }
+    @Test fun explicitRemuxRepairDiscoversBackendButPureRepairDoesNot() = blocking {
+        var path: Path? = null; var discoveries = 0
+        val cli = Cli(discover = { path = it; discoveries++; BackendDiscovery(null, null, emptyList()) })
+        assertEquals(3, cli.run(listOf("repair", "--input", "not-opened")) {})
+        assertEquals(3, cli.run(listOf("repair", "--input", "not-opened", "--mode", "ExplicitRePair")) {})
+        assertEquals(0, discoveries)
+        assertEquals(3, cli.run(listOf("repair", "--input", "not-opened", "--mode", "ExplicitRemux")) {})
+        assertEquals(1, discoveries); assertNull(path)
+        assertEquals(3, cli.run(listOf("repair", "--input", "not-opened", "--mode", "ExplicitRemux", "--ffmpeg", "tools with spaces/ffmpeg.exe")) {})
+        assertEquals(2, discoveries); assertEquals(Path.of("tools with spaces/ffmpeg.exe"), path)
+    }
     @Test fun decodeCheckIsAnExplicitProbeRequestFlag() = blocking {
         var decode = false
         val core = object : LivePhotoCore by DefaultLivePhotoCore() {

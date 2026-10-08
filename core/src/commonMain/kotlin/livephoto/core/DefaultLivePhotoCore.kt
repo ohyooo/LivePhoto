@@ -36,7 +36,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override suspend fun split(request: SplitRequest): CoreResult<OperationResult> = GoogleOperations.split(request)
     override suspend fun convert(request: ConvertRequest): CoreResult<OperationResult> =
         if (GoogleHeicCreateOperations.accepts(request.target)) GoogleHeicConvertOperations.convert(request) else ConvertOperations.convert(request, backend)
-    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairOperations.repair(request)
+    override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = RepairOperations.repair(request, backend)
     override suspend fun setKeyPhotoPosition(request: SetKeyRequest): CoreResult<OperationResult> = KeyMetadataOperations.set(request)
     override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> = FrameOperations.extract(request, backend)
     override suspend fun replacePrimaryImageFromFrame(request: ReplaceRequest): CoreResult<OperationResult> = ReplaceOperations.replace(request, backend)
@@ -136,7 +136,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
                 when { operation in reads -> if (jpeg) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "sefGraph", Value.Text("unique-complete-indexed-records-107"))) +
                     if (operation in setOf(Operation.ConvertFrom, Operation.ConvertTo)) listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("jpeg-mpv3-no-ordinary-sef-suffix-classified-cleanup-and-target-assembly-source-domain-key-and-edits-through-verified-backend-only")))
-                    else if (operation == Operation.Repair) listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("unique-legacy-footer-length-only-safe-metadata-mode"))) else if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-canonical-live-only-sef-existing-v2-directory-whole-suffix-preserved"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
+                    else if (operation == Operation.Repair) listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("safe-metadata-unique-legacy-footer-length-or-explicit-remux-canonical-jpeg-mpv3-mov-to-mp4-classified-metadata-private-backend-no-encoding"))) else if (operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-canonical-live-only-sef-existing-v2-directory-whole-suffix-preserved"))) else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("jpeg-mpv3-verified-owned-binding-ordinary-sef-preserved"))) else if (!jpeg)
                         listOf(Condition(ConditionOperator.Equals, "coverage", Value.Text("verified-box-media-ranges-parsed-item-locations-and-links-codec-derived-semantics-decode-not-run"))) +
                             if (operation == Operation.ExtractRaw) listOf(Condition(ConditionOperator.Equals, "rawScope", Value.Text("verified-motion-range-or-parsed-item-extents-in-declared-order-not-an-independent-heic-carrier"))) else emptyList() else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
@@ -226,7 +226,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
                 else -> GoogleOperations.plan(request)
             }
             is SetKeyRequest -> KeyMetadataOperations.plan(request)
-            is RepairRequest -> RepairOperations.plan(request)
+            is RepairRequest -> RepairOperations.plan(request, backend)
             else -> GoogleOperations.plan(request)
         }
 

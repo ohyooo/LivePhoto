@@ -12,14 +12,14 @@ internal object SamsungFixtures {
     data class Entry(val prefix: Int, val type: Int, val name: String, val start: Int, val size: Int, val payload: ByteArray, val raw: ByteArray)
     val ordinary = Record(0x1234, "Ordinary_Private_Data", GoogleFixtures.bytes(7, 0, 0xff, 0xd9, 8))
 
-    fun photo(video: ByteArray = GoogleFixtures.video().bytes, ordinaryRecord: Boolean = false, legacy: Boolean = false, xmp: Boolean = false, extraSegments: ByteArray = byteArrayOf(), extraXmp: String = "", secondaryPadding: String? = null, extraRecords: List<Record> = emptyList()): Photo {
+    fun photo(video: ByteArray = GoogleFixtures.video().bytes, ordinaryRecord: Boolean = false, legacy: Boolean = false, xmp: Boolean = false, extraSegments: ByteArray = byteArrayOf(), extraXmp: String = "", secondaryPadding: String? = null, extraRecords: List<Record> = emptyList(), timestamp: String? = "0"): Photo {
         val records = listOf(Record(0x0a30, "MotionPhoto_Data", video), Record(0x0a31, "MotionPhoto_Version", "mpv3".encodeToByteArray())) + (if (ordinaryRecord) listOf(ordinary) else emptyList()) + extraRecords
         val trailer = trailer(records, legacy)
         val packet = if (!xmp) byteArrayOf() else {
             val padding = secondaryPadding?.let { " item:Padding='$it'" } ?: ""
             val directory = "<rdf:li rdf:parseType='Resource'><container:Item item:Mime='image/jpeg' item:Semantic='Primary' item:Length='0' item:Padding='24'/></rdf:li>" +
                 "<rdf:li rdf:parseType='Resource'><container:Item item:Mime='video/mp4' item:Semantic='MotionPhoto' item:Length='${trailer.size - 24}'$padding/></rdf:li>"
-            GoogleFixtures.xmpSegment(GoogleFixtures.v2Xml(video.size, directory = directory, extra = extraXmp))
+            GoogleFixtures.xmpSegment(GoogleFixtures.v2Xml(video.size, timestamp = timestamp, directory = directory, extra = extraXmp))
         }
         val jpeg = GoogleFixtures.jpeg(extraSegments + packet)
         val tableStart = jpeg.size + records.sumOf { it.bytes.size }

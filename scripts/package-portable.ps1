@@ -364,6 +364,46 @@ try {
             throw "Portable existing-FFmpeg decode failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=SUCCESS'
+        $repairFixtures = Join-Path $repository 'core/build/reports/samsung-remux-fixtures'
+        $repairManifest = @{}
+        foreach ($line in Get-Content (Join-Path $repairFixtures 'manifest.txt')) {
+            $parts = $line.Split('=', 2)
+            if ($parts.Count -ne 2 -or $repairManifest.ContainsKey($parts[0])) { throw 'Invalid remux-repair fixture manifest.' }
+            $repairManifest[$parts[0]] = $parts[1]
+        }
+        $repairCarrier = Join-Path $repairFixtures 'carrier.jpg'
+        if ($repairManifest['scope'] -ne 'synthetic-real-avc-streamcopy-not-device-proof' -or -not $repairManifest['run'] -or
+            (Get-FileHash $repairCarrier).Hash.ToLowerInvariant() -ne $repairManifest['carrier']) { throw 'Unverified remux-repair fixture.' }
+        $repairArgs = @('repair', '--input', $repairCarrier, '--mode', 'ExplicitRemux', '--ffmpeg', $media.ffmpegPath, '--issues', 'UNSUPPORTED_CONTAINER')
+        $repairPreview = & $launcher @repairArgs
+        if ($LASTEXITCODE -ne 0) { throw "Portable remux repair preview failed: $repairPreview" }
+        $preview = ($repairPreview | ConvertFrom-Json).result
+        if ($preview.operation -or @($preview.changesApplied).Count -ne 0 -or @($preview.proposedChanges).Count -ne 1 -or @($preview.blocked).Count -ne 0) { throw 'Remux preview staged or did not propose its one container correction.' }
+        $repairResult = & $launcher @repairArgs --apply --strict --output-dir (Join-Path $verify 'Samsung container repair')
+        if ($LASTEXITCODE -ne 0) { throw "Portable remux repair failed: $repairResult" }
+        $repair = ($repairResult | ConvertFrom-Json).result
+        $repairedCarrier = $repair.operation.output.assets[0].path
+        if (@($repair.operation.output.assets).Count -ne 1 -or ($repair.operation.execution | Where-Object transcoded -eq $true) -or
+            -not ($repair.operation.execution | Where-Object { $_.stage -eq 'Remux' -and $_.remuxed }) -or
+            ($repair.issuesAfter | Where-Object { $_.code.value -eq 'UNSUPPORTED_CONTAINER' -and $_.layer -eq 'Protocol' })) { throw 'Remux repair did not publish one verified corrected carrier without encoding.' }
+        $repairedRaw = & $launcher extract --input $repairedCarrier --output-dir (Join-Path $verify 'Samsung repaired raw')
+        if ($LASTEXITCODE -ne 0) { throw 'Portable repaired video extraction failed.' }
+        $repairVideo = ($repairedRaw | ConvertFrom-Json).result.output.assets[0]
+        if ($repairVideo.videoContainer -ne 'Mp4') { throw 'Repaired video is not MP4.' }
+        $repairDecode = & $launcher probe --input $repairVideo.path --decode-check --ffmpeg $media.ffmpegPath
+        if ($LASTEXITCODE -ne 0 -or -not (($repairDecode | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Repaired video did not completely decode.' }
+        $repairKey = & $launcher get-key --input $repairedCarrier
+        if ($LASTEXITCODE -ne 0 -or (($repairKey | ConvertFrom-Json).result.position.value -ne $repairManifest['key'])) { throw 'Container repair changed the key.' }
+        $repairPath = $env:Path
+        try {
+            $env:Path = ''
+            $again = & $launcher repair --input $repairedCarrier --mode ExplicitRemux
+            if ($LASTEXITCODE -ne 0 -or @((($again | ConvertFrom-Json).result.proposedChanges)).Count -ne 0) { throw 'Container repair no-op unexpectedly requires backend.' }
+            $disabled = & $launcher repair --input $repairCarrier --mode ExplicitRemux --apply --output-dir (Join-Path $verify 'disabled Samsung repair')
+            if ($LASTEXITCODE -ne 3 -or ($disabled | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Unavailable remux backend must not authorize repair.' }
+        } finally { $env:Path = $repairPath }
+        if ((Get-FileHash $repairCarrier).Hash.ToLowerInvariant() -ne $repairManifest['carrier']) { throw 'Container repair mutated its source.' }
+        Write-Host 'PORTABLE_SAMSUNG_EXPLICIT_REMUX=SUCCESS scope=canonical-sef-mov-to-mp4-no-encoding-not-device-proof'
         if ($IsWindows -and $windowsDecoderAvailable) {
             # Explicit fixture encoding only: the OS worker itself never launches FFmpeg.
             # Microsoft H.264 decoding requires at least 48x48, unlike the smaller Core fixtures.

@@ -16,7 +16,8 @@ internal object RepairOperations {
     private data class Prepared(val session: SourceSession, val result: RepairResult, val rewrite: JpegRewritePlan? = null,
         val fixed: BinarySource? = null, val protocol: ProtocolId = ProtocolIds.GoogleV1,
         val exifProofs: List<ExifPositionIndependenceProof> = emptyList())
-    suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = attempt {
+    suspend fun repair(request: RepairRequest, backend: MediaBackend? = null): CoreResult<RepairResult> = attempt {
+        if (request.mode == RepairMode.ExplicitRemux) return@attempt RemuxRepairOperations.repair(request, backend).orThrow()
         if (request.mode == RepairMode.ExplicitRePair) return@attempt AppleRepairOperations.repair(request).orThrow()
         val budget = ParseBudget(request.context)
         val source = open(request, budget)
@@ -79,7 +80,8 @@ internal object RepairOperations {
         result.copy(changesApplied = result.proposedChanges, issuesAfter = after, operation = operation)
     }
 
-    suspend fun plan(request: RepairRequest): CoreResult<ExecutionPlan> = attempt {
+    suspend fun plan(request: RepairRequest, backend: MediaBackend? = null): CoreResult<ExecutionPlan> = attempt {
+        if (request.mode == RepairMode.ExplicitRemux) return@attempt RemuxRepairOperations.plan(request, backend).orThrow()
         if (request.mode == RepairMode.ExplicitRePair) return@attempt AppleRepairOperations.plan(request).orThrow()
         val budget = ParseBudget(request.context)
         val source = open(request, budget)

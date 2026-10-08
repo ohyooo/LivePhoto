@@ -77,7 +77,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             val targetKeys = setOf("target", "profile")
             val trimKeys = setOf("start-us", "end-us", "mode", "key-outside")
             val mediaCommands = setOf("probe", "media-capabilities", "extract-frame", "replace-cover", "trim", "remux", "transcode")
-            val allowed = common + (if (command in mediaCommands + setOf("create", "convert")) setOf("ffmpeg") else emptySet()) + when (command) {
+            val allowed = common + (if (command in mediaCommands + setOf("create", "convert", "repair")) setOf("ffmpeg") else emptySet()) + when (command) {
                 "capabilities" -> targetKeys
                 "media-capabilities" -> emptySet()
                 "create" -> setOf("image", "video", "output-dir", "strict", "allow-transcode") + targetKeys + trimKeys + positionKeys + replacementKeys
@@ -97,7 +97,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
             }
             require(options.keys.all { it in allowed }) { "Unknown or inapplicable option: ${options.keys.first { it !in allowed }}" }
             val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
-                command in setOf("create", "convert") && (options.keys.any { it in trimKeys + replacementKeys } || "ffmpeg" in options)
+                command in setOf("create", "convert") && (options.keys.any { it in trimKeys + replacementKeys } || "ffmpeg" in options) ||
+                command == "repair" && (options["mode"] == RepairMode.ExplicitRemux.name || "ffmpeg" in options)
             val discovery = if (providedCore == null && needsBackend) discover(options["ffmpeg"]?.let(Path::of)) else null
             val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
             fun required(name: String): String = options[name] ?: errorArgument("Missing --$name")
