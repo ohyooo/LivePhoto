@@ -6,6 +6,8 @@
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；当前构建目标为 JVM，尚未交付 Native、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux 便携包已交付；最近完成 Apple CID 源绑定证据。下一项是尚未开始的 Apple ExplicitRePair，真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+
 ## 目录
 
 - [下载与运行](#下载与运行)
@@ -51,7 +53,7 @@ Linux，在解压位置运行：
 - **只做协议操作通常不需要 FFmpeg。** 检测、结构检查、原样提取及有限的协议封装/编辑，可直接由 Core 完成。结构检查不代表已经解码视频。
 - **抽帧、裁剪、转码等推荐使用自己准备的 FFmpeg。** 后端选择顺序为：`--ffmpeg` 显式路径 → 系统 `PATH` → 已实现且运行时可用的系统 API → 禁用相应能力。工具不会自动下载或安装 FFmpeg、Java 或其他后端，也不识别 shell 的 FFmpeg 别名；PATH 中使用绝对目录。
 - Windows 系统 API 当前仅提供有限的 AVC/MP4、无音轨、完整软件解码 Probe 回退；并非通用媒体处理后端。系统抽帧/裁剪/remux/transcode 与其它 OS 系统适配器仍待实现。先用 `media-capabilities` 查看当前机器实际可用能力。
-- NAS 验证使用用户安装的 `C:\Program Files\FFmpeg\bin\ffmpeg.exe`。使用 shared 版 FFmpeg 时，要保留它旁边的 DLL；不要只移动 EXE。CLI 使用 `--ffmpeg` 或 PATH；测试另支持 `LIVEPHOTO_FFMPEG`，`FFMPEG_HOME` 本身不是 CLI 的查找入口。
+- 使用 shared 版 FFmpeg 时，要保留它旁边的 DLL；不要只移动 EXE。CLI 使用 `--ffmpeg` 或 PATH；测试另支持 `LIVEPHOTO_FFMPEG`，`FFMPEG_HOME` 本身不是 CLI 的查找入口。
 - 推荐先 `inspect` / `analyze`，再执行修改；重要原片另行备份。输入保持不可变，输出使用**尚不存在的新目录**，不会覆盖输入或已有输出。
 - 默认禁止转码。`--allow-transcode` 只是显式授权，仍受操作、输入及目标的能力和安全条件限制。不要用它绕过未知 metadata、HDR、GainMap、MakerNote 或资源依赖风险。
 - 默认保留策略是 `BestEffortWithReport`：必须阅读 `preservation` 报告，而不是假设所有 metadata 均无损。`--strict` 要求严格保留，无法证明时会拒绝输出；这不是“关闭警告”开关。
@@ -306,21 +308,16 @@ Apple CID inspection evidence 绑定 source/generation/role/字段位置；它�
 
 需要已有的 **JDK 25**，`JAVA_HOME` 指向 JDK 根目录。项目禁用自动供应 Java，并通过 `JAVA_HOME` 发现 toolchain；无需系统 Gradle，始终使用 Wrapper。Wrapper 和首次依赖解析需要网络，允许下载仓库指定的 Gradle 与依赖，但不会安装 JDK。打包另需 JDK 的 `jpackage` / `jlink`，以及已有的 PowerShell 7；应用使用者不需要这些构建工具。
 
-本项目协作验证约定：**源码在本地修改，所有 Gradle、测试、CLI 可执行验证只在 `ssh_nas_ci` 的 `C:\Users\admin\Desktop\LivePhoto` 执行**；不要在当前 macOS 开发主机编译或运行项目，也不要使用 WSL。先同步本地源码，远程不作为长期源码编辑位置。
+### Windows PowerShell
 
-每次修改/构建/测试前先 fetch 检查上游；只允许安全快进，分叉或冲突时停止，不能自动 merge/rebase/reset/丢弃工作树修改。
-
-### NAS 的 Windows PowerShell 示例
-
-通过 `ssh ssh_nas_ci` 连接，确保已进入 PowerShell，然后：
+在项目根目录执行，将 `JAVA_HOME` 配置为已有 JDK 25 的实际安装目录。下面的 JDK 路径只是占位示例：
 
 ```powershell
-Set-Location 'C:\Users\admin\Desktop\LivePhoto'
-$env:JAVA_HOME = 'C:\Program Files\jdk\jbr-25'
+$env:JAVA_HOME = 'C:\path\to\jdk-25'
 
-# 每次 Gradle 操作之前检查；若发现文件，停止并交由用户处理。
+# 本项目通过 JAVA_HOME 选择已有 JDK，执行前检查冲突配置。
 if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
-    throw '发现 gradle-daemon-jvm.properties；请先由用户删除，再继续。'
+    throw '发现 gradle-daemon-jvm.properties；请先处理该配置，再继续。'
 }
 
 .\gradlew.bat build :core:jvmTest :cli:installDist --console=plain --warning-mode=all
@@ -342,14 +339,6 @@ if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
 .\cli\build\install\cli\bin\cli.bat --help
 ```
 
-如需远程 fresh-report 验收记录，使用现有脚本（同样先完成上游检查与 JDK 设置）：
-
-```powershell
-.\scripts\remote-phase-validate.ps1 -Phase readme-check -GradleTasks @('build', ':core:jvmTest', ':cli:installDist')
-```
-
-脚本检查 JVM criteria 文件并写入本轮 run ID、时间、结果及 fresh XML 汇总，记录位于 `.validation/`，不提交到仓库。长任务复用现有远程 tmux/psmux 会话，避免 SSH 断开中止验收。
-
 ### 可选媒体集成测试
 
 纯协议测试不依赖 FFmpeg；没有后端时相关媒体集成测试可以跳过。需要完整 FFmpeg 验收时，在上述构建前设置：
@@ -366,7 +355,7 @@ reference 测试使用仓库中的 `reference/video.jpg`、`reference/video.mp4`
 
 ### 打包 Windows 便携应用
 
-在 NAS 完成 `:cli:installDist` 和 `:core:jvmTest` 后：
+完成 `:cli:installDist` 和 `:core:jvmTest` 后，在项目根目录执行：
 
 ```powershell
 .\scripts\package-portable.ps1 -Platform windows-x64 -Destination '.\ci-output\portable-readme'
@@ -386,7 +375,7 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 - `build-outputs-...`：JAR 与 JVM 分发包。
 - `build-reports-...`：测试报告、XML、合成 fixture、Gradle 和便携日志；构建失败时也尝试上传已有报告。
 
-两平台成功通常共 6 个 artifacts。CI 可能没有 FFmpeg，不能把它的协议/便携测试等同于 NAS 的完整真实媒体集成验收，也不能把缺失工具后的 skip 当作该媒体操作成功。
+两平台成功通常共 6 个 artifacts。CI 可能没有 FFmpeg，不能把它的协议/便携测试等同于配置完整媒体后端的集成验收，也不能把缺失工具后的 skip 当作该媒体操作成功。
 
 ## 进度、已完成与 TODO
 
@@ -394,15 +383,32 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
-- NAS Host：`DESKTOP-DCMRJ35`；Directory：`C:\Users\admin\Desktop\LivePhoto`。
-- Command：`.\gradlew.bat build :core:jvmTest :cli:installDist --console=plain --warning-mode=all --rerun-tasks`。
-- 本轮 **706 tests，0 failures / errors / skips**；独立核对本轮 XML 时间，不借用以前的 381 项或其它旧结果。
+- 完整验收 **706 tests，0 failures / errors / skips**；结果对应上述提交，不借用旧报告。
 - 完整 Windows 便携验收成功，包括已有 FFmpeg 集成与无 FFmpeg 的合成协议验收；这仍不是设备认证。
 - [对应 CI 37713982144](https://github.com/ohyooo/LivePhoto/actions/runs/37713982144) 成功；Windows/Linux 合计 6 个非空、未过期 artifacts 已核对。
 
 这是特定提交的证据，不是对以后每个提交的永久保证。项目**尚未完成所有 phases**；任务范围和未覆盖 profile 持续扩展，暂不提供缺乏固定分母的总体百分比。
 
-本 README 的基础命令另于 2026-10-08 在上述 NAS 使用已验证的便携程序试跑：help/version、读取、reference 预期 Invalid、普通媒体 Create 后协议验证、字节精确视频 Extract、Clean Split、转换均通过。这是文档示例验收，不是重新运行 706 项单元测试，也不表示本文所有条件性示例或 TODO 已实现。
+本 README 的基础命令另于 2026-10-08 使用已验证的便携程序试跑：help/version、读取、reference 预期 Invalid、普通媒体 Create 后协议验证、字节精确视频 Extract、Clean Split、转换均通过。这是文档示例验收，不是重新运行 706 项单元测试，也不表示本文所有条件性示例或 TODO 已实现。
+
+### 阶段状态一览
+
+状态按**工作包**记录，不按代码量或测试数量推算完成百分比。“已完成”只针对注明的范围；“部分完成”表示已有可用路径，但还存在本节 TODO。当前未在实施新的业务代码，最近几次提交是 README 和上游 CI 配置更新。
+
+| 阶段 / 工作包 | 当前状态 | 已完成 | 仍未完成 |
+| --- | --- | --- | --- |
+| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | KMP/JVM 工程、统一模型/API、IO/后端契约 | 新平台接入属后续范围，不等于已交付 Native |
+| Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
+| Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
+| 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence | 冲突重配对、Generic/HEIC 写入、更多原片与跨协议路径 |
+| Repair | 部分完成；下一实施工作包 | 有限 SafeMetadataOnly、预览、allowlist、回滚 | ExplicitRePair 尚未开始；ExplicitRemux 未实现 |
+| Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
+| MediaBackend | 部分完成 | 可选 FFmpeg 有限操作；Windows 系统有限 Probe 解码回退 | 系统媒体编辑、其它 OS 官方 API 适配 |
+| CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
+| Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
+
+每个实施工作包完成后，应同时更新本表、下面的 TODO 和对应提交/验收检查点。只有完成实际构建、测试与 CLI 验收并核对相应 CI/产物，才把该批次标记为完成；测试数增加本身不代表某个阶段全部完成。
 
 ### 已完成的实施批次
 
@@ -417,14 +423,38 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 - [x] 薄 CLI、JSON/退出码、两资产原子发布、源变化/预算/取消/篡改/第二资产失败回归。
 - [x] Windows/Linux 便携 CI、reference 测试、合成 parser/writer/round-trip/byte-exact/metadata/malformed 测试与有限真实媒体解码验收。
 
-### 剩余 TODO
+### 后续顺序与验收目标
+
+以下是当前推进顺序，不是已实施状态；遇到真实依赖可调整小范围顺序，不能因此跳过验证或把暂缓项计为完成。
+
+| 顺序 | 工作包 | 状态 / 前提 | 交付时应看到的结果 |
+| --- | --- | --- | --- |
+| 1 | Apple 有限 ExplicitRePair | **下一项，未开始**；复用既有 Request 与新鲜 CID 证据 | 用户指定两个源及权威，冲突 ID 不自动选；独立验证后原子发布 |
+| 2 | Repair 其它显式模式及 Apple 写入扩展 | 未开始相关剩余路径；先确认 ownership/依赖，重大规范/API 冲突需报告 | 每个 mode/profile 独立标能力；不能凭其它入口已可用推断支持 |
+| 3 | 系统 MediaBackend 扩展 | 未实现系统编辑；逐个平台检查官方 API 与运行时可用性 | 能力查询真实，抽帧/裁剪/remux/transcode 分别验证；无实现则禁用 |
+| 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
+| 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
+| 条件恢复后 | macOS ARM64 便携包 | **暂缓：runner 环境前置问题** | ARM64 主机/已有 JDK、构建、归档解压与 CLI smoke 全部实际通过 |
+| 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
+| 当前范围之外 | Compose UI、Android/iOS/Native 入口 | 未来规划，不计入本轮 Core + CLI 交付 | 复用统一 Core/Application API，不提前引入 GUI 依赖 |
+
+### 下一工作包的具体 TODO：ExplicitRePair
+
+- [ ] 核对 JPEG/HEIC 图片 CID 与 MOV/MP4 CID 的真实字段编码、位置、宽度和 ownership；未知结构不猜测。
+- [ ] 要求显式选定图片和视频，并由本次输入的新鲜 evidence 指定权威；缺失、过期、冲突或未知权威必须拒绝。
+- [ ] 补齐 dryRun 预览及允许问题码过滤；预览零写入，不自动生成 ID 或择一覆盖。
+- [ ] 实现有限 CID 改写与双资产共同原子发布，保留原图编码、视频 sample/configuration/时间线及未授权字段。
+- [ ] 独立检查输出配对与协议、保留报告；覆盖第二资产失败、源变化、预算/取消、篡改回滚、再次执行无变化。
+- [ ] 实际构建/测试和 CLI 验收；通过后提交推送、核对 CI artifacts，再更新状态并继续下一工作包。
+
+### 剩余范围清单
 
 - [ ] **下一项：Apple 有限 ExplicitRePair。** 明确选定和授权两个输入，通过新鲜 CID 证据指定权威；不自动选择冲突 ID，原子输出并独立验证。目前仅证据读取已实现。
 - [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
-- [ ] **L4 真机兼容验收（用户明确暂缓）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
+- [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
 - [ ] 未来 Compose UI、Android/iOS/Native targets：不属于当前 Core + CLI 交付范围，不提前引入 GUI 依赖。
 
@@ -447,8 +477,8 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 - `core/src/commonMain/`：公共模型、协议解析/写入、保留及原子操作逻辑。
 - `core/src/jvmMain/`：文件 IO、可选 FFmpeg/Windows 系统 API adapter。
 - `cli/`：参数 → Request → Core → JSON，业务逻辑不放在 CLI。
-- `scripts/`：远程验收、便携打包和 Windows 隔离 helper 配置。
-- `reference/`：已授权提交的三个测试媒体；设计规范与实施日志在本地保留，不随此 README 上传。
+- `scripts/`：验收、便携打包和 Windows 隔离 helper 配置。
+- `reference/`：三个测试媒体，供协议与往返测试使用。
 - `upstream/`：只读参考，不是项目依赖，不包含在发行包中；不复制其业务架构。
 
 README 的信息组织参考 [Gradle](https://github.com/gradle/gradle/blob/master/README.md) 的入门/构建导航与 [scrcpy](https://github.com/Genymobile/scrcpy/blob/master/README.md) 的前提/下载/用法组织；命令、参数、平台状态和能力边界来自本仓库实际源码与验收记录。
