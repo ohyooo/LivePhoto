@@ -90,6 +90,42 @@ try {
     if (-not ($media.discoveryIssues | Where-Object { $_.code.value -eq 'FFMPEG_EXPLICIT_PATH_UNAVAILABLE' })) {
         throw 'Portable media discovery did not report the unavailable explicit tool.'
     }
+    # Core Clean needs no FFmpeg/encoder/decoder. Run this on every packaged platform,
+    # including CI runners without external media tools, using independently hashed fixtures.
+    $neutralFixtures = Join-Path $repository 'core/build/portable-heic-fixtures'
+    $neutralManifest = @{}
+    foreach ($line in Get-Content (Join-Path $neutralFixtures 'manifest.txt')) {
+        $parts = $line.Split('=', 2); if ($parts.Count -eq 2) { $neutralManifest[$parts[0]] = $parts[1] }
+    }
+    if ($neutralManifest['scope'] -ne 'synthetic-protocol-framing-not-decoder-or-device-proof' -or -not $neutralManifest['runId']) {
+        throw 'Portable neutral fixture provenance is missing.'
+    }
+    $neutralSearchPath = $env:Path
+    try {
+        $env:Path = ''
+        foreach ($name in @('motion')) {
+            $fixture = Join-Path $neutralFixtures "$name.mp4"
+            if ((Get-FileHash $fixture).Hash.ToLowerInvariant() -ne $neutralManifest["$name.mp4"]) { throw 'Neutral fixture hash differs.' }
+            $outside = Join-Path $verify "neutral synthetic $name.mp4"
+            [IO.File]::Copy($fixture, $outside, $false)
+            $firstJson = & $launcher split --input $outside --strict --output-dir (Join-Path $verify "neutral tool-free $name")
+            if ($LASTEXITCODE -ne 0) { throw "Portable no-FFmpeg movie Clean failed: $firstJson" }
+            $first = ($firstJson | ConvertFrom-Json).result
+            if ($first.output.assets.Count -ne 1 -or $first.output.assets[0].role -ne 'MotionVideo' -or
+                $first.output.assets[0].videoContainer -ne 'Mp4' -or @($first.preservation.changes).Count -ne 0 -or
+                ($first.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or
+                ($first.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) {
+                throw 'Portable no-FFmpeg movie Clean violated its finite scope.'
+            }
+            $secondJson = & $launcher split --input $first.output.assets[0].path --strict --output-dir (Join-Path $verify "neutral tool-free repeat $name")
+            if ($LASTEXITCODE -ne 0) { throw "Portable no-FFmpeg repeated Clean failed: $secondJson" }
+            $second = ($secondJson | ConvertFrom-Json).result
+            foreach ($path in @($fixture, $outside, $first.output.assets[0].path, $second.output.assets[0].path)) {
+                if ((Get-FileHash $path).Hash.ToLowerInvariant() -ne $neutralManifest["$name.mp4"]) { throw 'No-FFmpeg Clean was not byte-exact or mutated input.' }
+            }
+        }
+    } finally { $env:Path = $neutralSearchPath }
+    Write-Host 'PORTABLE_NEUTRAL_MOVIE_NO_FFMPEG=SUCCESS scope=synthetic-avc-aac-framing-file-exact-idempotence-not-decode-or-device'
     if ($IsWindows -and $windowsDecoderAvailable) {
         $windowsFixtures = Join-Path $repository 'core/build/portable-windows-fixtures'
         $fixtureManifest = @{}

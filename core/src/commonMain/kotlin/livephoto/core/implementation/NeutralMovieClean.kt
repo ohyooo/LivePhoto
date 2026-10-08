@@ -68,4 +68,20 @@ internal object NeutralMovieClean {
         })
         publish(request.output, request.policy, request.context, session.readers, listOf(asset)).orThrow()
     }
+
+    suspend fun plan(request: SplitRequest, session: SourceSession, budget: ParseBudget): CoreResult<ExecutionPlan> = attempt {
+        val facts = preflight(session, budget)
+        val caps = request.output.capabilities()
+        if (!caps.canReadStaged || request.policy.atomicity == Atomicity.AssetSetRequired && !caps.assetSetAtomic ||
+            request.policy.existingOutput == ExistingOutput.Replace && !caps.replacesAtomically)
+            fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Neutral Clean plan cannot satisfy transaction guarantees", Stage.Plan)
+        session.recheck()
+        ExecutionPlan(session.snapshot, null, listOf(
+            PlanStep(Stage.Clean, listOf(Operation.SplitClean), emptyList(), "Copy the entire already-neutral movie; no edits, encoding or remux"),
+            PlanStep(Stage.Verify, listOf(Operation.Validate), emptyList(), "Independently classify staged hierarchy and compare whole-file SHA and track/sample/configuration/timeline facts")),
+            PreservationReport(), CapabilitySet(Availability.Conditional, listOf(CapabilityEntry(Operation.SplitClean, Implementation.Experimental,
+                conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text(videoFacts(facts).mime!!)),
+                    Condition(ConditionOperator.Equals, "cleanupScope", Value.Text("already-neutral-one-video-optional-audio-no-cid-timed-track-uuid-or-unknown-hierarchy-zero-padding-whole-file-copy"))),
+                verification = listOf(Verification.SourceReviewed)))))
+    }
 }

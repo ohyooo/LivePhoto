@@ -194,6 +194,8 @@ internal object GoogleOperations {
         }
         val budget = ParseBudget(context)
         val session = SourceSession.open(input, context, budget).orThrow()
+        if (request is SplitRequest && request.mode == SplitMode.Clean && NeutralMovieClean.accepts(session))
+            return@attempt NeutralMovieClean.plan(request, session, budget).orThrow()
         var snapshot = session.snapshot
         if (request is CreateRequest) {
             if (context.limits.maxSources < 2u) fail("RESOURCE_LIMIT_EXCEEDED", "Create planning requires two input sources")
@@ -231,7 +233,6 @@ internal object GoogleOperations {
         } else if (request is SplitRequest && request.mode == SplitMode.Clean) {
             if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_LAYOUT", "Clean plan needs one trusted resource graph")
             if (session.heifItems != null) GoogleHeicSplitOperations.preflight(request, session, budget)
-            else if (NeutralMovieClean.accepts(session)) NeutralMovieClean.preflight(session, budget)
             else if (session.applePair != null) AppleClean.prepare(session, budget).orThrow()
             else if (session.legacyPair != null) VivoPairOperations.preflightClean(session) else if (session.bindings.any { it.protocol == ProtocolIds.Huawei }) HuaweiJpegWriter.cleanPlan(session).orThrow() else if (session.sef != null) SamsungJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()) VivoJpegWriter.cleanPlan(session, context, budget).orThrow() else if (session.bindings.any { it.protocol == ProtocolIds.Oplus }) OplusJpegWriter.cleanPlan(session, context, budget).orThrow() else GoogleJpegWriter.cleanPlan(session, context).orThrow()
         }
