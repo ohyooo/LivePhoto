@@ -444,7 +444,7 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 
 Apple 有限默认 Create 入口：[`2f6554a`](https://github.com/ohyooo/LivePhoto/commit/2f6554a61122265ba1d5beebd59aee0727d4e0ea)，新全量 **757 tests，0 failures / errors / skips**。省略 profile 只接入普通 JPEG＋MOV 的已有 assembler，计划解析为 `jpeg-mov`；保持样本、配置、时间线及源文件不变，不执行 remux/转码。包含 AVC/HEVC 合成正负例、真实 AVC MOV 独立样本验证与完整解码。新完整 Windows 便携验收成功，新增空 PATH 创建、key 保持、MP4 拒绝且不发布输出的 smoke；[对应 CI 37806758463](https://github.com/ohyooo/LivePhoto/actions/runs/37806758463) 两平台成功，6 个非空、未过期 artifacts 已核对。
 
-Windows 系统解码缓冲区读取：新全量 **758 tests，0 failures / errors / skips**。隔离 worker 实际锁定并读取有效帧缓冲区，验证字节预算、返回原始缓冲区证据；包含 B 帧与小预算拒绝回归。该证据不解释像素 stride/色彩、不输出图片，系统 `ExtractFrame` 仍为 `Unsupported`。新完整 Windows 便携验收成功，验证内置 worker 新模式与原有 Core 系统回退；对应 CI/artifacts 待核对，不借用 Apple 上一批结果。
+Windows 系统解码缓冲区读取：[`686fa4c`](https://github.com/ohyooo/LivePhoto/commit/686fa4cf01f77d5db2520ed2bf078e3017dd9b55)，新全量 **758 tests，0 failures / errors / skips**。隔离 worker 实际锁定并读取有效帧缓冲区，验证字节预算、返回原始缓冲区证据；包含 B 帧与小预算拒绝回归。该证据不解释像素 stride/色彩、不输出图片，系统 `ExtractFrame` 仍为 `Unsupported`。新完整 Windows 便携验收成功，验证内置 worker 新模式与原有 Core 系统回退；[对应 CI 37808199497](https://github.com/ohyooo/LivePhoto/actions/runs/37808199497) 两平台成功，6 个非空、未过期 artifacts 已核对。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -524,7 +524,8 @@ Windows 系统解码缓冲区读取：新全量 **758 tests，0 failures / error
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
-- [ ] Windows 系统抽帧前置的对应 CI/artifacts 验收：真实帧缓冲区读取已通过 758 项全量测试与新完整 Windows 便携验收；不是已完成抽帧。
+- [x] Windows 真实解码缓冲区读取前置：758 项全量测试、新完整 Windows 便携包、对应两平台 CI 与 6 个 artifacts 已验收；不是已完成抽帧。
+- [ ] Windows 系统抽帧下一工作包：证明 NV12 像素布局与 SDR 色彩、按呈现顺序选定实际帧并核对 PTS，再生成 JPEG、独立验证图片和双重源不变检查后原子发布；未知 HDR/布局继续拒绝。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
