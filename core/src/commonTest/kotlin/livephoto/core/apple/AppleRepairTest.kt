@@ -105,6 +105,53 @@ class AppleRepairTest {
         assertTrue(tx.query().orThrow().assetIds.isEmpty()); assertFalse(mutable.closed)
     }
 
+    @Test fun independentlyFramedUuidFieldsPreserveOriginalWidthAndSingleTerminator(): Unit = runImmediate {
+        for (imageTerminated in listOf(false, true)) for (movieTerminated in listOf(false, true)) for (videoAuthority in listOf(false, true)) {
+            val input = SourceSet.Pair(source(Bytes(AppleFixtures.image(terminated = imageTerminated)), "width-image"),
+                source(Bytes(AppleFixtures.movie(otherId + if (movieTerminated) "\u0000" else "", ordinaryKey = false, singleMdat = true)), "width-movie"))
+            val before = listOf(bytes(input.image), bytes(input.video))
+            val oldInspections = listOf(input.image, input.video).map { core.inspect(ReadRequest(SourceSet.Single(it), context)).orThrow() }
+            val fields = oldInspections.mapIndexed { index, inspected ->
+                inspected.metadata.single { it.selector == if (index == 0) "apple:image:content-identifier" else APPLE_CID }.location.range!!
+            }
+            assertEquals(if (imageTerminated) 37uL else 36uL, fields[0].length)
+            assertEquals(if (movieTerminated) 37uL else 36uL, fields[1].length)
+            val result = core.repair(request(input, MemoryOutputTransaction(context, "width-$imageTerminated-$movieTerminated-$videoAuthority"), videoAuthority)).orThrow()
+            try {
+                val changedIndex = if (videoAuthority) 0 else 1
+                val chosen = if (videoAuthority) otherId else AppleFixtures.ID
+                for (index in 0..1) {
+                    val expected = before[index].toByteArray()
+                    if (index == changedIndex) chosen.encodeToByteArray().copyInto(expected, fields[index].offset.toInt())
+                    assertEquals(Bytes(expected), bytes(result.operation!!.output.assets[index].readableSource!!))
+                    assertEquals(before[index], bytes(if (index == 0) input.image else input.video))
+                }
+            } finally { result.operation!!.output.assets.forEach { it.readableSource?.close() }; input.image.close(); input.video.close() }
+        }
+    }
+
+    @Test fun extraTerminatorsSharedIdentityAndMixedTimedMetadataNeverAuthorizePublication(): Unit = runImmediate {
+        val image = source(Bytes(AppleFixtures.image()), "bounded-image")
+        val extraNuls = source(Bytes(AppleFixtures.movie(otherId + "\u0000\u0000", ordinaryKey = false, singleMdat = true)), "extra-terminators")
+        val mixed = source(Bytes(AppleFixtures.movie(otherId, ordinaryKey = true, singleMdat = true)), "mixed-timed-metadata")
+        for (movie in listOf(extraNuls, mixed)) {
+            val selected = SourceSet.Pair(image, movie)
+            val before = listOf(bytes(image), bytes(movie))
+            val tx = MemoryOutputTransaction(context, "bounded-reject-${movie.identity().orThrow().id.value}")
+            val req = request(selected, tx)
+            assertEquals("UNSAFE_METADATA_REWRITE", assertIs<CoreResult.Failure>(core.plan(req)).error.code.value)
+            assertEquals("UNSAFE_METADATA_REWRITE", assertIs<CoreResult.Failure>(core.repair(req)).error.code.value)
+            assertTrue(tx.query().orThrow().assetIds.isEmpty())
+            assertEquals(before[0], bytes(image)); assertEquals(before[1], bytes(movie))
+        }
+        val alias = source(Bytes(AppleFixtures.movie(otherId, ordinaryKey = false, singleMdat = true)), image.identity().orThrow().id.value)
+        val tx = MemoryOutputTransaction(context, "bounded-alias")
+        val req = request(SourceSet.Pair(image, alias), tx)
+        assertEquals("INVALID_ARGUMENT", assertIs<CoreResult.Failure>(core.repair(req)).error.code.value)
+        assertTrue(tx.query().orThrow().assetIds.isEmpty())
+        image.close(); extraNuls.close(); mixed.close(); alias.close()
+    }
+
     @Test fun strictExactMetadataOrdinaryMakerNoteWeakAtomicityAndBudgetArePreflightGates(): Unit = runImmediate {
         val input = mismatch(heic = true, mov = true)
         val tx = MemoryOutputTransaction(context, "repair-preflight")

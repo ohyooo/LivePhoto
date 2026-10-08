@@ -8,8 +8,8 @@ import livephoto.core.google.GoogleFixtures.u32
 /** Independent synthetic metadata, not a captured Apple-device compatibility fixture. */
 internal object AppleFixtures {
     const val ID = "00112233-4455-6677-8899-aabbccddeeff"
-    fun image(id: String = ID, tag: Int = 0x11, ordinaryNote: Boolean = false): ByteArray {
-        val text = (id + "\u0000").encodeToByteArray()
+    fun image(id: String = ID, tag: Int = 0x11, ordinaryNote: Boolean = false, terminated: Boolean = true): ByteArray {
+        val text = (id + if (terminated) "\u0000" else "").encodeToByteArray()
         val note = "Apple iOS\u0000".encodeToByteArray() + byteArrayOf(0, 1, 77, 77, 0, if (ordinaryNote) 2 else 1) +
             byteArrayOf((tag shr 8).toByte(), tag.toByte(), 0, 2) + u32(text.size.toUInt()) + u32(if (ordinaryNote) 40u else 28u) +
             (if (ordinaryNote) byteArrayOf(0, 1, 0, 4) + u32(1u) + u32(42u) else byteArrayOf()) + text
