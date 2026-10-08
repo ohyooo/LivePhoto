@@ -100,7 +100,7 @@ class AppleConvertTest {
         val weaker = object : OutputTransaction by output { override fun capabilities() = output.capabilities().copy(assetSetAtomic = false) }
         assertEquals("ATOMIC_PUBLICATION_UNAVAILABLE", assertIs<CoreResult.Failure>(core.convert(ConvertRequest(SourceSet.Single(source(GoogleFixtures.v2Photo())), target, output = weaker, context = context))).error.code.value)
         assertTrue(output.query().orThrow().assetIds.isEmpty())
-        for (profile in listOf(null, ProfileId("jpeg-mov"), ProfileId("heic-mov"))) {
+        for (profile in listOf(null, ProfileId("heic-mov"))) {
             val planned = core.convert(ConvertRequest(SourceSet.Single(source(GoogleFixtures.v2Photo())), ProtocolSelector(ProtocolIds.Apple, profile), output = output, context = context))
             assertEquals("CAPABILITY_PLANNED", assertIs<CoreResult.Failure>(planned).error.code.value)
         }

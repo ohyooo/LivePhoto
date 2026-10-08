@@ -331,6 +331,32 @@ try {
         }
         if ((Get-FileHash $movMovie).Hash -ne $movMovieHash -or (Get-FileHash $movSource).Hash -ne $movSourceHash) { throw 'Portable Apple MOV exact key roundtrip changed unrequested or source bytes.' }
         Write-Host 'PORTABLE_APPLE_MOV_CREATE_SETKEY=SUCCESS scope=bounded-classified-mov-not-device-compatibility'
+        $movCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $movSource --target google.motionphoto.v2 --frame-index 1 --strict --output-dir (Join-Path $verify 'Apple MOV live source')
+        if ($LASTEXITCODE -ne 0) { throw "Portable MOV live source Create failed: $movCarrierJson" }
+        $movCarrier = ($movCarrierJson | ConvertFrom-Json).result.output.assets[0].path
+        $movCarrierHash = (Get-FileHash $movCarrier).Hash
+        $movConvertJson = & $launcher convert --input $movCarrier --target apple.livephoto --profile jpeg-mov --strict --output-dir (Join-Path $verify 'Apple MOV ConvertTo')
+        if ($LASTEXITCODE -ne 0) { throw "Portable Apple MOV ConvertTo failed: $movConvertJson" }
+        $movConverted = ($movConvertJson | ConvertFrom-Json).result
+        if ($movConverted.output.assets.Count -ne 2 -or $movConverted.output.assets[1].videoContainer -ne 'Mov' -or
+            $movConverted.output.assets[1].mime -ne 'video/quicktime' -or ($movConverted.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or
+            ($movConverted.preservation.records | Where-Object { $_.outcome -notin @('Verified','NotApplicable') })) {
+            throw 'Portable MOV conversion did not preserve classified carriers/sample semantics.'
+        }
+        $convertedImage = $movConverted.output.assets[0].path
+        $convertedMovie = $movConverted.output.assets[1].path
+        $convertedValidation = & $launcher validate --input $convertedImage --pair-video $convertedMovie --layers Structure,Protocol
+        if ($LASTEXITCODE -ne 0 -or ($convertedValidation | ConvertFrom-Json).result.verdict -ne 'Valid' -or
+            ($convertedValidation | ConvertFrom-Json).result.coverage -ne 'Complete') { throw 'Portable MOV conversion pair validation failed.' }
+        $convertedKey = & $launcher get-key --input $convertedImage --pair-video $convertedMovie
+        if ($LASTEXITCODE -ne 0) { throw 'Portable MOV converted key inspection failed.' }
+        $position = ($convertedKey | ConvertFrom-Json).result.position
+        if (-not $position -or ([decimal]$position.value * 1000000 / $position.timescale) -ne 40000) { throw 'MOV conversion lost inherited presentation key.' }
+        & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $convertedMovie -map 0:v -map '0:a?' -sn -dn -f null -
+        if ($LASTEXITCODE -ne 0 -or (Get-FileHash $movCarrier).Hash -ne $movCarrierHash -or (Get-FileHash $movSource).Hash -ne $movSourceHash) {
+            throw 'MOV conversion decode/source immutability checks failed.'
+        }
+        Write-Host 'PORTABLE_APPLE_MOV_CONVERT=SUCCESS scope=bounded-classified-mov-not-device-compatibility'
         $transcodeFixture = Join-Path $verify 'transcode fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 8 -vf "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709" -fps_mode passthrough -c:v libx264 -preset ultrafast -crf 30 -bf 0 -g 3 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $transcodeFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable transcode fixture generation failed.' }

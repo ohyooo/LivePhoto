@@ -19,7 +19,8 @@ internal object AppleAssemblyOperations {
         val unknownMetadata: Boolean, val snapshot: Snapshot)
 
     fun validateTarget(request: ConvertRequest) {
-        if (request.target != target) fail("CAPABILITY_PLANNED", "Apple conversion currently requires the explicit jpeg-mp4 profile", Stage.Plan)
+        if (request.target !in setOf(target, ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov"))))
+            fail("CAPABILITY_PLANNED", "Apple conversion requires an implemented explicit JPEG movie profile", Stage.Plan)
         if (request.edits?.trim != null || request.edits?.replacementFrame != null)
             fail("CAPABILITY_UNSUPPORTED", "Apple conversion media edits do not yet have an assembly preservation proof", Stage.Plan)
     }
@@ -27,7 +28,7 @@ internal object AppleAssemblyOperations {
     private suspend fun prepare(request: AssemblyRequest, original: SourceSession?, inputs: Pair<BinarySource, BinarySource>, identifier: String): Prepared {
         val requestedContainer = when {
             request.target == target -> VideoContainer.Mp4
-            request.creating && request.target == ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")) -> VideoContainer.Mov
+            request.target == ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")) -> VideoContainer.Mov
             else -> fail("CAPABILITY_PLANNED", "Apple assembly requires an implemented explicit JPEG movie profile", Stage.Plan)
         }
         if (request.edits?.trim != null || request.edits?.replacementFrame != null)

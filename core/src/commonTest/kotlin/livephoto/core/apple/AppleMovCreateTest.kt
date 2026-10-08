@@ -84,7 +84,51 @@ class AppleMovCreateTest {
         assertTrue(req.output.query().orThrow().assetIds.isEmpty())
         assertEquals(Implementation.Experimental, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.Create }.implementation)
         assertEquals(Implementation.Experimental, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.SetKey }.implementation)
-        assertEquals(Implementation.Planned, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.ConvertTo }.implementation)
+        assertEquals(Implementation.Experimental, core.getProtocolCapabilities(target).operations.single { it.operation == Operation.ConvertTo }.implementation)
         assertEquals(Implementation.Planned, core.getProtocolCapabilities(ProtocolSelector(ProtocolIds.Apple)).operations.single { it.operation == Operation.Create }.implementation)
+    }
+    @Test fun movConvertUsesLiveSourceGateAndKeepsEveryOriginalAvSample(): Unit = runImmediate {
+        for (hevc in listOf(false, true)) for (v2 in listOf(false, true)) for (explicit in listOf(false, true)) {
+            val originalMovie = movie(hevc)
+            val carrier = if (v2) GoogleFixtures.v2Photo(originalMovie, timestamp = "40000") else GoogleFixtures.v1Photo(originalMovie, timestamp = "40000")
+            val input = source(carrier, "mov-live-$hevc-$v2-$explicit")
+            val output = MemoryOutputTransaction(context, "mov-convert-$hevc-$v2-$explicit")
+            val request = ConvertRequest(SourceSet.Single(input), target, edits = if (explicit) EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)) else null,
+                policy = strict, output = output, context = context)
+            val plan = core.plan(request).orThrow()
+            assertEquals(target, plan.target); assertTrue(output.query().orThrow().assetIds.isEmpty())
+            assertTrue(plan.capabilities.operations.any { it.operation == Operation.ConvertTo && it.implementation == Implementation.Experimental })
+            val result = core.convert(request).orThrow()
+            try {
+                assertEquals(VideoContainer.Mov, result.output.assets[1].videoContainer)
+                assertEquals("video/quicktime", result.output.assets[1].mime)
+                assertEquals(Verdict.Valid, result.validation.verdict); assertEquals(Coverage.Complete, result.validation.coverage)
+                assertTrue(result.execution.none { it.remuxed || it.transcoded })
+                assertTrue(result.preservation.records.all { it.outcome in setOf(GuaranteeOutcome.Verified, GuaranteeOutcome.NotApplicable) })
+                val pair = SourceSet.Pair(result.output.assets[0].readableSource!!, result.output.assets[1].readableSource!!)
+                val inspected = core.inspect(ReadRequest(pair, context)).orThrow()
+                assertEquals(target, inspected.detection.primaryProtocol); assertEquals(true, inspected.pairing?.matches)
+                assertEquals(0, inspected.keyPhoto.position!!.compareTo(if (explicit) Time.Zero else Time(40, 1000u)))
+                val original = BinaryReader(source(originalMovie, "mov-original"), context)
+                val originalFacts = BmffVideoProbe(original).probe(ByteRange(0uL, originalMovie.size.toULong())).orThrow()
+                val created = BinaryReader(pair.video, context)
+                val createdFacts = BmffVideoProbe(created, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                RemuxVerification.verify(original, originalFacts, created, createdFacts.copy(tracks = createdFacts.tracks.filter { it.handler != "meta" }))
+                assertEquals(Bytes(carrier), bytes(input))
+            } finally { result.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
+    @Test fun movConversionNeverRepairsOrRemuxesWrongSourcesOrDefaults(): Unit = runImmediate {
+        val live = source(GoogleFixtures.v2Photo(), "mp4-live-for-mov")
+        val output = MemoryOutputTransaction(context, "mov-convert-gates")
+        val request = ConvertRequest(SourceSet.Single(live), target, output = output, context = context)
+        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.plan(request)).error.code.value)
+        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.convert(request)).error.code.value)
+        assertTrue(output.query().orThrow().assetIds.isEmpty())
+        val standalone = request.copy(input = SourceSet.Single(source(movie(false), "standalone-mov")))
+        assertEquals("SOURCE_NOT_LIVE", assertIs<CoreResult.Failure>(core.convert(standalone)).error.code.value)
+        for (profile in listOf(null, ProfileId("heic-mov"))) {
+            assertEquals("CAPABILITY_PLANNED", assertIs<CoreResult.Failure>(core.convert(request.copy(target = ProtocolSelector(ProtocolIds.Apple, profile)))).error.code.value)
+        }
     }
 }

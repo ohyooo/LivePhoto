@@ -58,6 +58,26 @@ class AppleConvertIntegrationTest {
                     val facts = BmffVideoProbe(original).probe(ByteRange(0uL, movInput.size().orThrow())).orThrow()
                     assertEquals(VideoContainer.Mov, facts.container)
                     val before = sha256Range(original, facts.range).orThrow()
+                    val liveMov = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, movInput,
+                        ProtocolSelector(ProtocolIds.GoogleV2), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)),
+                        policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-mov-live-source"), context = context)).orThrow()
+                    try {
+                        val converted = core.convert(ConvertRequest(SourceSet.Single(liveMov.output.assets.single().readableSource!!),
+                            ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                            output = MemoryOutputTransaction(context, "apple-real-mov-convert"), context = context)).orThrow()
+                        try {
+                            assertEquals(VideoContainer.Mov, converted.output.assets[1].videoContainer)
+                            assertTrue(converted.execution.none { it.transcoded || it.remuxed })
+                            val pair = SourceSet.Pair(converted.output.assets[0].readableSource!!, converted.output.assets[1].readableSource!!)
+                            assertEquals(0, core.inspect(ReadRequest(pair, context)).orThrow().keyPhoto.position!!.compareTo(Time(40, 1000u)))
+                            val reader = BinaryReader(pair.video, context)
+                            val convertedFacts = BmffVideoProbe(reader, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                            RemuxVerification.verify(original, facts, reader, convertedFacts.copy(tracks = convertedFacts.tracks.filter { it.handler != "meta" }))
+                            val path = directory.resolve("converted Apple MOV.mov"); owned.add(path)
+                            save(pair.video, path); decode(path)
+                            assertEquals(before, sha256Range(original, facts.range).orThrow())
+                        } finally { converted.output.assets.forEach { it.readableSource?.close() } }
+                    } finally { liveMov.output.assets.forEach { it.readableSource?.close() } }
                     val apple = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, movInput,
                         ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
                         policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-mov-create"), context = context)).orThrow()
