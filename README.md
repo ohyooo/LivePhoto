@@ -94,11 +94,11 @@ Windows（PowerShell）：
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto detect --input './reference\livephoto.jpg'
-./LivePhoto/bin/LivePhoto inspect --input './reference\livephoto.jpg'
-./LivePhoto/bin/LivePhoto analyze --input './reference\livephoto.jpg'
-./LivePhoto/bin/LivePhoto validate --input './reference\livephoto.jpg' --layers Structure,Protocol
-./LivePhoto/bin/LivePhoto get-key --input './reference\livephoto.jpg'
+./LivePhoto/bin/LivePhoto detect --input './reference/livephoto.jpg'
+./LivePhoto/bin/LivePhoto inspect --input './reference/livephoto.jpg'
+./LivePhoto/bin/LivePhoto analyze --input './reference/livephoto.jpg'
+./LivePhoto/bin/LivePhoto validate --input './reference/livephoto.jpg' --layers Structure,Protocol
+./LivePhoto/bin/LivePhoto get-key --input './reference/livephoto.jpg'
 ```
 
 `detect` 按内容判断，可返回多个协议匹配；`inspect` 展示结构和 metadata，不等同于有效性结论。`validate` 默认检查 `Structure,Protocol,Media`，注意 `coverage`、各层 checks 以及 `NotRun` / `Partial`；退出码为 0 也不等于完整媒体或设备认证。
@@ -118,7 +118,7 @@ Linux（Bash/Zsh）：
 
 ```sh
 ./LivePhoto/bin/LivePhoto capabilities --target google.motionphoto.v2 --profile jpeg
-./LivePhoto/bin/LivePhoto create --image './reference\video.jpg' --video './reference\video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir './out-create'
+./LivePhoto/bin/LivePhoto create --image './reference/video.jpg' --video './reference/video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir './out-create'
 ```
 
 输入必须符合有限的 JPEG / 视频 profile；默认不转码。输出发布在 `out-create/assets/`，JSON 的 `result.output.assets[].path` 给出真实文件位置；**不要假设输出总叫 `livephoto.jpg`**。后续示例里的 `motion.jpg` 指你按 JSON 路径选取的结果或自己的输入文件。
@@ -197,7 +197,7 @@ Linux（Bash/Zsh）：
 
 当前仅修复能够唯一证明的有限问题，不猜协议、视频边界、ID 或单位。默认模式为 `SafeMetadataOnly`；预览不写入，不能传 `--output-dir`。
 
-有限 `ExplicitRemux`（Experimental）只处理 **Samsung JPEG SEF mpv3 中独立有效的 MOV 视频应为 MP4** 的容器约束问题。需要可用的 Remux 后端；可显式传 `--ffmpeg`，否则查 PATH，不自动安装。私有 streamcopy 验证全部 sample/configuration/时间线与已分类 metadata，再重建同协议的长度/索引，只发布最终一张照片；保留图片编码和 key，不转码。未知/损坏媒体、Legacy SEF、普通 SEF 记录、辅助资源、EXIF/MPF/不明 ownership 等会拒绝，不能用来修复任意损坏文件。
+有限 `ExplicitRemux`（Experimental）处理 **Samsung JPEG SEF mpv3，或 vivo 最小版本一 JPEG 中，独立有效的 MOV 视频应为 MP4** 的容器约束问题。vivo 仅接受 `VMotionPhotoVersion=1`、`VMotionPhotoSource=1`、`VMediaKitVersion=1.0.0.9` 和无辅助资源的 Primary/Motion 目录；未知 vendor 字段不授权重写。需要可用的 Remux 后端；可显式传 `--ffmpeg`，否则查 PATH，不自动安装。私有 streamcopy 验证全部 sample/configuration/时间线与已分类 metadata，再重建同协议的长度/索引，只发布最终一张照片；保留图片编码、原 key（包括未知值 `-1`）及既有 vendor 字段，不转码。未知/损坏媒体、Legacy SEF、普通 SEF 记录、辅助资源、EXIF/MPF/不明 ownership 等会拒绝，不能用来修复任意损坏文件。
 
 Windows（PowerShell）：
 
@@ -213,7 +213,7 @@ Linux（Bash/Zsh）：
 ./LivePhoto/bin/LivePhoto repair --input './samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER --apply --strict --output-dir './out-remux-repair'
 ```
 
-预览不执行媒体处理、不创建输出；CLI 的工具可用性探测可能运行只读版本检查。已是该有限 MP4 profile 时再次执行没有改动，也不需要媒体后端。Google 兼容基础层对整 SEF 后缀/纯视频长度的已有诊断仍保留，不能据此宣称所有 profile 或设备通过。
+vivo 使用相同命令，换成自己的 vivo 输入路径即可。预览不执行媒体处理、不创建输出；CLI 的工具可用性探测可能运行只读版本检查。已是该有限 MP4 profile 时再次执行没有改动，也不需要媒体后端。Google 兼容基础层对 Samsung 整 SEF 后缀/纯视频长度，以及 vivo Motion `Padding=0` 的已有诊断仍保留；目标厂商方言与严格 Google 验证分开报告，不能据此宣称所有 profile 或设备通过。
 
 Apple 有限 `ExplicitRePair` 支持明确选定的 JPEG/HEIC＋MOV/MP4：先单独 `inspect` 你选为权威的图片或视频，将返回的 `result.pairing.evidence[0].id.value` 填入 `--authority`。下例 `EVIDENCE_ID` 必须替换为该文件当前版本的真实证据 ID；文件变化后重新读取，不得复用其它文件的 ID。权威来自视频时改图片 CID，来自图片时改视频 CID，不会自动选边或生成新 ID。
 
@@ -297,7 +297,7 @@ Linux（Bash/Zsh）：
 | `--resources ID,ID` | extract 的资源列表，逗号分隔；默认留空交由 Core 选择 |
 | `--raw-carrier` | extract 额外请求完整 carrier；不代表 Clean |
 | `--issues CODE,CODE` | repair 的问题码过滤；不授权猜测性修复 |
-| repair 的 `--mode` / `--authority` | `SafeMetadataOnly`（默认）、有限 Samsung `ExplicitRemux`、有限 Apple `ExplicitRePair`。冲突重配对要求当前选定源的正式 CID evidence ID；容器修复不接受此权威参数 |
+| repair 的 `--mode` / `--authority` | `SafeMetadataOnly`（默认）、有限 Samsung/vivo `ExplicitRemux`、有限 Apple `ExplicitRePair`。冲突重配对要求当前选定源的正式 CID evidence ID；容器修复不接受此权威参数 |
 | `--same-target` | convert：`PreserveAsIs`（默认）或 `Normalize`；Normalize 仍需已实现的 writer |
 | `--start-us`、`--end-us`、`--mode` | trim，以及 create/convert 的复合裁剪；模式 `LosslessPreferred`（默认）、`LosslessOnly`、`Exact` |
 | `--key-outside` | 仅 create/convert 复合裁剪：`Reject`（默认）、`ClampExplicitly`、`ClearIfSupported`；不是独立 trim 的选项 |
@@ -434,7 +434,9 @@ Windows 有限 MOV 系统 Probe 扩展：[`91cec67`](https://github.com/ohyooo/L
 
 Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skips**，包含两个兼容素材的精确视频提取，以及有界图像、越界/开放长度/未知扩展/源变化拒绝测试。完整 Windows 便携验收成功，包含空 PATH、误导扩展名、视频整文件 SHA 一致和 Clean 拒绝用例。媒体语义仍 Partial，key 时间单位仍未知；不开放该 profile 的 HEIC Create、Clean、Repair 或跨格式 Convert。
 
-有限 Samsung ExplicitRemux 批次：全量 **749 tests，0 failures / errors / skips**，包含独立 SEF 合成测试、真实 AVC MOV 修复后完整解码、预览零写入/allowlist/幂等、后端样本/配置/时间线/metadata 改动及声称转码拒绝、最终 key 篡改/写入失败/取消/源变化回滚，以及 CLI 按模式发现后端/显式路径转发回归。新 Windows 便携包全部验收成功，包含显式路径修复、完整解码、key 保持、空 PATH 幂等和无后端拒绝；提交后的两平台 CI/产物以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 对应提交为准，不借用上一批产物，不证明设备兼容。
+有限 Samsung ExplicitRemux 批次：[`a804b3d`](https://github.com/ohyooo/LivePhoto/commit/a804b3d79eb758487abead37a5383dda73a7f67e) 全量 **749 tests，0 failures / errors / skips**，包含独立 SEF 合成测试、真实 AVC MOV 修复后完整解码、预览零写入/allowlist/幂等、后端样本/配置/时间线/metadata 改动及声称转码拒绝、最终 key 篡改/写入失败/取消/源变化回滚，以及 CLI 按模式发现后端/显式路径转发回归。新 Windows 便携包全部验收成功，[对应 CI 37758770263](https://github.com/ohyooo/LivePhoto/actions/runs/37758770263) 两平台成功，6 个非空、未过期 artifacts 已核对；不证明设备兼容。
+
+有限 vivo ExplicitRemux 扩展批次：全量 **751 tests，0 failures / errors / skips**，包含版本一原字段、已知/未知 key、VFR samples 保留及复杂 profile/GainMap/未知 vendor/错误时长拒绝；真实 AVC Samsung/vivo 双协议修复后提取、逐 sample 核对和完整解码均成功。新完整 Windows 便携验收成功，包含两协议显式路径修复、key 保持、空 PATH 幂等与无后端拒绝。提交后的 CI/6 artifacts 以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 对应提交为准，不借用 Samsung 上一批产物；复杂 vivo 与真机验收仍未完成。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -457,7 +459,7 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
 | Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | Generic/HEIC 写入、更多原片与跨协议路径 |
-| Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
+| Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；有限 MOV Probe 已交付 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe；完整解码、便携包与 CI 验收 | 系统媒体编辑、其它 OS 官方 API 适配 |
 | CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
@@ -485,7 +487,7 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 | 顺序 | 工作包 | 状态 / 前提 | 交付时应看到的结果 |
 | --- | --- | --- | --- |
 | 已完成批次 | Apple 有限 ExplicitRePair | **已完成有限范围交付**；复用既有 Request 与新鲜 CID 证据 | 用户指定两个源及权威，冲突 ID 不自动选；独立验证后原子发布 |
-| 2 | Repair 其它显式模式及 Apple 写入扩展 | 未开始相关剩余路径；先确认 ownership/依赖，重大规范/API 冲突需报告 | 每个 mode/profile 独立标能力；不能凭其它入口已可用推断支持 |
+| 2 | Repair 其它显式模式及 Apple 写入扩展 | Samsung/vivo 有限容器修复已通过；剩余路径先确认 ownership/依赖，重大规范/API 冲突需报告 | 每个 mode/profile 独立标能力；不能凭其它入口已可用推断支持 |
 | 3 | 系统 MediaBackend 扩展 | 未实现系统编辑；逐个平台检查官方 API 与运行时可用性 | 能力查询真实，抽帧/裁剪/remux/transcode 分别验证；无实现则禁用 |
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
@@ -507,8 +509,9 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 - [x] 接入 12 个单文件组合及 3 组配对的兼容回归测试，校验 18 个资产的整文件 SHA-256；不算 L4 设备认证。
 - [x] Huawei HEIC + 固定 60 字节尾标的有界读取与精确视频提取；保护图像 item extent 边界，未知 Honor/扩展不取得纯视频权威，HEIC 写入继续拒绝。
 - [x] 有限 Samsung ExplicitRemux：全量/真实媒体测试、新便携包验收通过；其它协议/未知媒体恢复不在此范围，各提交 CI 见 Actions。
+- [x] 最小版本一 vivo ExplicitRemux：全量/双协议真实媒体与新便携验收通过；保持原 vendor 字段、未知 key 和既有 Google 基础层诊断。
 - [ ] 继续核查兼容读取边界：MOV/vivo 的 `mdhd` 与 `stts` 差异须结合 CTS/edit 与官方语义核对；Apple IFD0 MakerNote 的有限兼容读取需独立确认，不猜容差，不自动授权旧结构写入。
-- [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair 已交付；Samsung 之外的 ExplicitRemux、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
+- [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。

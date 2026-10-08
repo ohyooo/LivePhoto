@@ -6,6 +6,7 @@ import livephoto.core.bmff.*
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.implementation.videoFacts
 import livephoto.core.memory.*
+import livephoto.core.vivo.VivoFixtures
 import kotlin.test.*
 
 /** Independent indexed SEF fixtures and adversarial backends; no decoder/device claim. */
@@ -177,6 +178,60 @@ class SamsungRemuxRepairTest {
             assertEquals(0, commits); assertTrue(base.committedAssets().isEmpty())
             assertEquals(if (fault == 3) 0 else 1, processor.calls)
         }
+    }
+
+    @Test fun minimalVivoProfilePreservesZeroPaddingVendorFieldsUnknownKeyAndEverySample(): Unit = runImmediate {
+        for (key in listOf("-1", "20000")) {
+            val video = GoogleFixtures.video(sampleDurations = 20u to 60u).bytes
+            val original = VivoFixtures.photo(mov(video), timestamp = key).bytes
+            val input = source(original)
+            val processor = backend(video)
+            val core = DefaultLivePhotoCore(processor)
+            val preview = core.repair(request(input)).orThrow()
+            assertTrue(preview.blocked.isEmpty(), preview.blocked.toString())
+            assertEquals(0, processor.calls)
+            val tx = MemoryOutputTransaction(context, "vivo-$key")
+            val result = core.repair(request(input, tx, dry = false, policy = MutationPolicy(preservation = PreservationPolicy.Strict,
+                requiredGuarantees = listOf(Guarantee.BitstreamPreserving, Guarantee.ImageDataPreserving, Guarantee.MetadataPreserving)))).orThrow()
+            val operation = assertNotNull(result.operation)
+            try {
+                assertEquals(1, processor.calls); assertEquals(1, tx.committedAssets().size)
+                assertTrue(operation.execution.none { it.transcoded }); assertTrue(operation.execution.any { it.stage == Stage.Remux && it.remuxed })
+                assertTrue(result.issuesAfter.none { it.code.value == "UNSUPPORTED_CONTAINER" })
+                assertTrue(result.issuesAfter.any { it.code.value == "MALFORMED_XMP" && it.layer == Layer.Protocol }, "Keep generic Google diagnostics for vivo Padding=0")
+                val out = operation.output.assets.single().readableSource!!
+                val inspected = core.inspect(ReadRequest(SourceSet.Single(out), context)).orThrow()
+                assertEquals(ProtocolIds.VivoModern, inspected.detection.primaryProtocol?.protocol)
+                for ((field, value) in mapOf("VMotionPhotoVersion" to "1", "VMotionPhotoSource" to "1", "VMediaKitVersion" to "1.0.0.9",
+                    "MotionPhotoPresentationTimestampUs" to key)) assertEquals(Value.Text(value), inspected.metadata.single { it.selector.endsWith("}$field") }.value)
+                val raw = core.extract(ExtractRequest(SourceSet.Single(out), emptyList(), output = MemoryOutputTransaction(context, "vivo-raw-$key"), context = context)).orThrow()
+                try { assertEquals(Bytes(video), raw.output.assets.single().readableSource!!.readAt(0uL, video.size.toUInt()).orThrow()) }
+                finally { raw.output.assets.forEach { it.readableSource?.close() } }
+                val again = DefaultLivePhotoCore().repair(request(out, MemoryOutputTransaction(context, "vivo-noop-$key"), dry = false)).orThrow()
+                assertTrue(again.proposedChanges.isEmpty()); assertNull(again.operation)
+                assertEquals(Bytes(original), input.readAt(0uL, original.size.toUInt()).orThrow())
+            } finally { operation.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
+
+    @Test fun vivoUnknownVendorFieldsGainMapNoncanonicalProfileAndMediaErrorsDoNotAuthorizeRemux(): Unit = runImmediate {
+        val video = GoogleFixtures.video().bytes
+        val processor = backend(video)
+        for (bytes in listOf(
+            VivoFixtures.photo(mov(video), gainMap = VivoFixtures.gainMap()).bytes,
+            VivoFixtures.photo(mov(video), version = "2").bytes,
+            VivoFixtures.photo(mov(video), source = "2").bytes,
+            VivoFixtures.photo(mov(video), kit = "unknown").bytes,
+            VivoFixtures.photo(mov(video), motionAttrs = "").bytes,
+            VivoFixtures.photo(mov(video), extra = "<v:PrivateField>retained</v:PrivateField>").bytes,
+            VivoFixtures.photo(mov(video), extra = "<v:VMotionPhotoFlags>3</v:VMotionPhotoFlags>").bytes,
+            VivoFixtures.photo(mov(video), primaryAttrs = "item:Length='0'").bytes,
+            VivoFixtures.photo(mov(video).also { GoogleFixtures.u32(81u).copyInto(it, offsetOrNull(it, "mdhd")!! + 20) }).bytes)) {
+            val tx = MemoryOutputTransaction(context, "vivo-denied")
+            assertIs<CoreResult.Failure>(DefaultLivePhotoCore(processor).repair(request(source(bytes), tx, dry = false)))
+            assertTrue(tx.query().orThrow().assetIds.isEmpty())
+        }
+        assertEquals(0, processor.calls)
     }
 
     private class CopyBackend(val bytes: ByteArray, val encoded: Boolean, val after: () -> Unit) : MediaBackend {

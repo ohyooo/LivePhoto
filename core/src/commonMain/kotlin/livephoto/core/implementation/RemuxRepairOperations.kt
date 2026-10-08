@@ -7,6 +7,8 @@ import livephoto.core.google.*
 import livephoto.core.jpeg.*
 import livephoto.core.memory.MemoryOutputTransaction
 import livephoto.core.samsung.*
+import livephoto.core.vivo.*
+import livephoto.core.xml.*
 
 /** One evidenced container correction, not arbitrary media recovery. Intermediate assets stay private. */
 internal object RemuxRepairOperations {
@@ -21,21 +23,18 @@ internal object RemuxRepairOperations {
             fail("PRESERVATION_REQUIREMENT_FAILED", "Container repair cannot preserve the entire original carrier byte-exactly", Stage.Plan)
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
-        val binding = session.bindings.singleOrNull { it.protocol == ProtocolIds.Samsung }
-            ?: fail("CAPABILITY_UNSUPPORTED", "Explicit remux currently requires canonical Samsung JPEG SEF mpv3", Stage.Plan)
+        val binding = session.bindings.singleOrNull { it.protocol in setOf(ProtocolIds.Samsung, ProtocolIds.VivoModern) }
+            ?: fail("CAPABILITY_UNSUPPORTED", "Explicit remux requires canonical Samsung JPEG mpv3 or minimal vivo version-one JPEG", Stage.Plan)
         val jpeg = session.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "HEIC container repair is not implemented", Stage.Plan)
-        val directory = session.sef ?: fail("REPAIR_NOT_POSSIBLE", "No independently indexed SEF movie", Stage.Plan)
-        if (!binding.structurallyValid || binding.profile != ProfileId("jpeg-sef-mpv3") ||
-            session.bindings.any { it.protocol !in setOf(ProtocolIds.Samsung, ProtocolIds.GoogleV2) } ||
+        if (!binding.structurallyValid || session.bindings.size != 2 ||
             session.bindings.count { it.protocol == ProtocolIds.GoogleV2 } != 1 || session.gainMaps.isNotEmpty() ||
-            directory.legacyDialect || directory.gaps.isNotEmpty() || directory.records.size != 2 ||
-            directory.records.any { it.prefix != 0u.toUShort() || it.type !in setOf(0x0a30u.toUShort(), 0x0a31u.toUShort()) } ||
             jpeg.segments.any { it.payloadKind in setOf(AppPayloadKind.Exif, AppPayloadKind.Mpf, AppPayloadKind.ExtendedXmp) } ||
             session.xmp?.rewriteAllowed != true)
             fail("REPAIR_AMBIGUOUS", "Container repair refuses unknown authority, legacy/ordinary SEF, auxiliary or opaque offset metadata", Stage.Plan)
         val jfif = ReplaceOperations.canonicalJfif(session)
         if (jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown && it != jfif })
             fail("UNSAFE_METADATA_REWRITE", "Container repair cannot relocate unclassified APP metadata", Stage.Plan)
+        val rewrite = profileRewrite(session, binding, request, budget)
         val movieRange = binding.video ?: fail("MOTION_VIDEO_MISSING", "No exact indexed video", Stage.Plan)
         val video = session.videos[binding.protocol] ?: fail("REPAIR_NOT_POSSIBLE", "Indexed movie is not independently valid", Stage.Plan)
         if (video.container !in setOf(VideoContainer.Mp4, VideoContainer.Mov))
@@ -51,15 +50,13 @@ internal object RemuxRepairOperations {
         val before = session.inspection.issues
         val independent = before.filter { issue -> !(issue.code.value == "UNSUPPORTED_CONTAINER" && issue.layer == Layer.Protocol && issue.severity == Severity.Warning) &&
             !(issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Compatibility && issue.severity == Severity.Warning && issue.location?.selector == "{$ITEM_URI}Padding") &&
-            !compatibleBaseLengthIssue(session, issue) }
+            !compatibleBaseDiagnostic(session, issue) }
         val issue = before.firstOrNull { it.code.value == "UNSUPPORTED_CONTAINER" && it.layer == Layer.Protocol }
         val changes = if (video.container == VideoContainer.Mov) listOf(Change("videoContainer", Value.Text("Mov"), Value.Text("Mp4"),
-            "Existing Samsung mpv3 requires MP4; preserve every encoded sample/configuration/timestamp and rebuild owned lengths", true)) else emptyList()
+            "Existing verified ${binding.protocol.value} profile requires MP4; preserve every encoded sample/configuration/timestamp and rebuild owned lengths", true)) else emptyList()
         val blocked = independent + if (changes.isNotEmpty() && request.allowedIssueCodes.isNotEmpty() && IssueCode("UNSUPPORTED_CONTAINER") !in request.allowedIssueCodes)
             listOf(issue ?: Issue(IssueCode("UNSUPPORTED_CONTAINER"), Severity.Warning, Layer.Protocol)) else emptyList()
-        val clean = SamsungJpegWriter.cleanPlan(session, request.context, budget).orThrow()
-        if (clean.suffix.length != 0uL) fail("UNSAFE_METADATA_REWRITE", "Ordinary SEF cannot be discarded during repair", Stage.Plan)
-        val image = JpegProjectionSource.create(session, clean.image).orThrow()
+        val image = JpegProjectionSource.create(session, rewrite).orThrow()
         val cleanSession = SourceSession.open(SourceSet.Single(image), request.context, budget).orThrow()
         if (cleanSession.bindings.isNotEmpty() || cleanSession.jpeg?.trailing?.length != 0uL || !opaqueOffsetsPreserved(session, cleanSession) ||
             codingDigest(session) != codingDigest(cleanSession) || ordinaryDigest(session) != ordinaryDigest(cleanSession))
@@ -80,6 +77,28 @@ internal object RemuxRepairOperations {
             RepairResult(before, changes, emptyList(), before, blocked = blocked))
     }
 
+    private suspend fun profileRewrite(session: SourceSession, binding: CarrierBinding, request: RepairRequest, budget: ParseBudget): JpegRewritePlan {
+        if (binding.protocol == ProtocolIds.Samsung) {
+            val directory = session.sef ?: fail("REPAIR_NOT_POSSIBLE", "No independently indexed SEF movie", Stage.Plan)
+            if (binding.profile != ProfileId("jpeg-sef-mpv3") || directory.legacyDialect || directory.gaps.isNotEmpty() || directory.records.size != 2 ||
+                directory.records.any { it.prefix != 0u.toUShort() || it.type !in setOf(0x0a30u.toUShort(), 0x0a31u.toUShort()) })
+                fail("REPAIR_AMBIGUOUS", "Container repair requires canonical live-only Samsung SEF", Stage.Plan)
+            val clean = SamsungJpegWriter.cleanPlan(session, request.context, budget).orThrow()
+            if (clean.suffix.length != 0uL) fail("UNSAFE_METADATA_REWRITE", "Ordinary SEF cannot be discarded during repair", Stage.Plan)
+            return clean.image
+        }
+        val xmp = session.xmp!!
+        val fields = mapOf("VMotionPhotoVersion" to "1", "VMotionPhotoSource" to "1", "VMediaKitVersion" to "1.0.0.9")
+        if (binding.profile != ProfileId("jpeg") || session.sef != null || binding.items.size != 2 || binding.padding != null ||
+            binding.video != session.jpeg!!.trailing || fields.any { (field, value) -> xmp.scalar(VIVO_URI, field).orThrow() != value } ||
+            xmp.packets.single().descriptions.any { description ->
+                description.attributes.any { it.name.expanded.uri == VIVO_URI && it.name.expanded.local !in VIVO_FIELDS } ||
+                    description.children.filterIsInstance<XmlElement>().any { it.name.expanded.uri == VIVO_URI &&
+                        (it.name.expanded.local !in VIVO_FIELDS || it.attributes.isNotEmpty()) }
+            }) fail("REPAIR_AMBIGUOUS", "vivo container repair requires the known minimal version-one inline Primary/Motion graph without auxiliary or unknown vendor fields", Stage.Plan)
+        return VivoJpegWriter.cleanPlan(session, request.context, budget).orThrow()
+    }
+
     private fun privateContext(request: RepairRequest): Context {
         val limit = minOf(request.context.limits.maxOutputBytes, request.context.limits.maxSpoolBytes / 16uL)
         if (limit == 0uL) fail("RESOURCE_LIMIT_EXCEEDED", "No bounded private remux budget", Stage.Plan)
@@ -87,12 +106,16 @@ internal object RemuxRepairOperations {
             maxSpoolBytes = request.context.limits.maxSpoolBytes - limit * 8uL))
     }
 
-    /** Retain this diagnostic in reports. Samsung owns pure video; its Google-compatible D includes SEF. */
-    private fun compatibleBaseLengthIssue(session: SourceSession, issue: Issue): Boolean {
+    /** Keep base diagnostics in reports: Samsung D includes SEF; vivo explicitly permits motion Padding=0. */
+    private fun compatibleBaseDiagnostic(session: SourceSession, issue: Issue): Boolean {
+        val base = session.bindings.singleOrNull { it.protocol == ProtocolIds.GoogleV2 } ?: return false
+        val vendor = session.bindings.singleOrNull { it.protocol in setOf(ProtocolIds.Samsung, ProtocolIds.VivoModern) } ?: return false
+        if (!vendor.structurallyValid || base.compatibleBaseOf != vendor.protocol || base.video != vendor.video || issue !in base.issues) return false
+        if (vendor.protocol == ProtocolIds.VivoModern) return vendor.items.size == 2 && vendor.padding == null &&
+            issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Protocol && issue.severity == Severity.Error &&
+            issue.location?.selector == "{$ITEM_URI}Padding"
         val directory = session.sef ?: return false
         val range = directory.pureVideoRange ?: return false
-        val base = session.bindings.singleOrNull { it.protocol == ProtocolIds.GoogleV2 } ?: return false
-        val vendor = session.bindings.singleOrNull { it.protocol == ProtocolIds.Samsung } ?: return false
         return vendor.structurallyValid && base.compatibleBaseOf == ProtocolIds.Samsung && base.video == range &&
             issue in base.issues && issue.code.value == "MOTION_VIDEO_LENGTH_MISMATCH" && issue.layer == Layer.Protocol &&
             issue.location?.range == ByteRange(range.offset, directory.footer.endExclusive - range.offset)
@@ -112,15 +135,17 @@ internal object RemuxRepairOperations {
     suspend fun plan(request: RepairRequest, backend: MediaBackend?): CoreResult<ExecutionPlan> = attempt {
         val prepared = prepare(request, backend)
         ExecutionPlan(prepared.session.snapshot, prepared.binding.selector,
-            listOf(PlanStep(Stage.Plan, listOf(Operation.Repair), listOf(videoId(ProtocolIds.Samsung)),
-                "Read-only canonical Samsung container correction preview; no backend execution or staging")) +
+            listOf(PlanStep(Stage.Plan, listOf(Operation.Repair), listOf(videoId(prepared.binding.protocol)),
+                "Read-only verified profile container correction preview; no backend execution or staging")) +
                 if (!request.dryRun && prepared.result.blocked.isEmpty() && prepared.result.proposedChanges.isNotEmpty()) listOf(
-                    PlanStep(Stage.Remux, listOf(Operation.Remux), listOf(videoId(ProtocolIds.Samsung)), "Privately streamcopy MOV to MP4; never encode"),
+                    PlanStep(Stage.Remux, listOf(Operation.Remux), listOf(videoId(prepared.binding.protocol)), "Privately streamcopy MOV to MP4; never encode"),
                     PlanStep(Stage.WriteProtocol, listOf(Operation.Repair), emptyList(), "Rebuild only owned binding; verify final media, image, metadata and key before one public commit")) else emptyList(),
             predictedPreservation = PreservationReport(changes = prepared.result.proposedChanges),
             capabilities = CapabilitySet(if (prepared.result.blocked.isEmpty()) Availability.Conditional else Availability.Unsupported,
                 listOf(CapabilityEntry(Operation.Repair, if (prepared.result.blocked.isEmpty()) Implementation.Experimental else Implementation.Unsupported,
-                    conditions = listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("canonical-jpeg-sef-mpv3-mov-to-mp4-classified-metadata-private-remux-no-encoding"))))), prepared.result.blocked),
+                    conditions = listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text(if (prepared.binding.protocol == ProtocolIds.Samsung)
+                        "canonical-jpeg-sef-mpv3-mov-to-mp4-classified-metadata-private-remux-no-encoding" else
+                        "minimal-vivo-version-one-jpeg-no-auxiliary-mov-to-mp4-private-remux-no-encoding"))))), prepared.result.blocked),
             issues = prepared.result.issuesBefore)
     }
 
@@ -142,10 +167,13 @@ internal object RemuxRepairOperations {
             val operation = GoogleOperations.create(CreateRequest(prepared.image, movie, prepared.binding.selector,
                 policy = request.policy, output = request.output!!, context = request.context), prepared.session.readers,
                 prepared.result.proposedChanges, prepared.key, verifyAdditional = { staged ->
+                    if (prepared.binding.protocol == ProtocolIds.VivoModern && VIVO_FIELDS.any { field ->
+                            prepared.session.xmp!!.scalar(VIVO_URI, field).orThrow() != staged.xmp?.scalar(VIVO_URI, field)?.orThrow() })
+                        fail("POSTCONDITION_FAILED", "Container correction changed an unrequested vivo field", Stage.Verify)
                     if (staged.xmp?.scalar(CAMERA_URI, "MotionPhotoPresentationTimestampUs")?.orThrow() != prepared.rawKey ||
                         codingDigest(staged) != originalCoding || ordinaryDigest(staged) != originalMetadata || !opaqueOffsetsPreserved(prepared.session, staged) ||
                         staged.inspection.issues.any { it.code.value == "UNSUPPORTED_CONTAINER" && it.layer == Layer.Protocol } ||
-                        staged.inspection.issues.any { issue -> issue.severity == Severity.Error && !compatibleBaseLengthIssue(staged, issue) || prepared.result.issuesBefore.none { it.code == issue.code && it.layer == issue.layer && it.severity == issue.severity } })
+                        staged.inspection.issues.any { issue -> issue.severity == Severity.Error && !compatibleBaseDiagnostic(staged, issue) || prepared.result.issuesBefore.none { it.code == issue.code && it.layer == issue.layer && it.severity == issue.severity } })
                         fail("POSTCONDITION_FAILED", "Container correction changed the key/image/ordinary metadata or introduced an issue", Stage.Verify)
                     after = staged.inspection.issues
                 }).orThrow()
