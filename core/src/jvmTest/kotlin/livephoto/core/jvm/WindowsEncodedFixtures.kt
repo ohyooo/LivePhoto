@@ -2,6 +2,10 @@ package livephoto.core.jvm
 
 import java.util.Base64
 import java.security.MessageDigest
+import livephoto.core.*
+import livephoto.core.binary.*
+import livephoto.core.bmff.BmffReader
+import livephoto.core.memory.MemoryBinarySource
 
 /** NAS FFmpeg-generated 64x64 synthetic media, not vendor/device originals.
  * Checked-in encoded bytes allow actual OS decoding without an optional fixture encoder on CI. */
@@ -20,5 +24,23 @@ internal object WindowsEncodedFixtures {
         val hash = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
         check(hash == expected) { "Encoded OS fixture digest differs" }
         return bytes
+    }
+
+    /** Explicitly synthetic QuickTime brand framing over checked-in real AVC samples.
+     * Not a general remuxer, camera MOV, or independent MOV encoder proof. */
+    suspend fun movBytes(name: String): ByteArray {
+        val bytes = bytes(name)
+        val context = Context(Limits(128_000_000uL, 128_000_000uL))
+        val source = MemoryBinarySource(Bytes(bytes), SourceId("fixture-mov-brand-$name"))
+        try {
+            val ftyp = BmffReader(BinaryReader(source, context)).readBoxes(ByteRange(0uL, bytes.size.toULong())).orThrow().single { it.type == "ftyp" }
+            check(ftyp.payload.length >= 8uL && (ftyp.payload.length - 8uL) % 4uL == 0uL)
+            "qt  ".encodeToByteArray().copyInto(bytes, ftyp.payload.offset.toInt())
+            var offset = ftyp.payload.offset + 8uL
+            while (offset < ftyp.payload.endExclusive) {
+                "qt  ".encodeToByteArray().copyInto(bytes, offset.toInt()); offset += 4uL
+            }
+            return bytes
+        } finally { source.close() }
     }
 }

@@ -294,9 +294,12 @@ try {
                 throw 'Portable system route requires the bundled helper, not PATH or external Java.'
             }
             foreach ($name in @('b0', 'b2', 'vfr', 'audio')) {
-                $inputFixture = Join-Path $windowsFixtures "$name.mp4"
-                if ((Get-FileHash $inputFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.mp4"]) { throw 'OS fixture digest differs.' }
-                $outsideFixture = Join-Path $verify "encoded OS $name.mp4"
+              foreach ($container in @('mp4', 'mov')) {
+                if ($container -eq 'mov' -and $fixtureManifest["$name.movScope"] -ne 'synthetic-qt-brand-over-encoded-avc-not-camera-or-general-remux') { throw 'MOV fixture framing provenance is missing.' }
+                $inputFixture = Join-Path $windowsFixtures "$name.$container"
+                if ((Get-FileHash $inputFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.$container"]) { throw 'OS fixture digest differs.' }
+                # Deliberately misleading extension: Core must recognize the MOV bytes.
+                $outsideFixture = Join-Path $verify "encoded OS $container $name.mp4"
                 [IO.File]::Copy($inputFixture, $outsideFixture, $false)
                 $systemProbe = & $launcher probe --input $outsideFixture --decode-check
                 if ($name -eq 'audio') {
@@ -307,10 +310,13 @@ try {
                     -not (($systemProbe | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) {
                     throw "Portable encoded fixture OS decode failed: $systemProbe"
                 }
-                if ((Get-FileHash $outsideFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.mp4"]) { throw 'OS decoder mutated source.' }
+                if ($name -ne 'audio' -and ($systemProbe | ConvertFrom-Json).result.videoContainer -ne $container) { throw 'OS probe confused filename with content container.' }
+                if ((Get-FileHash $outsideFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.$container"]) { throw 'OS decoder mutated source.' }
+              }
             }
         } finally { $env:Path = $savedSearchPath }
         Write-Host 'PORTABLE_WINDOWS_API_ENCODED_FIXTURES=SUCCESS scope=avc-bframes-vfr-audio-rejection-no-ffmpeg-no-system-java-not-device'
+        Write-Host 'PORTABLE_WINDOWS_API_MOV_FIXTURES=SUCCESS scope=synthetic-qt-brand-real-avc-bframes-vfr-audio-rejection-not-camera-or-general-remux'
     }
     $probeJson = & $launcher probe --input $referenceVideo --decode-check
     if ($media.ffmpegPath) {

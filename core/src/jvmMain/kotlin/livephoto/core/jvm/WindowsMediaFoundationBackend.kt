@@ -13,7 +13,7 @@ import java.security.MessageDigest
 internal class WindowsMediaFoundationBackend(private val command: List<String>) : MediaBackend {
     override fun capabilities() = MediaCapabilities(listOf("windows-media-foundation"), listOf(
         CapabilityEntry(Operation.Probe, Implementation.Experimental, conditions = listOf(
-            Condition(ConditionOperator.Equals, "decodeScope", Value.Text("one-mp4-avc-video-no-audio-48x48-to-4096x2304-at-most-64-visible-unique-exact-100ns-frames")),
+            Condition(ConditionOperator.Equals, "decodeScope", Value.Text("one-mp4-or-mov-avc-video-no-audio-48x48-to-4096x2304-at-most-64-visible-unique-exact-100ns-frames")),
             Condition(ConditionOperator.Equals, "runtime", Value.Text("registered-software-avc-nv12-decoder-512MiB-isolated-process-per-input-format-verification-not-HDR-or-metadata-conformance"))))) +
         listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map {
             CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
@@ -28,8 +28,8 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
         val identity = reader.identity().orThrow()
         val facts = DefaultLivePhotoCore().probe(request.copy(decodeCheck = false)).orThrow()
         if (!request.decodeCheck) return@attempt facts
-        if (facts.videoContainer != VideoContainer.Mp4 || facts.imageFormat != null)
-            fail("CAPABILITY_UNSUPPORTED", "System decoder currently implements isolated MP4 video only", Stage.Validate)
+        if (facts.videoContainer !in setOf(VideoContainer.Mp4, VideoContainer.Mov) || facts.imageFormat != null)
+            fail("CAPABILITY_UNSUPPORTED", "System decoder currently implements isolated bounded MP4/MOV video only", Stage.Validate)
         if (identity.size > minOf(128_000_000uL, request.context.limits.maxSpoolBytes))
             fail("RESOURCE_LIMIT_EXCEEDED", "System decoder input exceeds its temporary storage budget", Stage.Read)
         val range = ByteRange(0uL, identity.size)

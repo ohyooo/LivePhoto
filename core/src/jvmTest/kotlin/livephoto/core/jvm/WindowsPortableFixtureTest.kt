@@ -36,6 +36,16 @@ class WindowsPortableFixtureTest {
             val digest = pts.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
             Files.write(directory.resolve("$name.mp4"), bytes)
             manifest.append("$name.mp4=$hash\n$name.frames=${track.samples.size}\n$name.ptsSha256=$digest\n")
+            val movie = WindowsEncodedFixtures.movBytes(name)
+            val movieSource = MemoryBinarySource(Bytes(movie), SourceId("encoded-mov-$name"))
+            try {
+                val movieFacts = BmffVideoProbe(BinaryReader(movieSource, Context(Limits(128_000_000uL, 128_000_000uL))))
+                    .probe(ByteRange(0uL, movie.size.toULong())).orThrow()
+                assertEquals(VideoContainer.Mov, movieFacts.container); assertEquals(structure.tracks, movieFacts.tracks)
+                val movieHash = Sha256().also { it.update(Bytes(movie)) }.finish().value
+                Files.write(directory.resolve("$name.mov"), movie)
+                manifest.append("$name.mov=$movieHash\n$name.movScope=synthetic-qt-brand-over-encoded-avc-not-camera-or-general-remux\n")
+            } finally { movieSource.close(); source.close() }
         }
         Files.writeString(directory.resolve("manifest.txt"), manifest.toString())
     }

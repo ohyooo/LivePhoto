@@ -52,7 +52,7 @@ Linux，在解压位置运行：
 
 - **只做协议操作通常不需要 FFmpeg。** 检测、结构检查、原样提取及有限的协议封装/编辑，可直接由 Core 完成。结构检查不代表已经解码视频。
 - **抽帧、裁剪、转码等推荐使用自己准备的 FFmpeg。** 后端选择顺序为：`--ffmpeg` 显式路径 → 系统 `PATH` → 已实现且运行时可用的系统 API → 禁用相应能力。工具不会自动下载或安装 FFmpeg、Java 或其他后端，也不识别 shell 的 FFmpeg 别名；PATH 中使用绝对目录。
-- Windows 系统 API 当前仅提供有限的 AVC/MP4、无音轨、完整软件解码 Probe 回退；并非通用媒体处理后端。系统抽帧/裁剪/remux/transcode 与其它 OS 系统适配器仍待实现。先用 `media-capabilities` 查看当前机器实际可用能力。
+- Windows 系统 API 提供有限的 AVC/MP4 或 MOV、无音轨、完整软件解码 Probe 回退：单视频轨、48×48 至 4096×2304、至多 64 帧、唯一且可精确表示为 100ns 的 presentation 时间。新 MOV 路径已通过实际测试与 Windows 便携验收；并非通用媒体处理后端。系统抽帧/裁剪/remux/transcode 与其它 OS 系统适配器仍待实现。先用 `media-capabilities` 查看当前机器实际可用能力。
 - 使用 shared 版 FFmpeg 时，要保留它旁边的 DLL；不要只移动 EXE。CLI 使用 `--ffmpeg` 或 PATH；测试另支持 `LIVEPHOTO_FFMPEG`，`FFMPEG_HOME` 本身不是 CLI 的查找入口。
 - 推荐先 `inspect` / `analyze`，再执行修改；重要原片另行备份。输入保持不可变，输出使用**尚不存在的新目录**，不会覆盖输入或已有输出。
 - 默认禁止转码。`--allow-transcode` 只是显式授权，仍受操作、输入及目标的能力和安全条件限制。不要用它绕过未知 metadata、HDR、GainMap、MakerNote 或资源依赖风险。
@@ -404,7 +404,9 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/LivePhoto/commit/fceb13c5c226e0861515795abaadcc2978930b02) 实际全量构建 **711 tests，0 failures / errors / skips**，包含真实编码 MOV 修复后完整解码；Windows 新便携包全部验收成功，新增空 PATH 两侧权威/两种容器的重配对 smoke。[对应 CI 37742117365](https://github.com/ohyooo/LivePhoto/actions/runs/37742117365) 成功，Windows/Linux 合计 6 个非空、未过期 artifacts 已核对。
 
-随后补充独立合成 CID 字段边界回归：36/37 字节与单个 NUL 保持、额外终止符/混合 timed metadata/身份别名拒绝。该批次实际全量 **713 tests，0 failures / errors / skips**；只改测试及 fixture helper，不扩展业务能力。此测试批次的独立 CI 核对仍待提交后执行，不把上一提交的 CI 当作新测试证据。
+随后 [`18f8122`](https://github.com/ohyooo/LivePhoto/commit/18f81223adc4933b69abc0570745d13ba9b030be) 补充独立合成 CID 字段边界回归：36/37 字节与单个 NUL 保持、额外终止符/混合 timed metadata/身份别名拒绝。该批次实际全量 **713 tests，0 failures / errors / skips**；只改测试及 fixture helper，不扩展业务能力。[对应 CI 37742738670](https://github.com/ohyooo/LivePhoto/actions/runs/37742738670) 成功，6 个非空、未过期 artifacts 已核对。
+
+当前 Windows 有限 MOV 系统 Probe 扩展：实际全量 **714 tests，0 failures / errors / skips**，包含 B 帧/VFR、音轨拒绝，以及现有 FFmpeg 明确封装 MOV 后只用系统后端完整解码。人工 qt brand fixture 仅为合成容器结构＋真实 AVC samples，单独标明其范围，不能当作相机原片或通用 remux 证明。该批次完整 Windows 便携验收成功，新提交的 CI/产物仍待核对。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -429,7 +431,7 @@ Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/Li
 | Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | Generic/HEIC 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限重配对批次已完成 | 有限 SafeMetadataOnly；ExplicitRePair 两侧权威、预览、allowlist、回滚、幂等；便携及 CI 验收 | ExplicitRemux、复杂 MakerNote/metadata profile 未实现 |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
-| MediaBackend | 部分完成 | 可选 FFmpeg 有限操作；Windows 系统有限 Probe 解码回退 | 系统媒体编辑、其它 OS 官方 API 适配 |
+| MediaBackend | 部分完成；MOV 系统 Probe CI 核对中 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe；完整解码与 Windows 便携验收 | MOV 新 CI 核对；系统媒体编辑、其它 OS 官方 API 适配 |
 | CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
@@ -478,6 +480,7 @@ Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/Li
 - [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。
+- [ ] Windows 有限 MOV 系统 Probe 扩展：实际测试与新 Windows 便携包验收通过，待对应 CI 产物核对；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。

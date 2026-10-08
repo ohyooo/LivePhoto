@@ -88,6 +88,29 @@ class WindowsNativeVideoDecodeTest {
                     assertEquals(Coverage.Partial, decoded.coverage)
                     assertTrue(decoded.issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
                     assertEquals(before, sha256Range(reader, range).orThrow())
+                    if (fixtureEncoder != null) {
+                        // Explicit fixture muxing, outside the OS backend. No FFmpeg in the decode route.
+                        val movPath = directory.resolve("actual muxed B $bFrames.mov"); owned.add(movPath)
+                        val muxed = ExternalProcess.run(listOf(fixtureEncoder.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror",
+                            "-i", path.toString(), "-map", "0:v:0", "-c", "copy", "-map_metadata", "-1", "-f", "mov", movPath.toString()), 60_000)
+                        assertEquals(0, muxed.code, muxed.output); assertFalse(muxed.timedOut || muxed.ioFailed || muxed.outputLimited)
+                        val movSource = FileBinarySource(movPath)
+                        try {
+                            val movReader = BinaryReader(movSource, context)
+                            val movRange = ByteRange(0uL, movSource.size().orThrow())
+                            val movBefore = sha256Range(movReader, movRange).orThrow()
+                            val movFacts = BmffVideoProbe(movReader).probe(movRange).orThrow()
+                            assertEquals(VideoContainer.Mov, movFacts.container)
+                            val movTrack = movFacts.tracks.single()
+                            assertEquals(track.samples.size, movTrack.samples.size)
+                            assertEquals(track.samples.map { sha256Range(reader, it.range).orThrow() },
+                                movTrack.samples.map { sha256Range(movReader, it.range).orThrow() })
+                            val movDecoded = DefaultLivePhotoCore(discovery.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(movSource)), true, context)).orThrow()
+                            assertEquals(VideoContainer.Mov, movDecoded.videoContainer); assertEquals(Coverage.Partial, movDecoded.coverage)
+                            assertTrue(movDecoded.issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                            assertEquals(movBefore, sha256Range(movReader, movRange).orThrow())
+                        } finally { movSource.close() }
+                    }
                 } finally { source.close() }
             }
             if (fixtureEncoder != null) {
@@ -121,6 +144,33 @@ class WindowsNativeVideoDecodeTest {
             assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
             assertContentEquals(byteArrayOf(1, 2, 3, 4), Files.readAllBytes(path))
         } finally { Files.deleteIfExists(path) }
+    }
+    @Test fun actualSystemMovProbePreservesBFramesVfrAndRejectsAudio(): Unit = runImmediate {
+        if (!usable()) return@runImmediate
+        val context = Context(Limits(128_000_000uL, 128_000_000uL))
+        val core = DefaultLivePhotoCore(WindowsMediaFoundationBackend.available().single())
+        for (name in listOf("b0", "b2", "vfr", "audio")) {
+            val bytes = WindowsEncodedFixtures.movBytes(name)
+            val source = livephoto.core.memory.MemoryBinarySource(Bytes(bytes), SourceId("system-mov-$name"))
+            val original = livephoto.core.memory.MemoryBinarySource(Bytes(WindowsEncodedFixtures.bytes(name)), SourceId("system-mp4-$name"))
+            try {
+                val reader = BinaryReader(source, context)
+                val range = ByteRange(0uL, bytes.size.toULong())
+                val before = sha256Range(reader, range).orThrow()
+                val movie = BmffVideoProbe(reader).probe(range).orThrow()
+                val mp4 = BmffVideoProbe(BinaryReader(original, context)).probe(ByteRange(0uL, original.size().orThrow())).orThrow()
+                assertEquals(VideoContainer.Mov, movie.container)
+                assertEquals(mp4.tracks, movie.tracks)
+                val result = core.probe(ProbeRequest(ResourceRef(SourceSet.Single(source)), true, context))
+                if (name == "audio") assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(result).error.code.value)
+                else {
+                    val decoded = result.orThrow()
+                    assertEquals(VideoContainer.Mov, decoded.videoContainer); assertEquals(Coverage.Partial, decoded.coverage)
+                    assertTrue(decoded.issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                }
+                assertEquals(before, sha256Range(reader, range).orThrow())
+            } finally { source.close(); original.close() }
+        }
     }
     @Test fun actualSystemProbeKeepsVfrPresentationTimesAndRejectsAudioRatherThanDroppingIt(): Unit = runImmediate {
         if (!usable()) return@runImmediate
