@@ -36,6 +36,29 @@ class WindowsNativeVideoDecodeTest {
             assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
         }
     }
+    @Test fun actualDecodedBufferPayloadIsReadWithinBoundsWithoutClaimingFrameExtraction(): Unit = runImmediate {
+        if (!usable()) return@runImmediate
+        val path = Files.createTempFile("livephoto-os-payload-", ".mp4")
+        try {
+            for (variant in listOf("b0", "b2")) {
+                val bytes = WindowsEncodedFixtures.bytes(variant)
+                Files.write(path, bytes)
+                val result = worker(listOf("--decode-video-payload", path.toString(), "4", "65536", "128000000"))
+                assertEquals(0, result.code, result.output)
+                assertFalse(result.ioFailed || result.timedOut || result.outputLimited)
+                val trace = Regex("WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=4 width=64 height=64 ptsSha256=[0-9a-f]{64} payloadBytes=([0-9]+) payloadSha256=([0-9a-f]{64})")
+                    .matchEntire(result.output.trim()) ?: error("Missing bounded raw-buffer evidence: ${result.output}")
+                assertTrue(trace.groupValues[1].toLong() in 24_576L..262_144L)
+                assertNotEquals(MessageDigest.getInstance("SHA-256").digest().joinToString("") { "%02x".format(it.toInt() and 255) }, trace.groupValues[2])
+                assertContentEquals(bytes, Files.readAllBytes(path))
+                val bounded = worker(listOf("--decode-video-payload", path.toString(), "4", "6143", "128000000"))
+                assertEquals(4, bounded.code, bounded.output)
+                assertFalse(bounded.output.contains("DECODE=SUCCESS"))
+                assertContentEquals(bytes, Files.readAllBytes(path))
+            }
+            assertEquals(Implementation.Unsupported, WindowsMediaFoundationBackend.available().single().capabilities().operations.single { it.operation == Operation.ExtractFrame }.implementation)
+        } finally { Files.deleteIfExists(path) }
+    }
     @Test fun actualAvcDecodeReachesEosWithIndependentPresentationTimeline(): Unit = runImmediate {
         if (!usable()) return@runImmediate // Explicit unavailable evidence, not a claimed decoder success.
         val found = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of))

@@ -11,17 +11,17 @@ import java.util.UUID
 /** Narrow internal SourceReader experiment, confined to the native-enabled worker process. */
 internal object WindowsNativeVideoDecode {
     class Failure(val diagnostic: String) : Exception()
-    data class Request(val path: Path, val maxFrames: Int, val maxBuffer: Int, val maxFile: Long)
+    data class Request(val path: Path, val maxFrames: Int, val maxBuffer: Int, val maxFile: Long, val payloadEvidence: Boolean = false)
 
     fun request(args: Array<String>): Request? = try {
-        if (args.size != 5 || args[0] != "--decode-video") null else {
+        if (args.size != 5 || args[0] !in setOf("--decode-video", "--decode-video-payload")) null else {
             val path = Path.of(args[1])
             val frames = args[2].toIntOrNull()
             val buffer = args[3].toIntOrNull()
             val file = args[4].toLongOrNull()
             if (!path.isAbsolute || frames == null || frames !in 1..10_000 ||
                 buffer == null || buffer !in 1..32_000_000 || file == null || file !in 1..128_000_000) null
-            else Request(path, frames, buffer, file)
+            else Request(path, frames, buffer, file, args[0] == "--decode-video-payload")
         }
     } catch (_: Exception) { null }
 
@@ -136,6 +136,8 @@ internal object WindowsNativeVideoDecode {
                 val length = api.arena.allocate(ValueLayout.JAVA_INT)
                 val out = api.arena.allocate(ValueLayout.ADDRESS)
                 val digest = MessageDigest.getInstance("SHA-256")
+                val payloadDigest = MessageDigest.getInstance("SHA-256")
+                var payloadBytes = 0L
                 var frames = 0; var previous = -1L; var ended = false
                 for (iteration in 0 until request.maxFrames * 4 + 32) {
                     out.set(ValueLayout.ADDRESS, 0, MemorySegment.NULL)
@@ -155,6 +157,8 @@ internal object WindowsNativeVideoDecode {
                             val pts = sampleTime.get(ValueLayout.JAVA_LONG, 0)
                             check(pts == timestamp.get(ValueLayout.JAVA_LONG, 0) && pts >= 0 && pts >= previous)
                             check(length.get(ValueLayout.JAVA_INT, 0) in 1..request.maxBuffer)
+                            payloadBytes = Math.addExact(payloadBytes, api.readPayload(sample, length.get(ValueLayout.JAVA_INT, 0),
+                                dimensions.first.toLong() * dimensions.second * 3 / 2, request.maxBuffer, payloadDigest).toLong())
                             previous = pts
                             digest.update(ByteBuffer.allocate(8).putLong(pts).array())
                         }
@@ -165,7 +169,8 @@ internal object WindowsNativeVideoDecode {
                 if (!ended || frames == 0 || finalDimensions != dimensions)
                     throw Failure("state_frames=${frames}_eos=${ended}_size=${dimensions.first}x${dimensions.second}_final=${finalDimensions.first}x${finalDimensions.second}")
                 val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
-                return "WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=$frames width=${dimensions.first} height=${dimensions.second} ptsSha256=$hash"
+                val payload = if (request.payloadEvidence) " payloadBytes=$payloadBytes payloadSha256=${payloadDigest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }}" else ""
+                return "WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=$frames width=${dimensions.first} height=${dimensions.second} ptsSha256=$hash$payload"
             } finally { api.release(reader) }
         } finally { api.release(attributes) }
     }
@@ -192,6 +197,35 @@ internal object WindowsNativeVideoDecode {
                 throw failure
             }
             return out.get(ValueLayout.ADDRESS, 0).also { check(it.address() != 0L) }
+        }
+        // Read valid contiguous sample bytes only while locked. This is raw buffer evidence,
+        // not a stride/color interpretation or a public extracted image.
+        // https://learn.microsoft.com/en-us/windows/win32/api/mfobjects/nf-mfobjects-imfmediabuffer-lock
+        fun readPayload(sample: MemorySegment, expectedLength: Int, minimum: Long, limit: Int, digest: MessageDigest): Int {
+            val buffer = pointer { out -> hr(method(sample, 41, ValueLayout.ADDRESS).invokeWithArguments(sample, out)) }
+            try {
+                val bytes = arena.allocate(ValueLayout.ADDRESS)
+                val maximum = arena.allocate(ValueLayout.JAVA_INT)
+                val current = arena.allocate(ValueLayout.JAVA_INT)
+                hr(method(buffer, 3, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
+                    .invokeWithArguments(buffer, bytes, maximum, current))
+                try {
+                    val size = current.get(ValueLayout.JAVA_INT, 0)
+                    check(size == expectedLength && size.toLong() >= minimum && size in 1..limit)
+                    check(maximum.get(ValueLayout.JAVA_INT, 0) in size..limit)
+                    val pointer = bytes.get(ValueLayout.ADDRESS, 0)
+                    check(pointer.address() != 0L)
+                    val memory = pointer.reinterpret(size.toLong())
+                    digest.update(ByteBuffer.allocate(8).putLong(size.toLong()).array())
+                    var offset = 0L
+                    while (offset < size) {
+                        val count = minOf(65_536L, size - offset)
+                        digest.update(memory.asSlice(offset, count).toArray(ValueLayout.JAVA_BYTE))
+                        offset += count
+                    }
+                    return size
+                } finally { hr(method(buffer, 4).invokeWithArguments(buffer)) }
+            } finally { release(buffer) }
         }
         fun guid(text: String): MemorySegment {
             val id = UUID.fromString(text)

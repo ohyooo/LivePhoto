@@ -446,7 +446,7 @@ try {
                 $start.UseShellExecute = $false
                 $start.RedirectStandardOutput = $true
                 $start.RedirectStandardError = $true
-                foreach ($argument in @('--decode-video', $osFixture, '4', '65536', '128000000')) { $start.ArgumentList.Add($argument) }
+                foreach ($argument in @('--decode-video-payload', $osFixture, '4', '65536', '128000000')) { $start.ArgumentList.Add($argument) }
                 $process = [Diagnostics.Process]::Start($start)
                 try {
                     $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -454,8 +454,9 @@ try {
                     if (-not $process.WaitForExit(30000)) { $process.Kill($true); throw 'Portable OS decoder timed out.' }
                     $trace = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
                     if ($process.ExitCode -ne 0 -or $trace.Length -gt 65536 -or
-                        $trace -notmatch "WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=4 width=64 height=64 ptsSha256=$ptsHash" -or
+                        $trace.Trim() -notmatch "^WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=4 width=64 height=64 ptsSha256=$ptsHash payloadBytes=([0-9]+) payloadSha256=([0-9a-f]{64})$" -or
                         $osHash -ne (Get-FileHash $osFixture).Hash) { throw "Portable OS decoder failed independent frame/timeline/source checks: $trace" }
+                    if ([long]$Matches[1] -lt 24576 -or [long]$Matches[1] -gt 262144) { throw 'Portable decoded payload exceeds its independent byte bounds.' }
                 } finally { $process.Dispose() }
                 $savedSearchPath = $env:Path
                 try {
@@ -477,6 +478,7 @@ try {
                 if ($osHash -ne (Get-FileHash $osFixture).Hash) { throw 'Portable Core OS decoder mutated input.' }
             }
             Write-Host 'PORTABLE_WINDOWS_API_DECODE=SUCCESS scope=selected-avc-video-not-audio-or-device'
+            Write-Host 'PORTABLE_WINDOWS_API_PAYLOAD=SUCCESS scope=bounded-locked-buffer-read-not-stride-color-or-extracted-image-proof'
             Write-Host 'PORTABLE_WINDOWS_API_CORE_FALLBACK=SUCCESS scope=finite-probe-only-no-ffmpeg-no-system-java'
         }
         # Explicitly generated fixture: its encoding is not part of the remux operation.
