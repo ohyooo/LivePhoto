@@ -90,10 +90,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Packaging changes the runspace's location while Tee-Object consumes output.
+          $logPath = Join-Path $env:GITHUB_WORKSPACE 'ci-output/portable.log'
 
           & ./scripts/package-portable.ps1 `
             -Platform '${{ matrix.platform }}' *>&1 |
-            Tee-Object -FilePath ci-output/portable.log
+            Tee-Object -FilePath $logPath
 
           if (-not $?) {
             throw 'Portable packaging failed.'
