@@ -13,9 +13,12 @@ internal object AppleKeyOperations {
         val media = session.videos[ProtocolIds.Apple]
             ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey requires an independently parsed compatible movie", Stage.Plan)
         if (media.container !in setOf(VideoContainer.Mp4, VideoContainer.Mov) || session.inspection.issues.any { it.severity == Severity.Error })
-            fail("CAPABILITY_UNSUPPORTED", "Apple SetKey only implements a valid JPEG/MP4 or JPEG/MOV pair", Stage.Plan)
+            fail("CAPABILITY_UNSUPPORTED", "Apple SetKey requires a valid identified primary and compatible movie pair", Stage.Plan)
         val budget = ParseBudget(request.context)
-        AppleClean.prepare(session, budget).orThrow() // Closed ownership/dependency gate; these cleanup views are never published.
+        // HEIC remains byte-identical: no authority to clean/merge its MakerNote is required or inferred.
+        // Keep the existing JPEG image gate and the identical closed movie dependency gate.
+        if (session.heifItems != null) AppleClean.prepareVideo(session, budget).orThrow()
+        else AppleClean.prepare(session, budget).orThrow() // Cleanup views are never published.
         val track = media.tracks.singleOrNull { it.handler == "meta" }
             ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey needs one dedicated metadata track", Stage.Plan)
         if (track.timescale != media.movieTimescale || track.duration != 1uL || track.samples.size != 1 ||
@@ -56,7 +59,7 @@ internal object AppleKeyOperations {
     }
     suspend fun plan(request: SetKeyRequest, session: SourceSession): CoreResult<ExecutionPlan> = attempt {
         val prepared = prepare(request, session)
-        val target = ProtocolSelector(ProtocolIds.Apple, ProfileId(if (session.videos[ProtocolIds.Apple]?.container == VideoContainer.Mov) "jpeg-mov" else "jpeg-mp4"))
+        val target = session.inspection.detection.primaryProtocol ?: fail("CAPABILITY_UNSUPPORTED", "Apple SetKey needs an identified pair profile", Stage.Plan)
         ExecutionPlan(session.snapshot, target, listOf(PlanStep(Stage.WriteProtocol, listOf(Operation.SetKey), emptyList(),
             "Fixed-width metadata edit/tkhd duration patch; byte-identical primary; jointly verify pair before commit")),
             PreservationReport(changes = prepared.changes), CapabilitySet(Availability.Conditional,
@@ -66,7 +69,7 @@ internal object AppleKeyOperations {
         val prepared = prepare(request, session)
         val pair = session.applePair!!
         val image = GoogleOperations.rawAsset(session, ByteRange(0uL, pair.imageReader.identity().orThrow().size), AssetRole.PrimaryImage,
-            "image/jpeg", request.context, inputReader = pair.imageReader)
+            session.inspection.media.first().mime!!, request.context, inputReader = pair.imageReader)
         var imageId: AssetId? = null
         var imageIdentity: SourceIdentity? = null
         var imageHash: Digest? = null
@@ -92,7 +95,11 @@ internal object AppleKeyOperations {
                         fail("POSTCONDITION_FAILED", "Apple primary changed before joint SetKey verification", Stage.Verify)
                     val staged = SourceSession.open(SourceSet.Pair(source, reader.source), request.context, ParseBudget(request.context)).orThrow()
                     val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol)).orThrow()
-                    if (report.verdict != Verdict.Valid || report.coverage != Coverage.Complete || staged.inspection.pairing != session.inspection.pairing ||
+                    val required = setOf("heif.item-locations", "heif.item-graph", "bmff.samples", "apple.pair", "apple.media-profile")
+                    val validationComplete = if (session.heifItems == null) report.verdict == Verdict.Valid && report.coverage == Coverage.Complete
+                        else required.all { check -> report.checks.singleOrNull { it.id == check }?.let { it.verdict == Verdict.Valid && it.coverage == Coverage.Complete } == true } &&
+                            report.issues.none { it.severity == Severity.Error }
+                    if (!validationComplete || staged.inspection.detection.primaryProtocol != session.inspection.detection.primaryProtocol || staged.inspection.pairing != session.inspection.pairing ||
                         staged.inspection.keyPhoto.position?.compareTo(prepared.key) != 0 ||
                         staged.videos[ProtocolIds.Apple] == null ||
                         staged.videos[ProtocolIds.Apple]?.tracks?.filter { it.handler != "meta" } != session.videos[ProtocolIds.Apple]?.tracks?.filter { it.handler != "meta" })

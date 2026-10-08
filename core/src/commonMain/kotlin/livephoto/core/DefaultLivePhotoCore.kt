@@ -51,11 +51,15 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             if (actual.profile in setOf(ProfileId("heic-mov"), ProfileId("heic-mp4"))) {
                 val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey, Operation.ConvertFrom)
                 return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
-                    if (operation in reads) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
-                    conditions = if (operation in reads) listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("direct-hvc1-primary-one-contiguous-exif-item-unique-cdsc-formal-apple-maker-note-cid-exact-id-movie-pair"))) +
-                        if (operation == Operation.ConvertFrom) listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("unchanged-same-target-preserve-as-is-only-no-edits-or-format-preferences"))) else emptyList() else emptyList(),
-                    reasons = if (operation in reads) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
-                    verification = if (operation in reads) listOf(Verification.SourceReviewed) else emptyList()) })
+                    if (operation in reads || operation == Operation.SetKey) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
+                    conditions = if (operation in reads || operation == Operation.SetKey) listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("direct-hvc1-primary-one-contiguous-exif-item-unique-cdsc-formal-apple-maker-note-cid-exact-id-movie-pair"))) +
+                        when (operation) {
+                            Operation.ConvertFrom -> listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("unchanged-same-target-preserve-as-is-only-no-edits-or-format-preferences")))
+                            Operation.SetKey -> listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("closed-owned-movie-one-tick-metadata-fixed-edit-envelope-only-whole-heic-unchanged-no-maker-note-rewrite")))
+                            else -> emptyList()
+                        } else emptyList(),
+                    reasons = if (operation in reads || operation == Operation.SetKey) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
+                    verification = if (operation in reads || operation == Operation.SetKey) listOf(Verification.SourceReviewed) else emptyList()) })
             }
             if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)

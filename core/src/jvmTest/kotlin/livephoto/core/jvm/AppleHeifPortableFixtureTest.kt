@@ -39,6 +39,21 @@ class AppleHeifPortableFixtureTest {
         val badPair = SourceSet.Pair(MemoryBinarySource(fixtures.getValue("primary-mdat.heic"), SourceId("negative-image")),
             MemoryBinarySource(fixtures.getValue("other.mov"), SourceId("negative-movie")))
         assertEquals("INVALID_PAIR_IDENTIFIER", assertIs<CoreResult.Failure>(core.inspect(ReadRequest(badPair, context))).error.code.value)
+        for (mov in listOf(false, true)) {
+            val input = AppleHeifKeyFixtures.pair(context, mov = mov, idat = mov)
+            suspend fun read(source: BinarySource) = BinaryReader(source, context).readExactly(0uL, source.size().orThrow().toUInt()).orThrow()
+            val primary = read(input.image); val motion = read(input.video)
+            val changed = core.setKeyPhotoPosition(SetKeyRequest(input, CoverPosition.FrameIndex(1uL), MutationPolicy(preservation = PreservationPolicy.Strict),
+                MemoryOutputTransaction(context, "export-heic-key-$mov"), context)).orThrow()
+            try {
+                assertEquals(primary, read(changed.output.assets[0].readableSource!!))
+                assertEquals(0, changed.keyPhoto!!.position!!.compareTo(Time(40, 1000u)))
+                assertEquals(Coverage.Partial, changed.validation.coverage)
+            } finally { changed.output.assets.forEach { it.readableSource?.close() } }
+            val suffix = if (mov) "mov" else "mp4"
+            fixtures["key-$suffix.heic"] = primary; fixtures["key-motion.$suffix"] = motion
+            input.image.close(); input.video.close()
+        }
         val directory = Path.of("build", "portable-apple-heif-fixtures")
         Files.createDirectories(directory)
         val manifest = StringBuilder("scope=synthetic-apple-heif-pair-framing-not-decoder-or-device-proof\nrunId=${UUID.randomUUID()}\n")

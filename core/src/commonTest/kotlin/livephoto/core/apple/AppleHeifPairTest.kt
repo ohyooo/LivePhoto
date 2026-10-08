@@ -72,7 +72,7 @@ class AppleHeifPairTest {
         val capabilities = core.getProtocolCapabilities(target).operations
         assertEquals(Implementation.Experimental, capabilities.single { it.operation == Operation.Inspect }.implementation)
         assertEquals(Implementation.Planned, capabilities.single { it.operation == Operation.Create }.implementation)
-        assertEquals(Implementation.Unsupported, capabilities.single { it.operation == Operation.SetKey }.implementation)
+        assertEquals(Implementation.Experimental, capabilities.single { it.operation == Operation.SetKey }.implementation)
         val output = MemoryOutputTransaction(context, "heic-writer-gates")
         assertIs<CoreResult.Failure>(core.split(SplitRequest(input, output = output, context = context)))
         assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(input, CoverPosition.FrameIndex(0uL), output = output, context = context)))

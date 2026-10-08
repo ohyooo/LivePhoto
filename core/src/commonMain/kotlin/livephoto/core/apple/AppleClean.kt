@@ -8,6 +8,7 @@ import livephoto.core.implementation.*
 import livephoto.core.jpeg.*
 
 internal data class AppleCleanPlan(val image: BinarySource, val video: BinarySource, val media: VideoStructure)
+internal data class AppleCleanVideoPlan(val video: BinarySource, val media: VideoStructure)
 
 /** Deliberately narrow: CID-only MakerNote and dedicated, fully understood movie bindings. */
 internal object AppleClean {
@@ -45,6 +46,13 @@ internal object AppleClean {
         if (imageSession.bindings.isNotEmpty()) unsafe("Image retains another protocol binding")
         if (codingDigest(session) != codingDigest(imageSession)) fail("POSTCONDITION_FAILED", "Image coding changed during Apple cleanup", Stage.Verify)
 
+        val movie = prepareVideo(session, budget).orThrow()
+        AppleCleanPlan(image, movie.video, movie.media)
+    }
+
+    /** Shared closed movie ownership gate. Does not inspect, clean or rewrite the primary image. */
+    suspend fun prepareVideo(session: SourceSession, budget: ParseBudget): CoreResult<AppleCleanVideoPlan> = attempt {
+        val pair = session.applePair ?: unsafe("A complete Apple pair is required")
         val videoReader = pair.videoReader
         val movieId = AppleVideoReader.read(videoReader, budget).orThrow() ?: unsafe("Apple movie identifier is absent")
         val parser = BmffReader(videoReader, budget)
@@ -93,7 +101,7 @@ internal object AppleClean {
         val clean = BmffVideoProbe(cleanReader, budget, allowTimedMetadata = true).probe(ByteRange(0uL, cleanReader.identity().orThrow().size)).orThrow()
         if (clean.tracks != original.tracks.filter { it.handler != "meta" }) fail("POSTCONDITION_FAILED", "Apple cleanup changed retained movie tracks", Stage.Verify)
         session.recheck()
-        AppleCleanPlan(image, video, clean)
+        AppleCleanVideoPlan(video, clean)
     }
 
     private fun overlap(a: ByteRange, b: ByteRange): Boolean = a.offset < b.endExclusive && b.offset < a.endExclusive

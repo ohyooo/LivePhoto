@@ -139,7 +139,7 @@ try {
     try {
         $env:Path = ''
         $appleHeifInputs = @{}
-        foreach ($name in @('primary-mdat.heic', 'primary-idat.heic', 'motion.mov', 'other.mov')) {
+        foreach ($name in @('primary-mdat.heic', 'primary-idat.heic', 'motion.mov', 'other.mov', 'key-mov.heic', 'key-mp4.heic', 'key-motion.mov', 'key-motion.mp4')) {
             $fixture = Join-Path $appleHeifFixtures $name
             if ((Get-FileHash $fixture).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC fixture hash differs.' }
             $outside = Join-Path $verify "Apple HEIC tool-free $name"
@@ -185,11 +185,36 @@ try {
             $badJson = & $launcher inspect --input $image --pair-video $appleHeifInputs['other.mov']
             if ($LASTEXITCODE -ne 3 -or ($badJson | ConvertFrom-Json).error.code.value -ne 'INVALID_PAIR_IDENTIFIER') { throw 'Apple HEIC ID mismatch was silently repaired.' }
         }
+        foreach ($container in @('mov', 'mp4')) {
+            $keyImage = $appleHeifInputs["key-$container.heic"]; $keyMovie = $appleHeifInputs["key-motion.$container"]
+            $pairBeforeJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
+            if ($LASTEXITCODE -ne 0) { throw 'Apple HEIC key fixture inspection failed.' }
+            $pairBefore = ($pairBeforeJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 10 -Compress
+            foreach ($index in @(1, 0)) {
+                $keyJson = & $launcher set-key --input $keyImage --pair-video $keyMovie --frame-index $index --strict --output-dir (Join-Path $verify "Apple HEIC key $container $index")
+                if ($LASTEXITCODE -ne 0) { throw "Portable Apple HEIC SetKey failed: $keyJson" }
+                $keyResult = ($keyJson | ConvertFrom-Json).result
+                if ($keyResult.output.assets.Count -ne 2 -or $keyResult.output.assets[0].mime -ne 'image/heic' -or
+                    $keyResult.validation.coverage -ne 'Partial' -or
+                    ($keyResult.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') }) -or
+                    ($keyResult.execution | Where-Object { $_.transcoded -or $_.remuxed -or $_.stage -in @('DecodeFrame', 'EncodeImage') })) { throw 'Apple HEIC SetKey conflated metadata with image replacement or complete generic validation.' }
+                $keyImage = $keyResult.output.assets[0].path; $keyMovie = $keyResult.output.assets[1].path
+                if ((Get-FileHash $keyImage).Hash.ToLowerInvariant() -ne $appleHeifManifest["key-$container.heic"]) { throw 'Apple HEIC SetKey changed primary bytes.' }
+                $readKeyJson = & $launcher get-key --input $keyImage --pair-video $keyMovie
+                if ($LASTEXITCODE -ne 0) { throw 'Apple HEIC changed key cannot be read.' }
+                $position = ($readKeyJson | ConvertFrom-Json).result.position
+                if (([decimal]$position.value * 1000000 / $position.timescale) -ne ($index * 40000)) { throw 'Apple HEIC key presentation position differs.' }
+                $pairAfterJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
+                if ($LASTEXITCODE -ne 0 -or (($pairAfterJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 10 -Compress) -ne $pairBefore) { throw 'Apple HEIC SetKey changed CID pairing.' }
+            }
+            if ((Get-FileHash $keyMovie).Hash.ToLowerInvariant() -ne $appleHeifManifest["key-motion.$container"]) { throw 'Apple HEIC key zero roundtrip did not restore every movie byte.' }
+        }
         foreach ($name in $appleHeifInputs.Keys) {
             if ((Get-FileHash $appleHeifInputs[$name]).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC borrowed input changed.' }
         }
     } finally { $env:Path = $appleHeifPath }
     Write-Host 'PORTABLE_APPLE_HEIC_NO_FFMPEG=SUCCESS scope=finite-synthetic-pair-item-graph-byte-exact-not-decode-or-device'
+    Write-Host 'PORTABLE_APPLE_HEIC_SETKEY_NO_FFMPEG=SUCCESS scope=classified-mp4-mov-fixed-time-fields-whole-primary-not-image-rewrite-or-device'
     if ($IsWindows -and $windowsDecoderAvailable) {
         $windowsFixtures = Join-Path $repository 'core/build/portable-windows-fixtures'
         $fixtureManifest = @{}

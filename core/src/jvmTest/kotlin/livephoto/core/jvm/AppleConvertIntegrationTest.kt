@@ -1,10 +1,12 @@
 package livephoto.core.jvm
 
 import livephoto.core.*
+import livephoto.core.apple.AppleHeifFixtures
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.implementation.RangeSource
 import livephoto.core.memory.MemoryOutputTransaction
+import livephoto.core.memory.MemoryBinarySource
 import java.nio.file.Files
 import java.nio.file.Path
 import org.junit.Assume.assumeTrue
@@ -75,6 +77,19 @@ class AppleConvertIntegrationTest {
                             RemuxVerification.verify(original, facts, reader, convertedFacts.copy(tracks = convertedFacts.tracks.filter { it.handler != "meta" }))
                             val path = directory.resolve("converted Apple MOV.mov"); owned.add(path)
                             save(pair.video, path); decode(path)
+                            // Real encoded movie; the HEIC primary is explicitly synthetic framing, not a decoded camera photo.
+                            val cid = core.inspect(ReadRequest(pair, context)).orThrow().pairing!!.imageIdentifier!!
+                            val heic = MemoryBinarySource(Bytes(AppleHeifFixtures.image(cid, idat = true)), SourceId("real-movie-synthetic-heic"))
+                            val heicBefore = sha256Range(BinaryReader(heic, context), ByteRange(0uL, heic.size().orThrow())).orThrow()
+                            val keyed = core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Pair(heic, pair.video), CoverPosition.FrameIndex(0uL),
+                                MutationPolicy(preservation = PreservationPolicy.Strict), MemoryOutputTransaction(context, "real-heic-mov-key"), context)).orThrow()
+                            try {
+                                assertEquals("image/heic", keyed.output.assets[0].mime)
+                                assertEquals(heicBefore, sha256Range(BinaryReader(keyed.output.assets[0].readableSource!!, context), ByteRange(0uL, heic.size().orThrow())).orThrow())
+                                assertEquals(Coverage.Partial, keyed.validation.coverage)
+                                val keyPath = directory.resolve("keyed HEIC pair real movie.mov"); owned.add(keyPath)
+                                save(keyed.output.assets[1].readableSource!!, keyPath); decode(keyPath)
+                            } finally { keyed.output.assets.forEach { it.readableSource?.close() }; heic.close() }
                             assertEquals(before, sha256Range(original, facts.range).orThrow())
                         } finally { converted.output.assets.forEach { it.readableSource?.close() } }
                     } finally { liveMov.output.assets.forEach { it.readableSource?.close() } }
