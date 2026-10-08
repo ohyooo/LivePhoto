@@ -8,46 +8,56 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Portable (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: windows-x64
             runner: windows-2025
-            architecture: X64
           - platform: linux-x64
             runner: ubuntu-24.04
-            architecture: X64
-          # macOS ARM64 is deferred: hosted-runner environment preflight failed.
-          # Do not substitute Intel macOS or install another JDK automatically.
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+          # macOS ARM64 is deferred: hosted-runner environment
+          # preflight failed.
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Check build environment
+      - name: Validate environment
         shell: pwsh
         run: |
+          if ($env:RUNNER_ARCH -ne 'X64') {
+            throw 'Expected an X64 runner.'
+          }
+
           if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
             throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
           }
-          if ($env:RUNNER_ARCH -ne '${{ matrix.architecture }}') { throw 'Unexpected runner architecture.' }
-          $jdk = [Environment]::GetEnvironmentVariable('JAVA_HOME_25_${{ matrix.architecture }}')
-          if (-not $jdk) { $jdk = [Environment]::GetEnvironmentVariable('JAVA_HOME_25_X64') }
-          if (-not $jdk -or -not (Test-Path "$jdk/bin/javac$(if ($IsWindows) { '.exe' })")) {
-            throw 'Runner must provide an existing JDK 25. Java installation is prohibited.'
-          }
-          "JAVA_HOME=$jdk" >> $env:GITHUB_ENV
-          "$jdk/bin" >> $env:GITHUB_PATH
 
-      - name: Setup Gradle and validate Wrapper
+      - name: Setup JDK 25
+        uses: actions/setup-java@main
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          architecture: x64
+          cache-jdk: true
+
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
 
       - name: Build and test
         shell: pwsh
@@ -55,15 +65,39 @@ jobs:
           LIVEPHOTO_REQUIRE_REFERENCE: 'true'
         run: |
           New-Item -ItemType Directory -Path ci-output -Force | Out-Null
-          if ($IsWindows) { & .\gradlew.bat build :cli:installDist --console=plain --warning-mode=all 2>&1 | Tee-Object ci-output/gradle.log }
-          else { & bash ./gradlew build :cli:installDist --console=plain --warning-mode=all 2>&1 | Tee-Object ci-output/gradle.log }
-          if ($LASTEXITCODE -ne 0) { throw 'Gradle build failed.' }
 
-      - name: Package and smoke test portable executable
+          $args = @(
+            'build'
+            ':cli:installDist'
+            '--console=plain'
+            '--warning-mode=all'
+            '--stacktrace'
+          )
+
+          if ($IsWindows) {
+            & .\gradlew.bat @args 2>&1 |
+              Tee-Object -FilePath ci-output/gradle.log
+          } else {
+            & bash ./gradlew @args 2>&1 |
+              Tee-Object -FilePath ci-output/gradle.log
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Gradle build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Package and smoke test
         shell: pwsh
         run: |
-          $logPath = Join-Path $env:GITHUB_WORKSPACE 'ci-output/portable.log'
-          ./scripts/package-portable.ps1 -Platform '${{ matrix.platform }}' *>&1 | Tee-Object $logPath
+          $ErrorActionPreference = 'Stop'
+
+          & ./scripts/package-portable.ps1 `
+            -Platform '${{ matrix.platform }}' *>&1 |
+            Tee-Object -FilePath ci-output/portable.log
+
+          if (-not $?) {
+            throw 'Portable packaging failed.'
+          }
 
       - name: Upload portable executable
         uses: actions/upload-artifact@v7
@@ -74,6 +108,7 @@ jobs:
             ci-output/portable/LivePhoto-*.tar.gz
             ci-output/portable/LivePhoto-*.sha256
           if-no-files-found: error
+          compression-level: 0
           retention-days: 14
 
       - name: Upload build outputs
@@ -87,7 +122,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload test reports and build log
+      - name: Upload test reports and logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
