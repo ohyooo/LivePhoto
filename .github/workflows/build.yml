@@ -66,7 +66,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path ci-output -Force | Out-Null
 
-          $args = @(
+          $gradleArgs = @(
             'build'
             ':cli:installDist'
             '--console=plain'
@@ -75,10 +75,10 @@ jobs:
           )
 
           if ($IsWindows) {
-            & .\gradlew.bat @args 2>&1 |
+            & .\gradlew.bat @gradleArgs 2>&1 |
               Tee-Object -FilePath ci-output/gradle.log
           } else {
-            & bash ./gradlew @args 2>&1 |
+            & ./gradlew @gradleArgs 2>&1 |
               Tee-Object -FilePath ci-output/gradle.log
           }
 
@@ -90,15 +90,29 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Exercise packaging under a strict caller: its negative tests check exact exit codes locally.
+          $PSNativeCommandUseErrorActionPreference = $true
           # Packaging changes the runspace's location while Tee-Object consumes output.
           $logPath = Join-Path $env:GITHUB_WORKSPACE 'ci-output/portable.log'
 
-          & ./scripts/package-portable.ps1 `
-            -Platform '${{ matrix.platform }}' *>&1 |
-            Tee-Object -FilePath $logPath
+          try {
+            & ./scripts/package-portable.ps1 `
+              -Platform '${{ matrix.platform }}' *>&1 |
+              Tee-Object -FilePath $logPath
 
-          if (-not $?) {
-            throw 'Portable packaging failed.'
+            if (-not $?) {
+              throw 'Portable packaging failed.'
+            }
+            if (-not $PSNativeCommandUseErrorActionPreference) {
+              throw 'Packaging changed the caller native-error policy.'
+            }
+            if (-not (Select-String -LiteralPath $logPath `
+                -Pattern '^PORTABLE_SUCCESS=${{ matrix.platform }} ' -Quiet)) {
+              throw 'Portable packaging completion marker is missing.'
+            }
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $logPath
+            throw
           }
 
       - name: Upload portable executable

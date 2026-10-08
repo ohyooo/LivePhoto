@@ -410,7 +410,7 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 ## CI 与产物
 
-[Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 构建、测试、便携打包及 smoke tests。只使用 runner 已有 JDK 25，不自动下载 Java。
+[Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux 直接执行仓库中带可执行位的 `gradlew`。
 
 每个平台上传三类 artifacts，默认保留 **14 天**：
 

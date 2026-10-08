@@ -5,6 +5,9 @@ param(
     [string]$Destination = 'ci-output/portable'
 )
 $ErrorActionPreference = 'Stop'
+# Expected CLI failures are checked explicitly below, including nonzero negative tests.
+# Keep this preference local to the script, independent of the caller's native-error policy.
+$PSNativeCommandUseErrorActionPreference = $false
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $repository = (Get-Location).Path
 function Get-PairingSemantics($pairing) {
@@ -88,7 +91,9 @@ try {
     $createCapability = ($capabilityJson | ConvertFrom-Json).result.operations | Where-Object operation -eq 'Create'
     if ($createCapability.implementation -ne 'Experimental') { throw 'Portable Core capability registry is not accessible.' }
     & $launcher detect --input does-not-exist.jpg
-    if ($LASTEXITCODE -ne 3) { throw 'Portable IO/error exit-code smoke test failed' }
+    $ioExitCode = $LASTEXITCODE
+    Write-Host "PORTABLE_IO_EXIT=$ioExitCode expected=3"
+    if ($ioExitCode -ne 3) { throw "Portable IO/error exit-code smoke test failed: expected 3, received $ioExitCode" }
     $referenceImage = Join-Path $repository 'reference/video.jpg'
     $referenceVideo = Join-Path $repository 'reference/video.mp4'
     $mediaJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'missing-ffmpeg.exe')
