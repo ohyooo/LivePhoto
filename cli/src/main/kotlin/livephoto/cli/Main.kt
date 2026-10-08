@@ -23,6 +23,7 @@ Derived image: [--replacement-frame-index N | --replacement-time-us N] [--replac
 Convert: [--same-target PreserveAsIs|Normalize]; trim [--key-outside Reject|ClampExplicitly|ClearIfSupported]
 Extract: [--resources ID,ID] [--raw-carrier]
 Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
+Repair modes: [--mode SafeMetadataOnly|ExplicitRePair|ExplicitRemux]; re-pair needs --pair-video and --authority EVIDENCE_ID from inspect of a selected single asset
 Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for frame index]
 Extract-frame: [--resource ID] (select an embedded video in a live-photo carrier)
 Validate: [--layers Structure,Protocol,Media]
@@ -83,7 +84,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target", "allow-transcode") + trimKeys + positionKeys + replacementKeys
                 "extract" -> inputKeys + setOf("output-dir", "resources", "raw-carrier")
                 "split" -> inputKeys + setOf("output-dir", "strict")
-                "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues")
+                "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues", "mode", "authority")
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
                 "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource")
                 "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format", "update-key", "strict")
@@ -122,7 +123,9 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 return if (trim == null && key == null && replacement == null) null else EditSpec(trim = trim, keyPosition = key, replacementFrame = replacement)
             }
             val policy = MutationPolicy(preservation = if (options.containsKey("strict")) PreservationPolicy.Strict else PreservationPolicy.BestEffortWithReport,
-                transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid)
+                transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid,
+                conflicts = if (command == "repair" && "authority" in options) ConflictPolicy.ExplicitAuthority else ConflictPolicy.Reject,
+                authority = if (command == "repair") options["authority"]?.let(::EvidenceId) else null)
             val result: CoreResult<*> = when (command) {
                 "capabilities" -> CoreResult.Success(core.getProtocolCapabilities(target()))
                 "media-capabilities" -> CoreResult.Success(mapOf("capabilities" to core.getMediaCapabilities(),
@@ -139,7 +142,9 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "split" -> core.split(SplitRequest(source(), policy = policy, output = destination(), context = context))
                 "repair" -> {
                     require(options.containsKey("apply") || !options.containsKey("output-dir")) { "Repair preview does not accept --output-dir; use --apply" }
-                    core.repair(RepairRequest(source(), allowedIssueCodes = options["issues"]?.split(',')?.map(::IssueCode) ?: emptyList(), dryRun = !options.containsKey("apply"), policy = policy, output = if (options.containsKey("apply")) destination() else null, context = context))
+                    core.repair(RepairRequest(source(), mode = options["mode"]?.let(RepairMode::valueOf) ?: RepairMode.SafeMetadataOnly,
+                        allowedIssueCodes = options["issues"]?.split(',')?.map(::IssueCode) ?: emptyList(), authority = options["authority"]?.let(::EvidenceId),
+                        dryRun = !options.containsKey("apply"), policy = policy, output = if (options.containsKey("apply")) destination() else null, context = context))
                 }
                 "set-key" -> core.setKeyPhotoPosition(SetKeyRequest(source(), position(), policy, destination(), context))
                 "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))

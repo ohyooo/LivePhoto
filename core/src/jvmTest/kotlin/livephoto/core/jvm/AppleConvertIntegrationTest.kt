@@ -2,6 +2,7 @@ package livephoto.core.jvm
 
 import livephoto.core.*
 import livephoto.core.apple.AppleHeifFixtures
+import livephoto.core.apple.APPLE_CID
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.implementation.RangeSource
@@ -77,6 +78,31 @@ class AppleConvertIntegrationTest {
                             RemuxVerification.verify(original, facts, reader, convertedFacts.copy(tracks = convertedFacts.tracks.filter { it.handler != "meta" }))
                             val path = directory.resolve("converted Apple MOV.mov"); owned.add(path)
                             save(pair.video, path); decode(path)
+                            // A real encoded MOV with one intentionally conflicting formal CID.
+                            // Re-pair must retain every sample and decode, not silently remux or encode.
+                            val movieBytes = reader.readExactly(0uL, pair.video.size().orThrow().toUInt()).orThrow().toByteArray()
+                            val cidField = core.inspect(ReadRequest(SourceSet.Single(pair.video), context)).orThrow().metadata.single { it.selector == APPLE_CID }.location.range!!
+                            "11112233-4455-6677-8899-aabbccddeeff".encodeToByteArray().copyInto(movieBytes, cidField.offset.toInt())
+                            val conflictingMovie = MemoryBinarySource(Bytes(movieBytes), SourceId("real-conflicting-apple-mov"))
+                            try {
+                                for (videoAuthority in listOf(false, true)) {
+                                    val authority = core.inspect(ReadRequest(SourceSet.Single(if (videoAuthority) conflictingMovie else pair.image), context)).orThrow().pairing!!.evidence.single().id
+                                    val repaired = core.repair(RepairRequest(SourceSet.Pair(pair.image, conflictingMovie), RepairMode.ExplicitRePair,
+                                        authority = authority, dryRun = false, policy = MutationPolicy(conflicts = ConflictPolicy.ExplicitAuthority, authority = authority),
+                                        output = MemoryOutputTransaction(context, "real-mov-repair-$videoAuthority"), context = context)).orThrow()
+                                    try {
+                                        val operation = repaired.operation!!
+                                        assertEquals(1, repaired.changesApplied.size)
+                                        assertTrue(operation.execution.none { it.transcoded || it.remuxed })
+                                        val repairedReader = BinaryReader(operation.output.assets[1].readableSource!!, context)
+                                        val repairedFacts = BmffVideoProbe(repairedReader, allowTimedMetadata = true).probe(ByteRange(0uL, repairedReader.identity().orThrow().size)).orThrow()
+                                        RemuxVerification.verify(original, facts, repairedReader, repairedFacts.copy(tracks = repairedFacts.tracks.filter { it.handler != "meta" }))
+                                        val repairedPath = directory.resolve("repaired real movie $videoAuthority.mov"); owned.add(repairedPath)
+                                        save(repairedReader.source, repairedPath); decode(repairedPath)
+                                        assertEquals(true, core.inspect(ReadRequest(SourceSet.Pair(operation.output.assets[0].readableSource!!, repairedReader.source), context)).orThrow().pairing!!.matches)
+                                    } finally { repaired.operation!!.output.assets.forEach { it.readableSource?.close() } }
+                                }
+                            } finally { conflictingMovie.close() }
                             // Real encoded movie; the HEIC primary is explicitly synthetic framing, not a decoded camera photo.
                             val cid = core.inspect(ReadRequest(pair, context)).orThrow().pairing!!.imageIdentifier!!
                             val heic = MemoryBinarySource(Bytes(AppleHeifFixtures.image(cid, idat = true)), SourceId("real-movie-synthetic-heic"))

@@ -50,10 +50,10 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-mov")) else target
             if (actual.profile in setOf(ProfileId("heic-mov"), ProfileId("heic-mp4"))) {
                 val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey, Operation.ConvertFrom)
-                val implemented = reads + setOf(Operation.SetKey, Operation.SplitClean)
+                val implemented = reads + setOf(Operation.SetKey, Operation.SplitClean, Operation.Repair)
                 return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                     if (operation in implemented) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
-                    conditions = if (operation in implemented) listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("direct-hvc1-primary-one-contiguous-exif-item-unique-cdsc-formal-apple-maker-note-cid-exact-id-movie-pair"))) +
+                    conditions = if (operation == Operation.Repair) AppleRepairOperations.conditions() else if (operation in implemented) listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("direct-hvc1-primary-one-contiguous-exif-item-unique-cdsc-formal-apple-maker-note-cid-exact-id-movie-pair"))) +
                         when (operation) {
                             Operation.ConvertFrom -> listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("unchanged-same-target-preserve-as-is-only-no-edits-or-format-preferences")))
                             Operation.SetKey -> listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("closed-owned-movie-one-tick-metadata-fixed-edit-envelope-only-whole-heic-unchanged-no-maker-note-rewrite")))
@@ -65,12 +65,12 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             }
             if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = setOf(Operation.SplitClean, Operation.ConvertFrom, Operation.SetKey) + if (actual.profile == ProfileId("jpeg-mp4")) setOf(Operation.ConvertTo, Operation.Create)
+            val writes = setOf(Operation.SplitClean, Operation.ConvertFrom, Operation.SetKey, Operation.Repair) + if (actual.profile == ProfileId("jpeg-mp4")) setOf(Operation.ConvertTo, Operation.Create)
                 else if (target.profile != null) setOf(Operation.Create, Operation.ConvertTo) else emptySet()
             val movieProfile = if (actual.profile == ProfileId("jpeg-mp4")) "mp4" else "mov"
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 if (operation in reads + writes) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
-                conditions = if (operation in setOf(Operation.ConvertTo, Operation.Create) && operation in writes) listOf(
+                conditions = if (operation == Operation.Repair) AppleRepairOperations.conditions() else if (operation in setOf(Operation.ConvertTo, Operation.Create) && operation in writes) listOf(
                     Condition(ConditionOperator.Equals, "assembly", Value.Text(if (operation == Operation.Create) "ordinary-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-except-exact-canonical-jfif-$movieProfile-movie-selected-or-default-presentation-key-no-trim-replacement-no-remux" else "unique-live-source-classified-jpeg-without-existing-exif-mpf-extended-or-unknown-app-except-exact-canonical-jfif-$movieProfile-movie-known-or-explicit-key-no-trim-replacement-no-remux")),
                     Condition(ConditionOperator.Equals, "publication", Value.Text("independent-two-asset-reread-and-asset-set-atomic-no-encoding"))) else if (operation == Operation.SetKey && operation in writes) listOf(
                     Condition(ConditionOperator.Equals, "keyEditScope", Value.Text("valid-jpeg-$movieProfile-closed-dedicated-one-tick-metadata-track-canonical-40-byte-edit-envelope-fixed-tkhd32-no-resize-or-encoding-original-cid-primary-and-samples-preserved"))) else listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("exact-id-jpeg-quicktime-meta-pair")),

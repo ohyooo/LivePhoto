@@ -6,7 +6,7 @@
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；当前构建目标为 JVM，尚未交付 Native、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux 便携包已交付；最近完成 Apple CID 源绑定证据。下一项是尚未开始的 Apple ExplicitRePair，真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux 便携包已交付；Apple 有限 ExplicitRePair 已通过全量测试与 Windows 便携验收，待本次提交的 CI 产物核对。后续仍有显式修复模式、Apple 写入及系统媒体后端扩展；真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -195,7 +195,27 @@ Linux（Bash/Zsh）：
 ./LivePhoto/bin/LivePhoto repair --input './damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir './out-repair'
 ```
 
-当前仅修复能够唯一证明的有限 metadata 问题，不猜协议、视频边界、ID 或单位。预览不写入；预览时不能传 `--output-dir`。Apple 冲突 ID 的 `ExplicitRePair` 尚未实现，也没有 CLI `--authority` 参数。
+当前仅修复能够唯一证明的有限问题，不猜协议、视频边界、ID 或单位。默认模式为 `SafeMetadataOnly`；预览不写入，不能传 `--output-dir`。`ExplicitRemux` 尚未实现，不等同于已有的独立 `remux` 命令。
+
+Apple 有限 `ExplicitRePair` 支持明确选定的 JPEG/HEIC＋MOV/MP4：先单独 `inspect` 你选为权威的图片或视频，将返回的 `result.pairing.evidence[0].id.value` 填入 `--authority`。下例 `EVIDENCE_ID` 必须替换为该文件当前版本的真实证据 ID；文件变化后重新读取，不得复用其它文件的 ID。权威来自视频时改图片 CID，来自图片时改视频 CID，不会自动选边或生成新 ID。
+
+Windows（PowerShell）：
+
+```powershell
+.\LivePhoto\LivePhoto.exe inspect --input '.\primary.heic'
+.\LivePhoto\LivePhoto.exe repair --input '.\primary.heic' --pair-video '.\motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID'
+.\LivePhoto\LivePhoto.exe repair --input '.\primary.heic' --pair-video '.\motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID' --apply --output-dir '.\out-pair'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto inspect --input './primary.heic'
+./LivePhoto/bin/LivePhoto repair --input './primary.heic' --pair-video './motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID'
+./LivePhoto/bin/LivePhoto repair --input './primary.heic' --pair-video './motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID' --apply --output-dir './out-pair'
+```
+
+此功能为 Experimental：只接受已确认 ownership 的 CID-only MakerNote 和专用 movie metadata，改写一侧固定宽度 CID，整对共同发布。普通 MakerNote、混合私有 metadata 等未覆盖结构会拒绝；无法证明未知 ID 关联，因此保留报告明确 `MetadataPreserving=Unknown`，`--strict` 不可用于发生 CID 改写的请求。匹配成功不证明原始同次拍摄，也不证明相册兼容；默认不转码。
 
 ### 抽帧、裁剪、remux 与显式转码
 
@@ -236,7 +256,7 @@ Linux（Bash/Zsh）：
 | `convert` | `--input`、`--target`、`--output-dir`；可选 `--pair-video`、`--same-target` | 动态照片协议转换 |
 | `extract` | `--input`、`--output-dir`；可选 `--pair-video`、`--resources`、`--raw-carrier` | 原样提取 |
 | `split` | `--input`、`--output-dir`；可选 `--pair-video`、`--strict` | 干净拆分 |
-| `repair` | `--input`；可选 `--pair-video`、`--issues`、`--strict`；写入需 `--apply --output-dir` | 有限安全修复 |
+| `repair` | `--input`；可选 `--pair-video`、`--issues`、`--strict`、`--mode`、`--authority`；写入需 `--apply --output-dir` | 有限安全 metadata 修复或显式重配对 |
 | `set-key` | `--input`、位置、`--output-dir`；可选 `--pair-video`、`--strict` | 修改 key metadata |
 | `extract-frame` | `--input`、位置、`--format`、`--output-dir`；可选 `--pair-video`、`--resource`、`--ffmpeg` | 提取视频帧 |
 | `replace-cover` | `--input`、位置、`--format`、`--output-dir`；可选 `--pair-video`、`--update-key`、`--strict`、`--ffmpeg` | 重建主图 |
@@ -248,7 +268,7 @@ Linux（Bash/Zsh）：
 
 | 参数 | 取值 / 约束 |
 | --- | --- |
-| `--max-bytes N` | 所有命令可用；正整数，默认 `1073741824`（1 GiB），设置 Context 的读取与内存预算，并非只限制输入文件大小 |
+| `--max-bytes N` | 所有命令可用；正整数，默认 `1073741824`（1 GiB），设置 Context 的缓存/materialize 与输出字节预算，不是总内存上限，也并非只限制输入文件大小 |
 | `--layers` | 逗号分隔 `Structure,Protocol,Media`，不加空格 |
 | `--target`、`--profile` | 下节列出的协议 ID / profile；未知组合不会静默回退 |
 | `--output-dir` | 尚不存在的新目录；同一次操作全部资产共同发布到其 `assets/` 子目录 |
@@ -259,6 +279,7 @@ Linux（Bash/Zsh）：
 | `--resources ID,ID` | extract 的资源列表，逗号分隔；默认留空交由 Core 选择 |
 | `--raw-carrier` | extract 额外请求完整 carrier；不代表 Clean |
 | `--issues CODE,CODE` | repair 的问题码过滤；不授权猜测性修复 |
+| repair 的 `--mode` / `--authority` | `SafeMetadataOnly`（默认）、`ExplicitRePair`；`ExplicitRemux` 尚未实现。冲突重配对要求当前选定源的正式 CID evidence ID |
 | `--same-target` | convert：`PreserveAsIs`（默认）或 `Normalize`；Normalize 仍需已实现的 writer |
 | `--start-us`、`--end-us`、`--mode` | trim，以及 create/convert 的复合裁剪；模式 `LosslessPreferred`（默认）、`LosslessOnly`、`Exact` |
 | `--key-outside` | 仅 create/convert 复合裁剪：`Reject`（默认）、`ClampExplicitly`、`ClearIfSupported`；不是独立 trim 的选项 |
@@ -381,6 +402,8 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 ### 最新可核验检查点
 
+本批次 Apple 有限 ExplicitRePair：实际全量构建 **711 tests，0 failures / errors / skips**，包含真实编码 MOV 修复后完整解码；Windows 新便携包全部验收成功，新增空 PATH 两侧权威/两种容器的重配对 smoke。对应提交的 CI 与 Linux 新便携产物仍待核对，不能借用下方历史 CI。
+
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
 - 完整验收 **706 tests，0 failures / errors / skips**；结果对应上述提交，不借用旧报告。
@@ -393,7 +416,7 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 ### 阶段状态一览
 
-状态按**工作包**记录，不按代码量或测试数量推算完成百分比。“已完成”只针对注明的范围；“部分完成”表示已有可用路径，但还存在本节 TODO。当前未在实施新的业务代码，最近几次提交是 README 和上游 CI 配置更新。
+状态按**工作包**记录，不按代码量或测试数量推算完成百分比。“已完成”只针对注明的范围；“部分完成”表示已有可用路径，但还存在本节 TODO。当前在完成有限 ExplicitRePair 的交付验收，新增代码已经实际全量构建测试。
 
 | 阶段 / 工作包 | 当前状态 | 已完成 | 仍未完成 |
 | --- | --- | --- | --- |
@@ -401,8 +424,8 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence | 冲突重配对、Generic/HEIC 写入、更多原片与跨协议路径 |
-| Repair | 部分完成；下一实施工作包 | 有限 SafeMetadataOnly、预览、allowlist、回滚 | ExplicitRePair 尚未开始；ExplicitRemux 未实现 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | Generic/HEIC 写入、更多原片与跨协议路径 |
+| Repair | 部分完成；本批次验收中 | 有限 SafeMetadataOnly；ExplicitRePair 两侧权威、预览、allowlist、回滚、幂等；Windows 便携验收 | 本批次 CI 产物核对；ExplicitRemux 未实现 |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成 | 可选 FFmpeg 有限操作；Windows 系统有限 Probe 解码回退 | 系统媒体编辑、其它 OS 官方 API 适配 |
 | CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
@@ -429,7 +452,7 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 
 | 顺序 | 工作包 | 状态 / 前提 | 交付时应看到的结果 |
 | --- | --- | --- | --- |
-| 1 | Apple 有限 ExplicitRePair | **下一项，未开始**；复用既有 Request 与新鲜 CID 证据 | 用户指定两个源及权威，冲突 ID 不自动选；独立验证后原子发布 |
+| 1 | Apple 有限 ExplicitRePair | **实现与全量测试已通过，交付验收中**；复用既有 Request 与新鲜 CID 证据 | 用户指定两个源及权威，冲突 ID 不自动选；独立验证后原子发布 |
 | 2 | Repair 其它显式模式及 Apple 写入扩展 | 未开始相关剩余路径；先确认 ownership/依赖，重大规范/API 冲突需报告 | 每个 mode/profile 独立标能力；不能凭其它入口已可用推断支持 |
 | 3 | 系统 MediaBackend 扩展 | 未实现系统编辑；逐个平台检查官方 API 与运行时可用性 | 能力查询真实，抽帧/裁剪/remux/transcode 分别验证；无实现则禁用 |
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
@@ -438,18 +461,18 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
 | 当前范围之外 | Compose UI、Android/iOS/Native 入口 | 未来规划，不计入本轮 Core + CLI 交付 | 复用统一 Core/Application API，不提前引入 GUI 依赖 |
 
-### 下一工作包的具体 TODO：ExplicitRePair
+### 当前工作包的具体 TODO：ExplicitRePair
 
-- [ ] 核对 JPEG/HEIC 图片 CID 与 MOV/MP4 CID 的真实字段编码、位置、宽度和 ownership；未知结构不猜测。
-- [ ] 要求显式选定图片和视频，并由本次输入的新鲜 evidence 指定权威；缺失、过期、冲突或未知权威必须拒绝。
-- [ ] 补齐 dryRun 预览及允许问题码过滤；预览零写入，不自动生成 ID 或择一覆盖。
-- [ ] 实现有限 CID 改写与双资产共同原子发布，保留原图编码、视频 sample/configuration/时间线及未授权字段。
-- [ ] 独立检查输出配对与协议、保留报告；覆盖第二资产失败、源变化、预算/取消、篡改回滚、再次执行无变化。
+- [x] 核对有限 JPEG/HEIC 图片 CID 与 MOV/MP4 CID 的真实字段编码、位置、宽度和 ownership；未知结构不猜测。
+- [x] 要求显式选定图片和视频，并由本次输入的新鲜 evidence 指定权威；缺失、过期、冲突或未知权威必须拒绝。
+- [x] 补齐 dryRun 预览及允许问题码过滤；预览零写入，不自动生成 ID 或择一覆盖。
+- [x] 实现有限 CID 改写与双资产共同原子发布，保留原图编码、视频 sample/configuration/时间线及未授权字段。
+- [x] 独立检查输出配对与协议、保留报告；覆盖第二资产失败、源变化、预算/取消、篡改回滚、再次执行无变化；真实编码 MOV 修复后全解码。
 - [ ] 实际构建/测试和 CLI 验收；通过后提交推送、核对 CI artifacts，再更新状态并继续下一工作包。
 
 ### 剩余范围清单
 
-- [ ] **下一项：Apple 有限 ExplicitRePair。** 明确选定和授权两个输入，通过新鲜 CID 证据指定权威；不自动选择冲突 ID，原子输出并独立验证。目前仅证据读取已实现。
+- [ ] **当前验收：Apple 有限 ExplicitRePair。** 实现、711 项全量测试与 Windows 便携验收通过；完成对应 CI/产物核对后封闭本批次。更复杂 MakerNote/private metadata 仍不在此范围。
 - [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。

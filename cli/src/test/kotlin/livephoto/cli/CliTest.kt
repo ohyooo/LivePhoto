@@ -15,6 +15,20 @@ class CliTest {
         assertFalse(json.contains("private-adapter-reference"))
     }
     private val failure = CoreResult.Failure(CoreError(IssueCode("TEST_SENTINEL"), Stage.Plan, "test"))
+    @Test fun explicitRePairForwardsModePairAndAuthorityWithoutProtocolLogic(): Unit = blocking {
+        var received: RepairRequest? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun repair(request: RepairRequest): CoreResult<RepairResult> { received = request; return failure }
+        }
+        assertEquals(3, Cli(core).run(listOf("repair", "--input", "unopened image", "--pair-video", "unopened movie",
+            "--mode", "ExplicitRePair", "--authority", "current-evidence", "--issues", "INVALID_PAIR_IDENTIFIER")) {})
+        val request = assertNotNull(received)
+        assertIs<SourceSet.Pair>(request.input); assertEquals(RepairMode.ExplicitRePair, request.mode)
+        assertEquals(EvidenceId("current-evidence"), request.authority); assertEquals(request.authority, request.policy.authority)
+        assertEquals(ConflictPolicy.ExplicitAuthority, request.policy.conflicts); assertEquals(TranscodePolicy.Forbid, request.policy.transcode)
+        assertTrue(request.dryRun); assertNull(request.output)
+        assertEquals(listOf(IssueCode("INVALID_PAIR_IDENTIFIER")), request.allowedIssueCodes)
+    }
     @Test fun pairKeyCommandsForwardPairAndPositionWithoutInspectingOrOpeningInputs() = blocking {
         var read: ReadRequest? = null; var set: SetKeyRequest? = null
         val core = object : LivePhotoCore by DefaultLivePhotoCore() {

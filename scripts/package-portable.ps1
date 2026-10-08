@@ -146,7 +146,7 @@ try {
     try {
         $env:Path = ''
         $appleHeifInputs = @{}
-        foreach ($name in @('primary-mdat.heic', 'primary-idat.heic', 'motion.mov', 'other.mov', 'key-mov.heic', 'key-mp4.heic', 'key-motion.mov', 'key-motion.mp4')) {
+        foreach ($name in @('primary-mdat.heic', 'primary-idat.heic', 'motion.mov', 'other.mov', 'key-mov.heic', 'key-mp4.heic', 'key-motion.mov', 'key-motion.mp4', 'repair-motion.mov', 'repair-motion.mp4')) {
             $fixture = Join-Path $appleHeifFixtures $name
             if ((Get-FileHash $fixture).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC fixture hash differs.' }
             $outside = Join-Path $verify "Apple HEIC tool-free $name"
@@ -199,6 +199,35 @@ try {
         }
         foreach ($container in @('mov', 'mp4')) {
             $keyImage = $appleHeifInputs["key-$container.heic"]; $keyMovie = $appleHeifInputs["key-motion.$container"]
+            $conflictingMovie = $appleHeifInputs["repair-motion.$container"]
+            foreach ($videoAuthority in @($false, $true)) {
+                $selectedSource = if ($videoAuthority) { $conflictingMovie } else { $keyImage }
+                $authorityJson = & $launcher inspect --input $selectedSource
+                if ($LASTEXITCODE -ne 0) { throw 'Cannot obtain selected source CID evidence.' }
+                $authority = ($authorityJson | ConvertFrom-Json).result.pairing.evidence[0].id.value
+                $repairArgs = @('repair', '--input', $keyImage, '--pair-video', $conflictingMovie, '--mode', 'ExplicitRePair', '--authority', $authority)
+                $previewJson = & $launcher @repairArgs
+                if ($LASTEXITCODE -ne 0) { throw "Re-pair preview failed: $previewJson" }
+                $preview = ($previewJson | ConvertFrom-Json).result
+                if (@($preview.proposedChanges).Count -ne 1 -or @($preview.changesApplied).Count -ne 0 -or $preview.operation) { throw 'Re-pair preview published outputs.' }
+                $repairArgs += @('--apply', '--output-dir', (Join-Path $verify "Apple re-pair $container $videoAuthority"))
+                $repairJson = & $launcher @repairArgs
+                if ($LASTEXITCODE -ne 0) { throw "Portable explicit re-pair failed: $repairJson" }
+                $repair = ($repairJson | ConvertFrom-Json).result
+                $assets = $repair.operation.output.assets
+                if (@($repair.changesApplied).Count -ne 1 -or $assets.Count -ne 2 -or
+                    ($repair.operation.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or
+                    @($repair.operation.preservation.records | Where-Object { $_.guarantee -eq 'MetadataPreserving' -and $_.outcome -eq 'Unknown' }).Count -ne 1) { throw 'Re-pair scope or opaque-association guarantee is incorrect.' }
+                $unchangedIndex = if ($videoAuthority) { 1 } else { 0 }
+                $unchangedSource = if ($videoAuthority) { $conflictingMovie } else { $keyImage }
+                if ((Get-FileHash $assets[$unchangedIndex].path).Hash -ne (Get-FileHash $unchangedSource).Hash) { throw 'Re-pair changed its authoritative asset.' }
+                $jointJson = & $launcher inspect --input $assets[0].path --pair-video $assets[1].path
+                if ($LASTEXITCODE -ne 0 -or -not ($jointJson | ConvertFrom-Json).result.pairing.matches) { throw 'Published re-pair failed independent inspection.' }
+                $repeatJson = & $launcher repair --input $assets[0].path --pair-video $assets[1].path --mode ExplicitRePair
+                if ($LASTEXITCODE -ne 0 -or @((($repeatJson | ConvertFrom-Json).result.proposedChanges)).Count -ne 0) { throw 'Re-pair is not idempotent.' }
+                $originalJson = & $launcher inspect --input $keyImage --pair-video $conflictingMovie
+                if ($LASTEXITCODE -ne 3 -or ($originalJson | ConvertFrom-Json).error.code.value -ne 'INVALID_PAIR_IDENTIFIER') { throw 'Re-pair altered its original mismatched pair.' }
+            }
             $pairBeforeJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
             if ($LASTEXITCODE -ne 0) { throw 'Apple HEIC key fixture inspection failed.' }
             $pairBefore = Get-PairingSemantics (($pairBeforeJson | ConvertFrom-Json).result.pairing)
@@ -245,6 +274,7 @@ try {
     Write-Host 'PORTABLE_APPLE_HEIC_NO_FFMPEG=SUCCESS scope=finite-synthetic-pair-item-graph-byte-exact-not-decode-or-device'
     Write-Host 'PORTABLE_APPLE_HEIC_SETKEY_NO_FFMPEG=SUCCESS scope=classified-mp4-mov-fixed-time-fields-whole-primary-not-image-rewrite-or-device'
     Write-Host 'PORTABLE_APPLE_HEIC_CLEAN_NO_FFMPEG=SUCCESS scope=cid-only-fixed-retirement-and-byte-exact-idempotence-unknown-associations-not-device'
+    Write-Host 'PORTABLE_APPLE_EXPLICIT_REPAIR_NO_FFMPEG=SUCCESS scope=selected-pair-current-cid-authority-fixed-field-atomic-assets-not-capture-or-device-proof'
     if ($IsWindows -and $windowsDecoderAvailable) {
         $windowsFixtures = Join-Path $repository 'core/build/portable-windows-fixtures'
         $fixtureManifest = @{}

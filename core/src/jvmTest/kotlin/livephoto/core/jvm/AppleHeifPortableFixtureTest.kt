@@ -59,6 +59,26 @@ class AppleHeifPortableFixtureTest {
             } finally { cleaned.output.assets.forEach { it.readableSource?.close() } }
             val suffix = if (mov) "mov" else "mp4"
             fixtures["key-$suffix.heic"] = primary; fixtures["key-motion.$suffix"] = motion
+            val videoInspection = core.inspect(ReadRequest(SourceSet.Single(input.video), context)).orThrow()
+            val cidRange = videoInspection.metadata.single { it.selector == APPLE_CID }.location.range!!
+            val mismatched = motion.toByteArray()
+            "11112233-4455-6677-8899-aabbccddeeff".encodeToByteArray().copyInto(mismatched, cidRange.offset.toInt())
+            val selected = SourceSet.Pair(input.image, MemoryBinarySource(Bytes(mismatched), SourceId("repair-motion.$suffix")))
+            assertEquals("INVALID_PAIR_IDENTIFIER", assertIs<CoreResult.Failure>(core.inspect(ReadRequest(selected, context))).error.code.value)
+            for (videoAuthority in listOf(false, true)) {
+                val authority = core.inspect(ReadRequest(SourceSet.Single(if (videoAuthority) selected.video else selected.image), context)).orThrow().pairing!!.evidence.single().id
+                val repaired = core.repair(RepairRequest(selected, RepairMode.ExplicitRePair, authority = authority, dryRun = false,
+                    policy = MutationPolicy(conflicts = ConflictPolicy.ExplicitAuthority, authority = authority),
+                    output = MemoryOutputTransaction(context, "export-repair-$suffix-$videoAuthority"), context = context)).orThrow()
+                try {
+                    assertEquals(1, repaired.changesApplied.size)
+                    val output = repaired.operation!!.output.assets
+                    assertEquals(true, core.inspect(ReadRequest(SourceSet.Pair(output[0].readableSource!!, output[1].readableSource!!), context)).orThrow().pairing!!.matches)
+                    assertEquals(if (videoAuthority) Bytes(mismatched) else primary, read(output[if (videoAuthority) 1 else 0].readableSource!!))
+                } finally { repaired.operation!!.output.assets.forEach { it.readableSource?.close() } }
+            }
+            fixtures["repair-motion.$suffix"] = Bytes(mismatched)
+            selected.video.close()
             input.image.close(); input.video.close()
         }
         val directory = Path.of("build", "portable-apple-heif-fixtures")

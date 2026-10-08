@@ -17,6 +17,7 @@ internal object RepairOperations {
         val fixed: BinarySource? = null, val protocol: ProtocolId = ProtocolIds.GoogleV1,
         val exifProofs: List<ExifPositionIndependenceProof> = emptyList())
     suspend fun repair(request: RepairRequest): CoreResult<RepairResult> = attempt {
+        if (request.mode == RepairMode.ExplicitRePair) return@attempt AppleRepairOperations.repair(request).orThrow()
         val budget = ParseBudget(request.context)
         val source = open(request, budget)
         if (source.heifItems != null) return@attempt GoogleHeicRepairOperations.repair(request, source, budget).orThrow()
@@ -79,6 +80,7 @@ internal object RepairOperations {
     }
 
     suspend fun plan(request: RepairRequest): CoreResult<ExecutionPlan> = attempt {
+        if (request.mode == RepairMode.ExplicitRePair) return@attempt AppleRepairOperations.plan(request).orThrow()
         val budget = ParseBudget(request.context)
         val source = open(request, budget)
         if (source.heifItems != null) return@attempt GoogleHeicRepairOperations.plan(request, source, budget).orThrow()
