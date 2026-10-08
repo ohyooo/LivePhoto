@@ -96,4 +96,69 @@ class AppleHeifPairTest {
             finally { result.output.assets.forEach { it.readableSource?.close() } }
         } finally { created.output.assets.forEach { it.readableSource?.close() } }
     }
+
+    @Test fun itemInventoryAndRawExifStayDistinctFromWholeImageCarrier(): Unit = runImmediate {
+        for (idat in listOf(false, true)) {
+            val input = pair(AppleHeifFixtures.image(idat = idat))
+            val inspection = core.inspect(ReadRequest(input, context)).orThrow()
+            val items = inspection.layout.resources.filter { it.id.value.startsWith("heif:item:") }
+            assertEquals(2, items.size); assertTrue(items.all { !it.standalone && it.kind == ResourceKind.Unknown })
+            val association = inspection.layout.relationships.single { it.kind == RelationshipKind.Describes }
+            assertEquals(ResourceId("heif:item:2"), association.from); assertEquals(ResourceId("heif:item:1"), association.to)
+            assertTrue(inspection.metadata.any { it.selector == "heif:item:2:metadata-format" && it.value == Value.Text("Exif/TIFF") })
+            val exif = items.single { it.id == association.from }.extents.single()
+            assertEquals(SourceId("heic-image"), exif.source)
+            val result = core.extract(ExtractRequest(input, listOf(association.from), output = MemoryOutputTransaction(context, "heic-item-$idat"), context = context)).orThrow()
+            try {
+                val asset = result.output.assets.single()
+                assertEquals(AssetRole.SidecarMetadata, asset.role); assertEquals("application/octet-stream", asset.mime)
+                assertEquals(BinaryReader(input.image, context).readExactly(exif.range.offset, exif.range.length.toUInt()).orThrow(), bytes(asset.readableSource!!))
+            } finally { result.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
+
+    @Test fun candidateOrderNeverResolvesDuplicateIdsAndGuardsUnselectedHeif(): Unit = runImmediate {
+        val unrelated = TestSource(AppleHeifFixtures.image("11112233-4455-6677-8899-aabbccddeeff"))
+        val inputs = listOf(source(AppleHeifFixtures.image(), "selected-image"), source(AppleFixtures.movie(), "selected-video"), unrelated)
+        for (ordered in listOf(inputs, inputs.reversed())) {
+            val inspection = core.inspect(ReadRequest(SourceSet.Candidates(ordered), context)).orThrow()
+            assertEquals(true, inspection.pairing?.matches); assertEquals(3, inspection.snapshot.identities.size)
+        }
+        for (ordered in listOf(inputs + source(AppleHeifFixtures.image(), "duplicate"), (inputs + source(AppleFixtures.movie(), "duplicate-video")).reversed())) {
+            assertEquals("AMBIGUOUS_PAIR", assertIs<CoreResult.Failure>(core.inspect(ReadRequest(SourceSet.Candidates(ordered), context))).error.code.value)
+        }
+        val transaction = MemoryOutputTransaction(context, "heif-candidate-changed")
+        val output = object : OutputTransaction by transaction {
+            override suspend fun prepare(): CoreResult<Unit> {
+                unrelated.currentIdentity = unrelated.currentIdentity.copy(generation = GenerationToken("changed"))
+                return transaction.prepare()
+            }
+        }
+        assertEquals("SOURCE_CHANGED", assertIs<CoreResult.Failure>(core.extract(ExtractRequest(SourceSet.Candidates(inputs), emptyList(), output = output, context = context))).error.code.value)
+        assertEquals(TransactionState.Aborted, transaction.query().orThrow().state)
+        assertTrue(transaction.committedAssets().isEmpty()); assertFalse(unrelated.closed)
+    }
+
+    @Test fun secondAssetFailureAbortsHeicPairForExtractSplitAndSameTarget(): Unit = runImmediate {
+        for (mode in 0..2) {
+            val input = pair(); val imageBefore = bytes(input.image); val movieBefore = bytes(input.video)
+            val transaction = MemoryOutputTransaction(context, "heif-second-failure-$mode")
+            var created = 0
+            val output = object : OutputTransaction by transaction {
+                override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> {
+                    if (++created == 2) return CoreResult.Failure(CoreError(IssueCode("IO_WRITE_FAILED"), Stage.WriteProtocol, "Synthetic second asset failure"))
+                    return transaction.create(spec)
+                }
+            }
+            val result = when (mode) {
+                0 -> core.extract(ExtractRequest(input, emptyList(), output = output, context = context))
+                1 -> core.split(SplitRequest(input, SplitMode.Raw, strict, output, context))
+                else -> core.convert(ConvertRequest(input, target, policy = strict, output = output, context = context))
+            }
+            assertEquals("IO_WRITE_FAILED", assertIs<CoreResult.Failure>(result).error.code.value)
+            assertEquals(2, created); assertEquals(TransactionState.Aborted, transaction.query().orThrow().state)
+            assertTrue(transaction.committedAssets().isEmpty())
+            assertEquals(imageBefore, bytes(input.image)); assertEquals(movieBefore, bytes(input.video))
+        }
+    }
 }

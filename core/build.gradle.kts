@@ -19,4 +19,5 @@ kotlin {
 tasks.named<Test>("jvmTest") {
     outputs.dir(layout.buildDirectory.dir("portable-heic-fixtures"))
     outputs.dir(layout.buildDirectory.dir("portable-windows-fixtures"))
+    outputs.dir(layout.buildDirectory.dir("portable-apple-heif-fixtures"))
 }

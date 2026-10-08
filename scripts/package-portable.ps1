@@ -126,6 +126,70 @@ try {
         }
     } finally { $env:Path = $neutralSearchPath }
     Write-Host 'PORTABLE_NEUTRAL_MOVIE_NO_FFMPEG=SUCCESS scope=synthetic-avc-aac-framing-file-exact-idempotence-not-decode-or-device'
+    # Apple HEIC reads are a finite structural profile, independent of media tools or camera evidence.
+    $appleHeifFixtures = Join-Path $repository 'core/build/portable-apple-heif-fixtures'
+    $appleHeifManifest = @{}
+    foreach ($line in Get-Content (Join-Path $appleHeifFixtures 'manifest.txt')) {
+        $parts = $line.Split('=', 2); if ($parts.Count -eq 2) { $appleHeifManifest[$parts[0]] = $parts[1] }
+    }
+    if ($appleHeifManifest['scope'] -ne 'synthetic-apple-heif-pair-framing-not-decoder-or-device-proof' -or -not $appleHeifManifest['runId']) {
+        throw 'Apple HEIC fixture provenance is missing.'
+    }
+    $appleHeifPath = $env:Path
+    try {
+        $env:Path = ''
+        $appleHeifInputs = @{}
+        foreach ($name in @('primary-mdat.heic', 'primary-idat.heic', 'motion.mov', 'other.mov')) {
+            $fixture = Join-Path $appleHeifFixtures $name
+            if ((Get-FileHash $fixture).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC fixture hash differs.' }
+            $outside = Join-Path $verify "Apple HEIC tool-free $name"
+            [IO.File]::Copy($fixture, $outside, $false); $appleHeifInputs[$name] = $outside
+        }
+        $movie = $appleHeifInputs['motion.mov']
+        foreach ($name in @('primary-mdat.heic', 'primary-idat.heic')) {
+            $image = $appleHeifInputs[$name]
+            $inspectJson = & $launcher inspect --input $image --pair-video $movie
+            if ($LASTEXITCODE -ne 0) { throw "Portable Apple HEIC inspect failed: $inspectJson" }
+            $inspection = ($inspectJson | ConvertFrom-Json).result
+            if ($inspection.detection.disposition -ne 'Live' -or $inspection.detection.primaryProtocol.profile.value -ne 'heic-mov' -or
+                -not $inspection.pairing.matches -or $inspection.media[0].mime -ne 'image/heic' -or
+                @($inspection.layout.relationships | Where-Object kind -eq 'Describes').Count -ne 1 -or
+                @($inspection.layout.resources | Where-Object { -not $_.standalone }).Count -ne 2) { throw 'Apple HEIC item/pair scope was not inspected.' }
+            $keyJson = & $launcher get-key --input $image --pair-video $movie
+            if ($LASTEXITCODE -ne 0 -or ($keyJson | ConvertFrom-Json).result.position.value -ne '30' -or
+                ($keyJson | ConvertFrom-Json).result.position.timescale -ne 25) { throw 'Apple HEIC key confused payload zero with sample PTS.' }
+            $validateJson = & $launcher validate --input $image --pair-video $movie --layers Structure,Protocol
+            if ($LASTEXITCODE -ne 0) { throw "Apple HEIC pair validation failed: $validateJson" }
+            $validation = ($validateJson | ConvertFrom-Json).result
+            if ($validation.verdict -ne 'Warning' -or $validation.coverage -ne 'Partial' -or
+                @($validation.checks | Where-Object { $_.layer -eq 'Protocol' -and ($_.verdict -ne 'Valid' -or $_.coverage -ne 'Complete') }).Count -ne 0 -or
+                @($validation.checks | Where-Object { $_.id -eq 'heif.metadata' -and $_.coverage -eq 'Partial' }).Count -ne 1) {
+                throw 'Apple HEIC structural validation must retain partial generic metadata coverage, not claim complete media/device proof.'
+            }
+            $singleJson = & $launcher inspect --input $image
+            if ($LASTEXITCODE -ne 0 -or ($singleJson | ConvertFrom-Json).result.detection.disposition -ne 'Candidate' -or
+                ($singleJson | ConvertFrom-Json).result.pairing.matches) { throw 'A single HEIC CID must not claim a complete pair.' }
+            foreach ($operation in @('extract', 'convert')) {
+                $arguments = @($operation, '--input', $image, '--pair-video', $movie, '--output-dir', (Join-Path $verify "Apple HEIC $operation $name"))
+                if ($operation -eq 'convert') { $arguments += @('--target', 'apple.livephoto', '--profile', 'heic-mov', '--strict') }
+                $resultJson = & $launcher @arguments
+                if ($LASTEXITCODE -ne 0) { throw "Apple HEIC $operation failed: $resultJson" }
+                $result = ($resultJson | ConvertFrom-Json).result
+                if ($result.output.assets.Count -ne 2 -or $result.output.assets[0].role -ne 'PrimaryImage' -or $result.output.assets[0].mime -ne 'image/heic' -or
+                    $result.output.assets[1].role -ne 'MotionVideo' -or $result.output.assets[1].videoContainer -ne 'Mov' -or
+                    ($result.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or @($result.preservation.changes).Count -ne 0 -or
+                    ($result.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) { throw 'Apple HEIC raw pair did not preserve both whole assets.' }
+                if ((Get-FileHash $result.output.assets[0].path).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name] -or
+                    (Get-FileHash $result.output.assets[1].path).Hash.ToLowerInvariant() -ne $appleHeifManifest['motion.mov']) { throw 'Apple HEIC output was not byte-identical.' }
+            }
+            $badJson = & $launcher inspect --input $image --pair-video $appleHeifInputs['other.mov']
+            if ($LASTEXITCODE -ne 3 -or ($badJson | ConvertFrom-Json).error.code.value -ne 'INVALID_PAIR_IDENTIFIER') { throw 'Apple HEIC ID mismatch was silently repaired.' }
+        }
+        foreach ($name in $appleHeifInputs.Keys) {
+            if ((Get-FileHash $appleHeifInputs[$name]).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC borrowed input changed.' }
+        }
+    } finally { $env:Path = $appleHeifPath }
+    Write-Host 'PORTABLE_APPLE_HEIC_NO_FFMPEG=SUCCESS scope=finite-synthetic-pair-item-graph-byte-exact-not-decode-or-device'
     if ($IsWindows -and $windowsDecoderAvailable) {
         $windowsFixtures = Join-Path $repository 'core/build/portable-windows-fixtures'
         $fixtureManifest = @{}
@@ -578,7 +642,8 @@ try {
         $vendorValidation = & $launcher validate --input $vendorPath --layers Structure,Protocol
         if ($LASTEXITCODE -ne 0) { throw "Portable vendor validation failed: $vendorValidation" }
         $vendorVideoJson = & $launcher extract --input $vendorPath --output-dir (Join-Path $verify "vendor extracted $vendorTarget")
-        if ($LASTEXITCODE -ne 0 -or (Get-FileHash $referenceVideo).Hash -ne (Get-FileHash ($vendorVideoJson | ConvertFrom-Json).result.output.assets[0].path).Hash) { throw 'Vendor Convert changed original reference video.' }
+        if ($LASTEXITCODE -ne 0) { throw "Vendor video extraction failed ($vendorTarget): $vendorVideoJson" }
+        if ((Get-FileHash $referenceVideo).Hash -ne (Get-FileHash ($vendorVideoJson | ConvertFrom-Json).result.output.assets[0].path).Hash) { throw 'Vendor Convert changed original reference video.' }
         $vendorBackJson = & $launcher convert --input $vendorPath --target google.motionphoto.v2 --output-dir (Join-Path $verify "vendor back $vendorTarget")
         if ($LASTEXITCODE -ne 0) { throw "Portable vendor-to-Google conversion failed: $vendorBackJson" }
         $vendorBack = ($vendorBackJson | ConvertFrom-Json).result

@@ -71,10 +71,14 @@ internal object ApplePairSession {
             image?.let { MetadataEntry("apple:image:content-identifier", value = Value.Text(it.id.value), owner = Ownership.SourceProtocol, location = Location(source = it.reader.identity().orThrow().id, range = it.id.range), origin = FactOrigin.Parsed) },
             video?.let { MetadataEntry(APPLE_CID, value = Value.Text(it.id.value), owner = Ownership.SourceProtocol, location = Location(source = it.reader.identity().orThrow().id, range = it.id.range), origin = FactOrigin.Parsed) })
         val facts = listOfNotNull(image?.let { it.heif?.media ?: jpegFacts(it.reader, it.jpeg!!) }, media?.let(::videoFacts))
+        val heif = image?.heif?.let { inspectHeifItems(image.reader, it.graph, budget) }
         val inspection = InspectionResult(snapshot, detection,
-            Layout(snapshot.identities, regions.toList(), regions.map { Resource(it.id, it.kind, listOf(it), true) },
-                if (pair == null) emptyList() else listOf(Relationship(RelationshipKind.PairedWith, ResourceId("primary"), videoId(ProtocolIds.Apple)))),
-            facts, metadata, key, PairingFacts(image?.id?.value, video?.id?.value, pair != null), issues.toList())
+            Layout(snapshot.identities, regions.toList() + (heif?.regions ?: emptyList()),
+                regions.map { Resource(it.id, it.kind, listOf(it), true) } + (heif?.resources ?: emptyList()),
+                (if (pair == null) emptyList() else listOf(Relationship(RelationshipKind.PairedWith, ResourceId("primary"), videoId(ProtocolIds.Apple)))) +
+                    (heif?.relationships ?: emptyList())),
+            facts, metadata + (heif?.metadata ?: emptyList()), key, PairingFacts(image?.id?.value, video?.id?.value, pair != null),
+            issues.toList() + (heif?.issues ?: emptyList()))
         val binding = CarrierBinding(ProtocolIds.Apple, video?.let { ByteRange(0uL, it.reader.identity().orThrow().size) }, key = key, issues = issues.toList(), profile = ProfileId(profile))
         for (reader in readers) reader.validateIdentity().orThrow()
         SourceSession(readers, snapshot, image?.jpeg, image?.jpeg?.let { XmpReader.readJpeg(image.reader, it, budget).orThrow() }, listOf(binding),
