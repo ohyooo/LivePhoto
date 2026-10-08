@@ -65,7 +65,9 @@ internal object ApplePairSession {
         if (image != null) regions += Region(ResourceId("primary"), image.reader.identity().orThrow().id, ByteRange(0uL, image.reader.identity().orThrow().size), ResourceKind.PrimaryImage, ProtocolIds.Apple)
         if (video != null) regions += Region(videoId(ProtocolIds.Apple), video.reader.identity().orThrow().id, ByteRange(0uL, video.reader.identity().orThrow().size), ResourceKind.Video, ProtocolIds.Apple)
         val complete = pair != null && media != null
-        val match = Match(selector, if (complete) MatchStrength.Strong else MatchStrength.Weak, issues = issues.toList(), resourceIds = regions.map { it.id })
+        val evidence = frozenList(listOfNotNull(image?.let { AppleCidEvidence.parsed(it.reader, "image", it.id.value, it.id.range, budget) },
+            video?.let { AppleCidEvidence.parsed(it.reader, "video", it.id.value, it.id.range, budget) }))
+        val match = Match(selector, if (complete) MatchStrength.Strong else MatchStrength.Weak, evidence = evidence, issues = issues.toList(), resourceIds = regions.map { it.id })
         val detection = DetectionResult(if (complete) Disposition.Live else Disposition.Candidate, selector, listOf(match), issues.toList(), snapshot)
         val metadata = listOfNotNull(
             image?.let { MetadataEntry("apple:image:content-identifier", value = Value.Text(it.id.value), owner = Ownership.SourceProtocol, location = Location(source = it.reader.identity().orThrow().id, range = it.id.range), origin = FactOrigin.Parsed) },
@@ -77,7 +79,7 @@ internal object ApplePairSession {
                 regions.map { Resource(it.id, it.kind, listOf(it), true) } + (heif?.resources ?: emptyList()),
                 (if (pair == null) emptyList() else listOf(Relationship(RelationshipKind.PairedWith, ResourceId("primary"), videoId(ProtocolIds.Apple)))) +
                     (heif?.relationships ?: emptyList())),
-            facts, metadata + (heif?.metadata ?: emptyList()), key, PairingFacts(image?.id?.value, video?.id?.value, pair != null),
+            facts, metadata + (heif?.metadata ?: emptyList()), key, PairingFacts(image?.id?.value, video?.id?.value, pair != null, evidence),
             issues.toList() + (heif?.issues ?: emptyList()))
         val binding = CarrierBinding(ProtocolIds.Apple, video?.let { ByteRange(0uL, it.reader.identity().orThrow().size) }, key = key, issues = issues.toList(), profile = ProfileId(profile))
         for (reader in readers) reader.validateIdentity().orThrow()

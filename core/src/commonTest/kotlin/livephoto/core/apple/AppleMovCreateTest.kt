@@ -70,7 +70,7 @@ class AppleMovCreateTest {
             assertEquals(VideoContainer.Mov, result.output.assets[1].videoContainer)
             current = SourceSet.Pair(result.output.assets[0].readableSource!!, result.output.assets[1].readableSource!!)
             val inspected = core.inspect(ReadRequest(current, context)).orThrow()
-            assertEquals(pairingBefore, inspected.pairing)
+            assertEquals(pairingBefore?.copy(evidence = emptyList()), inspected.pairing?.copy(evidence = emptyList()))
             assertEquals(0, inspected.keyPhoto.position!!.compareTo(Time(index.toLong() * 40L, 1000u)))
             assertEquals(imageBefore, bytes(current.image))
         }

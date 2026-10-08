@@ -7,6 +7,13 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $repository = (Get-Location).Path
+function Get-PairingSemantics($pairing) {
+    if (-not $pairing -or -not $pairing.matches -or -not $pairing.imageIdentifier -or -not $pairing.videoIdentifier) {
+        throw 'A complete parsed pair is required for semantic CID comparison.'
+    }
+    # Inspection evidence is source/generation-bound and must change when assets are published.
+    $pairing | Select-Object imageIdentifier, videoIdentifier, matches | ConvertTo-Json -Compress
+}
 if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME/bin/jpackage$(if ($IsWindows) { '.exe' })")) {
     throw 'An existing JDK 25 with jpackage is required. This script never installs Java.'
 }
@@ -155,6 +162,10 @@ try {
                 -not $inspection.pairing.matches -or $inspection.media[0].mime -ne 'image/heic' -or
                 @($inspection.layout.relationships | Where-Object kind -eq 'Describes').Count -ne 1 -or
                 @($inspection.layout.resources | Where-Object { -not $_.standalone }).Count -ne 2) { throw 'Apple HEIC item/pair scope was not inspected.' }
+            $cidEvidence = $inspection.pairing.evidence
+            if ($cidEvidence.Count -ne 2 -or ($cidEvidence | Where-Object kind -ne 'Inspection') -or
+                $cidEvidence[0].id.value -notmatch '^apple:cid:image:[0-9a-f]{64}$' -or
+                $cidEvidence[1].id.value -notmatch '^apple:cid:video:[0-9a-f]{64}$') { throw 'Apple CID evidence must be formal, role-bound inspection rather than capture/device proof.' }
             $keyJson = & $launcher get-key --input $image --pair-video $movie
             if ($LASTEXITCODE -ne 0 -or ($keyJson | ConvertFrom-Json).result.position.value -ne '30' -or
                 ($keyJson | ConvertFrom-Json).result.position.timescale -ne 25) { throw 'Apple HEIC key confused payload zero with sample PTS.' }
@@ -169,6 +180,7 @@ try {
             $singleJson = & $launcher inspect --input $image
             if ($LASTEXITCODE -ne 0 -or ($singleJson | ConvertFrom-Json).result.detection.disposition -ne 'Candidate' -or
                 ($singleJson | ConvertFrom-Json).result.pairing.matches) { throw 'A single HEIC CID must not claim a complete pair.' }
+            if (($singleJson | ConvertFrom-Json).result.pairing.evidence[0].id.value -ne $cidEvidence[0].id.value) { throw 'Apple CID evidence is not stable for the same file generation across CLI invocations.' }
             foreach ($operation in @('extract', 'convert')) {
                 $arguments = @($operation, '--input', $image, '--pair-video', $movie, '--output-dir', (Join-Path $verify "Apple HEIC $operation $name"))
                 if ($operation -eq 'convert') { $arguments += @('--target', 'apple.livephoto', '--profile', 'heic-mov', '--strict') }
@@ -189,7 +201,7 @@ try {
             $keyImage = $appleHeifInputs["key-$container.heic"]; $keyMovie = $appleHeifInputs["key-motion.$container"]
             $pairBeforeJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
             if ($LASTEXITCODE -ne 0) { throw 'Apple HEIC key fixture inspection failed.' }
-            $pairBefore = ($pairBeforeJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 10 -Compress
+            $pairBefore = Get-PairingSemantics (($pairBeforeJson | ConvertFrom-Json).result.pairing)
             foreach ($index in @(1, 0)) {
                 $keyJson = & $launcher set-key --input $keyImage --pair-video $keyMovie --frame-index $index --strict --output-dir (Join-Path $verify "Apple HEIC key $container $index")
                 if ($LASTEXITCODE -ne 0) { throw "Portable Apple HEIC SetKey failed: $keyJson" }
@@ -205,7 +217,7 @@ try {
                 $position = ($readKeyJson | ConvertFrom-Json).result.position
                 if (([decimal]$position.value * 1000000 / $position.timescale) -ne ($index * 40000)) { throw 'Apple HEIC key presentation position differs.' }
                 $pairAfterJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
-                if ($LASTEXITCODE -ne 0 -or (($pairAfterJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 10 -Compress) -ne $pairBefore) { throw 'Apple HEIC SetKey changed CID pairing.' }
+                if ($LASTEXITCODE -ne 0 -or (Get-PairingSemantics (($pairAfterJson | ConvertFrom-Json).result.pairing)) -ne $pairBefore) { throw 'Apple HEIC SetKey changed CID pairing.' }
             }
             if ((Get-FileHash $keyMovie).Hash.ToLowerInvariant() -ne $appleHeifManifest["key-motion.$container"]) { throw 'Apple HEIC key zero roundtrip did not restore every movie byte.' }
             $cleanJson = & $launcher split --input $keyImage --pair-video $keyMovie --output-dir (Join-Path $verify "Apple HEIC clean $container")
@@ -435,7 +447,7 @@ try {
             $directMovieHash = (Get-FileHash $directMovie).Hash
             $directInspectJson = & $launcher inspect --input $directImage --pair-video $directMovie
             if ($LASTEXITCODE -ne 0) { throw 'Portable Apple Create independent inspect failed.' }
-            $directPairing = ($directInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress
+            $directPairing = Get-PairingSemantics (($directInspectJson | ConvertFrom-Json).result.pairing)
             $keyImage = $directImage; $keyMovie = $directMovie
             foreach ($keyIndex in @(1, 0)) {
                 $setJson = & $launcher set-key --input $keyImage --pair-video $keyMovie --frame-index $keyIndex --strict --output-dir (Join-Path $verify "Apple key $appleIndex $keyIndex")
@@ -450,7 +462,7 @@ try {
                 $keyPosition = ($keyJson | ConvertFrom-Json).result.position
                 if (-not $keyPosition -or ([decimal]$keyPosition.value * 1000000 / $keyPosition.timescale) -ne ($keyIndex * 40000)) { throw 'Portable Apple SetKey lost the requested exact presentation time.' }
                 $keyInspectJson = & $launcher inspect --input $keyImage --pair-video $keyMovie
-                if ($LASTEXITCODE -ne 0 -or (($keyInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress) -ne $directPairing) { throw 'Portable Apple SetKey changed pair CID or matching facts.' }
+                if ($LASTEXITCODE -ne 0 -or (Get-PairingSemantics (($keyInspectJson | ConvertFrom-Json).result.pairing)) -ne $directPairing) { throw 'Portable Apple SetKey changed pair CID or matching facts.' }
                 $keyValidateJson = & $launcher validate --input $keyImage --pair-video $keyMovie --layers Structure,Protocol
                 if ($LASTEXITCODE -ne 0 -or ($keyValidateJson | ConvertFrom-Json).result.verdict -ne 'Valid' -or ($keyValidateJson | ConvertFrom-Json).result.coverage -ne 'Complete') { throw 'Portable Apple SetKey pair failed complete independent validation.' }
                 & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $keyMovie -map 0:v -map '0:a?' -sn -dn -f null -
@@ -473,7 +485,7 @@ try {
         $movImageHash = (Get-FileHash $movImage).Hash; $movMovieHash = (Get-FileHash $movMovie).Hash
         $movInspectJson = & $launcher inspect --input $movImage --pair-video $movMovie
         if ($LASTEXITCODE -ne 0) { throw 'Portable Apple MOV initial pair inspect failed.' }
-        $movPairing = ($movInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress
+        $movPairing = Get-PairingSemantics (($movInspectJson | ConvertFrom-Json).result.pairing)
         foreach ($keyIndex in @(1, 0)) {
             $movSetJson = & $launcher set-key --input $movImage --pair-video $movMovie --frame-index $keyIndex --strict --output-dir (Join-Path $verify "Apple MOV key $keyIndex")
             if ($LASTEXITCODE -ne 0) { throw "Portable Apple MOV SetKey failed: $movSetJson" }
@@ -487,7 +499,7 @@ try {
             $movPosition = ($movKeyJson | ConvertFrom-Json).result.position
             if (-not $movPosition -or ([decimal]$movPosition.value * 1000000 / $movPosition.timescale) -ne ($keyIndex * 40000)) { throw 'Portable Apple MOV key PTS is not exact.' }
             $movInspectJson = & $launcher inspect --input $movImage --pair-video $movMovie
-            if ($LASTEXITCODE -ne 0 -or (($movInspectJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 20 -Compress) -ne $movPairing -or (Get-FileHash $movImage).Hash -ne $movImageHash) { throw 'Portable Apple MOV SetKey changed the original primary or CID.' }
+            if ($LASTEXITCODE -ne 0 -or (Get-PairingSemantics (($movInspectJson | ConvertFrom-Json).result.pairing)) -ne $movPairing -or (Get-FileHash $movImage).Hash -ne $movImageHash) { throw 'Portable Apple MOV SetKey changed the original primary or CID.' }
             $movValidateJson = & $launcher validate --input $movImage --pair-video $movMovie --layers Structure,Protocol
             if ($LASTEXITCODE -ne 0 -or ($movValidateJson | ConvertFrom-Json).result.verdict -ne 'Valid' -or ($movValidateJson | ConvertFrom-Json).result.coverage -ne 'Complete') { throw 'Portable Apple MOV pair validation failed.' }
             & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $movMovie -map 0:v -map '0:a?' -sn -dn -f null -

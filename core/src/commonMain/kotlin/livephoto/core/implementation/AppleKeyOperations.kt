@@ -99,7 +99,9 @@ internal object AppleKeyOperations {
                     val validationComplete = if (session.heifItems == null) report.verdict == Verdict.Valid && report.coverage == Coverage.Complete
                         else required.all { check -> report.checks.singleOrNull { it.id == check }?.let { it.verdict == Verdict.Valid && it.coverage == Coverage.Complete } == true } &&
                             report.issues.none { it.severity == Severity.Error }
-                    if (!validationComplete || staged.inspection.detection.primaryProtocol != session.inspection.detection.primaryProtocol || staged.inspection.pairing != session.inspection.pairing ||
+                    // Evidence belongs to the staged source generation, not the old source's address/identity.
+                    if (!validationComplete || staged.inspection.detection.primaryProtocol != session.inspection.detection.primaryProtocol ||
+                        staged.inspection.pairing?.copy(evidence = emptyList()) != session.inspection.pairing?.copy(evidence = emptyList()) ||
                         staged.inspection.keyPhoto.position?.compareTo(prepared.key) != 0 ||
                         staged.videos[ProtocolIds.Apple] == null ||
                         staged.videos[ProtocolIds.Apple]?.tracks?.filter { it.handler != "meta" } != session.videos[ProtocolIds.Apple]?.tracks?.filter { it.handler != "meta" })

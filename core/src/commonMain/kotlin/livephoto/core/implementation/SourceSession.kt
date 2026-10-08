@@ -129,6 +129,7 @@ internal class SourceSession internal constructor(
             }
             val comments = exifComments.flatMap { it.comments }
             val appleIdentifier = AppleImageReader.read(reader, jpeg, budget, exifComments.map { it.document }).orThrow()
+            val appleEvidence = frozenList(listOfNotNull(appleIdentifier?.let { AppleCidEvidence.parsed(reader, "image", it.value, it.range, budget) }))
             val apple = appleIdentifier?.let { CarrierBinding(ProtocolIds.Apple, profile = ProfileId("jpeg-mov"),
                 issues = listOf(Issue(IssueCode("PAIR_ASSET_MISSING"), Severity.Error, Layer.Protocol))) }
             val comment = if (comments.size == 1) comments.single().text else null
@@ -199,6 +200,7 @@ internal class SourceSession internal constructor(
             }
             val matches = bindings.map { binding -> Match(binding.selector,
                 if (binding.protocol == ProtocolIds.Fusion && binding.structurallyValid && binding.protocol in videos) MatchStrength.Legacy else if (binding.protocol == ProtocolIds.Samsung && sef?.legacyDialect == true && binding.protocol in videos) MatchStrength.Legacy else if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
+                evidence = if (binding.protocol == ProtocolIds.Apple) appleEvidence else emptyList(),
                 issues = binding.issues, resourceIds = if (binding.video != null) listOf(videoId(binding.protocol)) else emptyList()) }
             val strong = matches.filter { it.strength == MatchStrength.Strong }
             val conflicting = strong.mapNotNull { match -> bindings.first { it.selector == match.target }.video }.distinct().size > 1 ||
@@ -325,7 +327,7 @@ internal class SourceSession internal constructor(
             if (appleIdentifier != null) metadata += MetadataEntry("apple:image:content-identifier", value = Value.Text(appleIdentifier.value), owner = Ownership.SourceProtocol,
                 location = Location(source = identity.id, range = appleIdentifier.range), origin = FactOrigin.Parsed)
             val inspection = InspectionResult(snapshot, detection, Layout(identities, frozenList(regions), frozenList(shared), frozenList(relationships)), frozenList(media), frozenList(metadata), key,
-                pairing = appleIdentifier?.let { PairingFacts(imageIdentifier = it.value, matches = false) }, issues = frozenList(issues))
+                pairing = appleIdentifier?.let { PairingFacts(imageIdentifier = it.value, matches = false, evidence = appleEvidence) }, issues = frozenList(issues))
             SourceSession(readers, snapshot, jpeg, xmp, bindings, videos.toMap(), inspection, frozenList(exifComments), sef, frozenList(gainMaps), huaweiTail)
         }
     }

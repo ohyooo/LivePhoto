@@ -34,7 +34,7 @@ class AppleKeyTest {
             assertEquals(originalImage, bytes(edited.image))
             assertEquals(originalMovie.size, bytes(edited.video).size)
             val after = core.inspect(ReadRequest(edited, context)).orThrow()
-            assertEquals(before.pairing, after.pairing)
+            assertEquals(before.pairing?.copy(evidence = emptyList()), after.pairing?.copy(evidence = emptyList()))
             assertEquals(0, after.keyPhoto.position!!.compareTo(Time(40, 1000u)))
             assertEquals("0", (after.keyPhoto.rawFields.single().rawValue as Value.Number).decimal) // Marker payload remains zero.
             val original = BinaryReader(input.video, context); val changed = BinaryReader(edited.video, context)

@@ -59,7 +59,7 @@ class AppleHeifKeyTest {
             val changed = core.setKeyPhotoPosition(request).orThrow()
             val edited = SourceSet.Pair(changed.output.assets[0].readableSource!!, changed.output.assets[1].readableSource!!)
             val after = core.inspect(ReadRequest(edited, context)).orThrow()
-            assertEquals(before.pairing, after.pairing); assertEquals(before.detection.primaryProtocol, after.detection.primaryProtocol)
+            assertEquals(before.pairing?.copy(evidence = emptyList()), after.pairing?.copy(evidence = emptyList())); assertEquals(before.detection.primaryProtocol, after.detection.primaryProtocol)
             assertEquals(0, after.keyPhoto.position!!.compareTo(Time(40, 1000u)))
             assertEquals(imageBefore, bytes(edited.image)); assertEquals("image/heic", changed.output.assets[0].mime)
             assertEquals(ImageFormat.Heic, changed.output.assets[0].imageFormat)
