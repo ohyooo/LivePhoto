@@ -1,0 +1,60 @@
+name: Update Gradle Wrapper
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-gradle-wrapper
+  cancel-in-progress: false
+
+jobs:
+  update-gradle-wrapper:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup JDK
+        uses: actions/setup-java@main
+        with:
+          distribution: 'zulu'
+          java-version: '25'
+          java-package: jdk
+          cache: 'gradle'
+
+      - name: Update Gradle Wrapper
+        uses: gradle-update/update-gradle-wrapper-action@main
+        with:
+          repo-token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
+
+      - name: Merge Gradle Wrapper PR
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_PAT }}
+        run: |
+          set -euo pipefail
+
+          pr_number=$(gh pr list \
+            --state open \
+            --limit 100 \
+            --json number,headRefName \
+            --jq '[.[] | select(.headRefName | startswith("gradlew-update-"))] | sort_by(.number) | last | .number // empty')
+
+          if [ -z "$pr_number" ]; then
+            echo "No Gradle Wrapper PR found."
+            exit 0
+          fi
+
+          echo "Merging Gradle Wrapper PR #$pr_number"
+
+          gh pr merge "$pr_number" \
+            --squash \
+            --delete-branch
