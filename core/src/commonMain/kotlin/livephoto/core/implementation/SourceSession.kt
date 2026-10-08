@@ -68,6 +68,8 @@ internal class SourceSession internal constructor(
             }
             val reader = readers.single()
             val identity = identities.single()
+            // This finite compound carrier is not one whole-file BMFF envelope. Keep generic detection strict.
+            HuaweiHeicSession.open(reader, snapshot, budget, probeEmbeddedVideo).orThrow()?.let { return@attempt it }
             val content = detectContent(reader).orThrow()
             if (content.kind != ContentKind.Jpeg) {
                 if (content.kind == ContentKind.IsoBmff && BmffBrandHint.Heic !in content.brandHints) {

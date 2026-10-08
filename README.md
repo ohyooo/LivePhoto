@@ -376,7 +376,7 @@ reference 测试使用仓库中的 `reference/video.jpg`、`reference/video.mp4`
 
 协议兼容回归包含 **12 个单文件组合及 3 组配对，共 18 个资产**。`core/src/jvmTest/resources/protocol-compatibility/v1/` 保存无损字节差分、完整 SHA-256 和资产清单；测试还原并校验整文件，再检查多重匹配、非规范字段与原样视频提取。差分只引用参考视频或其它已校验资产中完全相同的字节，不重写协议字段。包含 **16 个回归测试**，无需网络或额外工具运行，不增加产品运行时依赖。
 
-这些样本也用于暴露差异，不强行期待全为 Valid：Google V2 的 secondary `Padding=0`、Samsung 旧式 SEF footer 必须明确报告；Huawei HEIC + trailer 和部分 MOV 仍有当前 Core 解析范围缺口。部分 Apple 样本将 MakerNote 放在 IFD0，本 Core 当前只授权正式 ExifIFD；vivo 旧式配对存在 sample/header duration 边界，需要继续核查。文件名中的 `H.265` 不是实际 codec 证明。样本不代表真实设备相册兼容。
+这些样本也用于暴露差异，不强行期待全为 Valid：Google V2 的 secondary `Padding=0`、Samsung 旧式 SEF footer 必须明确报告。Huawei HEIC + 固定尾标现可有界读取并原样提取视频，图像 item graph 与视频范围分别验证，仍为 Partial/Candidate，不授权 HEIC 写入；部分 MOV 仍有解析范围缺口。部分 Apple 样本将 MakerNote 放在 IFD0，本 Core 当前只授权正式 ExifIFD；vivo 旧式配对存在 sample/header duration 边界，需要继续核查。文件名中的 `H.265` 不是实际 codec 证明。样本不代表真实设备相册兼容。
 
 ### 打包 Windows 便携应用
 
@@ -413,6 +413,8 @@ Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/Li
 Windows 有限 MOV 系统 Probe 扩展：[`91cec67`](https://github.com/ohyooo/LivePhoto/commit/91cec677bb13f8df74c31e851e29a133a5f7954e) 实际全量 **714 tests，0 failures / errors / skips**，包含 B 帧/VFR、音轨拒绝，以及现有 FFmpeg 明确封装 MOV 后只用系统后端完整解码。人工 qt brand fixture 仅为合成容器结构＋真实 AVC samples，单独标明其范围，不能当作相机原片或通用 remux 证明。完整 Windows 便携验收与[对应 CI 37743888829](https://github.com/ohyooo/LivePhoto/actions/runs/37743888829) 成功，6 个非空、未过期 artifacts 已核对。
 
 协议兼容素材批次此前全量验证 **730 tests，0 failures / errors / skips**，含 16 个回归测试；整文件哈希与素材保持不变。最新提交的 Windows/Linux 构建、测试和上传结果以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 为准；解析缺口另列 TODO，不能把素材覆盖等同于所有协议兼容完成。
+
+Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skips**，包含两个兼容素材的精确视频提取，以及有界图像、越界/开放长度/未知扩展/源变化拒绝测试。完整 Windows 便携验收成功，包含空 PATH、误导扩展名、视频整文件 SHA 一致和 Clean 拒绝用例。媒体语义仍 Partial，key 时间单位仍未知；不开放该 profile 的 HEIC Create、Clean、Repair 或跨格式 Convert。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -483,7 +485,9 @@ Windows 有限 MOV 系统 Probe 扩展：[`91cec67`](https://github.com/ohyooo/L
 ### 剩余范围清单
 
 - [x] 接入 12 个单文件组合及 3 组配对的兼容回归测试，校验 18 个资产的整文件 SHA-256；不算 L4 设备认证。
-- [ ] **下一项：核查兼容素材暴露的读取边界。** MOV/vivo 的 `mdhd` 与 `stts` 时长差异须结合 CTS/edit 与官方语义核对；Huawei HEIC + trailer 的包络和 Apple IFD0 MakerNote 的有限兼容读取也需确认，不猜容差，不自动授权旧结构写入。
+- [x] Huawei HEIC + 固定 60 字节尾标的有界读取与精确视频提取；保护图像 item extent 边界，未知 Honor/扩展不取得纯视频权威，HEIC 写入继续拒绝。
+- [ ] **下一项：有限 ExplicitRemux Repair。** 只针对已知协议容器约束且有唯一完整媒体证据的问题；私有 remux 后独立核验 sample/configuration/时间线/metadata，再重新封装与原子发布，不转码、不猜 ftyp。
+- [ ] 继续核查兼容读取边界：MOV/vivo 的 `mdhd` 与 `stts` 差异须结合 CTS/edit 与官方语义核对；Apple IFD0 MakerNote 的有限兼容读取需独立确认，不猜容差，不自动授权旧结构写入。
 - [ ] 其它显式 Repair 模式及 Apple 写入扩展：有限 ExplicitRePair 已交付；ExplicitRemux 与更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [ ] Apple Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。

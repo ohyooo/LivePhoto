@@ -104,7 +104,7 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             val writes = if (basic) setOf(Operation.Create, Operation.SplitClean) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> if (basic) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
-                conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("jpeg-fixed-sixty-byte-tail")),
+                conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text(if (operation in reads) "jpeg-or-tail-bounded-heic-item-graph-fixed-sixty-byte-tail" else "jpeg-fixed-sixty-byte-tail")),
                     Condition(ConditionOperator.Equals, "keySemantics", Value.Text("raw-fields-unknown-units"))) +
                     if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("plain-jpeg-mp4-no-gap-no-honor-extensions-no-explicit-key"))) else if (!basic)
                         listOf(Condition(ConditionOperator.Equals, "mediaBinding", Value.Text("unconfirmed-extensions-not-a-pure-video-claim"))) else emptyList(),

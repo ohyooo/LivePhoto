@@ -32,8 +32,8 @@ class ProtocolCompatibilityFixtureTest {
     @Test fun samsungJpegReportsLegacyFooterAndUsesPureVideoNotSefSuffix() = check("video_Samsung_MotionPhoto_JPEG+MP4.jpg", ProtocolIds.Samsung, Verdict.Invalid, setOf("MALFORMED_XMP", "MOTION_VIDEO_LENGTH_MISMATCH", "SEF_DIRECTORY_INVALID"), 294956, 8121397, originalHash)
     @Test fun samsungHeicReportsLegacyFooterAndKeepsDistinctVideoExtents() = check("video_Samsung_MotionPhoto_HEIC+MP4.heic", ProtocolIds.Samsung, Verdict.Invalid, setOf("CORRUPTED_CONTAINER", "MOTION_VIDEO_LENGTH_MISMATCH", "SEF_DIRECTORY_INVALID"), 1065745, 8121397, originalHash)
     @Test fun huaweiJpegKeepsUnknownTimestampSemanticsAndExactTransformedVideo() = check("video_HUAWEI_MovingPhoto_JPEG+MP4.jpg", ProtocolIds.Huawei, Verdict.Warning, setOf("TIMESTAMP_SEMANTICS_UNKNOWN"), 293848, 8121397, huaweiHash)
-    @Test fun huaweiHeicCapturesCurrentReaderGapWithoutClaimingMalformedInput() = huaweiHeic("video_HUAWEI_MovingPhoto_HEIC+MP4.heic")
-    @Test fun huaweiHeicH265LabelIsNotCodecEvidenceAndCapturesCurrentReaderGap() = huaweiHeic("video_HUAWEI_MovingPhoto_HEIC+MP4 (H.265).heic")
+    @Test fun huaweiHeicReadsBoundedEnvelopeAndExtractsExactMovie() = huaweiHeic("video_HUAWEI_MovingPhoto_HEIC+MP4.heic")
+    @Test fun huaweiHeicH265LabelIsNotCodecEvidenceAndExtractsExactMovie() = huaweiHeic("video_HUAWEI_MovingPhoto_HEIC+MP4 (H.265).heic")
     @Test fun appleJpegMovPairKeepsIfd0MakerNoteOutsideFormalWriterScope() = applePair("jpeg", "jpg")
     @Test fun appleHeicMovPairKeepsIfd0MakerNoteOutsideFormalWriterScope() = applePair("heic", "heic")
     @Test fun vivoLegacyPairCapturesDurationBoundaryGapWithoutCallingItDeviceTested(): Unit = runImmediate {
@@ -159,11 +159,24 @@ class ProtocolCompatibilityFixtureTest {
     private fun huaweiHeic(name: String): Unit = runImmediate {
         val bytes = captured(name)
         val original = sha(bytes)
-        // Independently measured LIVE trailer and media bytes, not this Core's failed layout.
+        // Independently measured LIVE trailer and media bytes, not this Core's layout.
         assertEquals(huaweiHash, sha(bytes.copyOfRange(1064602, 1064602 + 8121397)))
         val input = SourceSet.Single(MemoryBinarySource(Bytes(bytes), SourceId("protocol-compatibility:$name")))
-        val result = assertIs<CoreResult.Failure>(DefaultLivePhotoCore().inspect(ReadRequest(input, context)))
-        assertEquals("OFFSET_OUT_OF_BOUNDS", result.error.code.value, "Known HEIC + Huawei trailer reader gap; TODO, not a media corruption verdict")
+        val core = DefaultLivePhotoCore()
+        val result = core.inspect(ReadRequest(input, context)).orThrow()
+        assertEquals(ProtocolIds.Huawei, result.detection.primaryProtocol?.protocol)
+        assertEquals(Disposition.Candidate, result.detection.disposition)
+        assertEquals(ImageFormat.Heic, result.media.first().imageFormat)
+        assertEquals(Coverage.Partial, result.media.first().coverage)
+        val movie = result.layout.resources.single { it.kind == ResourceKind.Video }
+        assertEquals(ByteRange(1064602uL, 8121397uL), movie.extents.single().range)
+        assertNull(result.keyPhoto.position)
+        val output = MemoryOutputTransaction(context, "huawei-heic-raw:$name")
+        val extracted = core.extract(ExtractRequest(input, listOf(movie.id), result.snapshot, output = output, context = context)).orThrow()
+        assertEquals(huaweiHash, extracted.output.assets.single().digest.value)
+        assertEquals(Bytes(bytes.copyOfRange(1064602, 1064602 + 8121397)), output.committedAssets().values.single())
+        assertFalse(core.validate(ValidationRequest(input, context = context)).orThrow().coverage == Coverage.Complete)
+        assertEquals(original, sha(input.source.readAt(0uL, bytes.size.toUInt()).orThrow().toByteArray()))
         assertEquals(original, sha(bytes))
     }
 

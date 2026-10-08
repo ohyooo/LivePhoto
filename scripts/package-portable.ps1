@@ -97,6 +97,46 @@ try {
     if (-not ($media.discoveryIssues | Where-Object { $_.code.value -eq 'FFMPEG_EXPLICIT_PATH_UNAVAILABLE' })) {
         throw 'Portable media discovery did not report the unavailable explicit tool.'
     }
+    $huaweiFixtures = Join-Path $repository 'core/build/reports/huawei-heic-fixtures'
+    $huaweiManifest = @{}
+    foreach ($line in Get-Content (Join-Path $huaweiFixtures 'manifest.txt')) {
+        $parts = $line.Split('=', 2)
+        if ($parts.Count -ne 2 -or $huaweiManifest.ContainsKey($parts[0])) { throw 'Invalid Huawei HEIC fixture manifest.' }
+        $huaweiManifest[$parts[0]] = $parts[1]
+    }
+    if ($huaweiManifest['scope'] -ne 'synthetic-protocol-framing-not-decoder-or-device-proof' -or -not $huaweiManifest['runId']) {
+        throw 'Huawei HEIC fixture scope is missing.'
+    }
+    foreach ($name in @('carrier.heic', 'movie.mp4')) {
+        if ((Get-FileHash (Join-Path $huaweiFixtures $name)).Hash.ToLowerInvariant() -ne $huaweiManifest[$name]) { throw 'Huawei HEIC fixture hash mismatch.' }
+    }
+    $huaweiPath = $env:Path
+    try {
+        $env:Path = ''
+        $huaweiCarrier = Join-Path $verify 'Huawei carrier with misleading extension.jpg'
+        Copy-Item (Join-Path $huaweiFixtures 'carrier.heic') $huaweiCarrier
+        $huaweiJson = & $launcher inspect --input $huaweiCarrier
+        if ($LASTEXITCODE -ne 0) { throw "Portable Huawei HEIC inspect failed: $huaweiJson" }
+        $huawei = ($huaweiJson | ConvertFrom-Json).result
+        if ($huawei.detection.primaryProtocol.protocol.value -ne 'huawei.movingphoto' -or $huawei.detection.disposition -ne 'Candidate' -or
+            $huawei.media[0].imageFormat -ne 'Heic' -or $huawei.media[0].coverage -ne 'Partial' -or $null -ne $huawei.keyPhoto.position) {
+            throw 'Huawei HEIC content/partial scope was overstated or misdetected.'
+        }
+        $huaweiRawJson = & $launcher extract --input $huaweiCarrier --output-dir (Join-Path $verify 'Huawei HEIC raw video')
+        if ($LASTEXITCODE -ne 0) { throw "Portable Huawei HEIC extraction failed: $huaweiRawJson" }
+        $huaweiRaw = ($huaweiRawJson | ConvertFrom-Json).result
+        if ($huaweiRaw.output.assets.Count -ne 1 -or (Get-FileHash $huaweiRaw.output.assets[0].path).Hash.ToLowerInvariant() -ne $huaweiManifest['movie.mp4']) {
+            throw 'Huawei HEIC raw video is not byte-exact.'
+        }
+        $huaweiCleanDirectory = Join-Path $verify 'Huawei HEIC unsupported clean'
+        $huaweiCleanJson = & $launcher split --input $huaweiCarrier --output-dir $huaweiCleanDirectory
+        if ($LASTEXITCODE -ne 3 -or ($huaweiCleanJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED' -or
+            ((Test-Path $huaweiCleanDirectory) -and @(Get-ChildItem $huaweiCleanDirectory -Recurse -File).Count -ne 0)) {
+            throw 'Huawei HEIC writable ownership was inferred or partial files were published.'
+        }
+        if ((Get-FileHash $huaweiCarrier).Hash.ToLowerInvariant() -ne $huaweiManifest['carrier.heic']) { throw 'Huawei HEIC input changed.' }
+    } finally { $env:Path = $huaweiPath }
+    Write-Host 'PORTABLE_HUAWEI_HEIC_NO_BACKEND=SUCCESS scope=bounded-read-exact-raw-not-clean-decode-or-device'
     # Core Clean needs no FFmpeg/encoder/decoder. Run this on every packaged platform,
     # including CI runners without external media tools, using independently hashed fixtures.
     $neutralFixtures = Join-Path $repository 'core/build/portable-heic-fixtures'
