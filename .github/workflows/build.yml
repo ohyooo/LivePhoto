@@ -96,6 +96,7 @@ jobs:
             **/build/reports/
             **/build/test-results/
             core/build/portable-heic-fixtures/
+            core/build/portable-windows-fixtures/
             ci-output/gradle.log
             ci-output/portable.log
           if-no-files-found: warn

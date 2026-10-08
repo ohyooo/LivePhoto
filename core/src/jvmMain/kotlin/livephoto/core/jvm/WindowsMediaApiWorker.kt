@@ -14,8 +14,9 @@ import kotlin.system.exitProcess
 internal object WindowsMediaApiWorker {
     @JvmStatic fun main(args: Array<String>) {
         val preflight = args.contentEquals(arrayOf("--preflight"))
-        val decode = if (!preflight) WindowsNativeVideoDecode.request(args) else null
-        if (!preflight && decode == null) {
+        val decoderPreflight = args.contentEquals(arrayOf("--decoder-preflight"))
+        val decode = if (!preflight && !decoderPreflight) WindowsNativeVideoDecode.request(args) else null
+        if (!preflight && !decoderPreflight && decode == null) {
             println("WINDOWS_MEDIA_API_PREFLIGHT=INVALID_ARGUMENT")
             exitProcess(2)
         }
@@ -52,6 +53,7 @@ internal object WindowsMediaApiWorker {
                     comStarted = true
                     check((startup.invokeWithArguments(0x00020070, 1) as Int) >= 0) // SDK MF_VERSION and MFSTARTUP_NOSOCKET.
                     mfStarted = true
+                    if (decoderPreflight) decodeResult = WindowsNativeVideoDecode.decoderPreflight(arena, mf, ole)
                     if (decode != null) {
                         enteredDecode = true
                         decodeResult = WindowsNativeVideoDecode.run(decode, arena, mf, read, library("kernel32.dll"))
@@ -63,6 +65,7 @@ internal object WindowsMediaApiWorker {
             }
             if (preflight) println("WINDOWS_MEDIA_API_PREFLIGHT=SUCCESS scope=runtime-bootstrap-not-media-decode")
             else println(decodeResult ?: error("Missing decode evidence"))
+            if (decoderPreflight && decodeResult?.contains("=UNAVAILABLE") == true) exitProcess(3)
         } catch (failure: Throwable) {
             // A bounded worker diagnostic, not an input path, user content or a simulated decoder result.
             val unavailable = !enteredDecode

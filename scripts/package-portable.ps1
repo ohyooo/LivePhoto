@@ -63,6 +63,14 @@ try {
         }
         if ($env:LIVEPHOTO_REQUIRE_WINDOWS_MEDIA -eq 'true' -and $workerExit -ne 0) { throw 'Required Windows system API bootstrap is unavailable in the portable worker.' }
         Write-Host "PORTABLE_WINDOWS_API_BOOTSTRAP=$(if ($workerExit -eq 0) { 'SUCCESS' } else { 'UNAVAILABLE' }) scope=runtime-not-decode"
+        $decoderJson = & $mediaWorker --decoder-preflight
+        $decoderExit = $LASTEXITCODE
+        if (($decoderExit -eq 0 -and "$decoderJson" -notmatch 'WINDOWS_MEDIA_API_DECODER=SUCCESS scope=registered-software-avc-to-nv12') -or
+            ($decoderExit -eq 3 -and "$decoderJson" -notmatch 'UNAVAILABLE') -or $decoderExit -notin @(0, 3)) {
+            throw "Portable OS decoder enumeration failed: $decoderJson"
+        }
+        $windowsDecoderAvailable = $decoderExit -eq 0
+        if ($env:LIVEPHOTO_REQUIRE_WINDOWS_MEDIA -eq 'true' -and -not $windowsDecoderAvailable) { throw 'Required OS AVC decoder is unavailable.' }
     }
     & $launcher --version
     if ($LASTEXITCODE -ne 0) { throw 'Portable version smoke test failed' }
@@ -82,13 +90,50 @@ try {
     if (-not ($media.discoveryIssues | Where-Object { $_.code.value -eq 'FFMPEG_EXPLICIT_PATH_UNAVAILABLE' })) {
         throw 'Portable media discovery did not report the unavailable explicit tool.'
     }
+    if ($IsWindows -and $windowsDecoderAvailable) {
+        $windowsFixtures = Join-Path $repository 'core/build/portable-windows-fixtures'
+        $fixtureManifest = @{}
+        foreach ($line in Get-Content (Join-Path $windowsFixtures 'manifest.txt')) {
+            $parts = $line.Split('=', 2); if ($parts.Count -eq 2) { $fixtureManifest[$parts[0]] = $parts[1] }
+        }
+        if ($fixtureManifest['scope'] -ne 'nas-encoded-synthetic-avc-not-device-proof' -or -not $fixtureManifest['runId']) {
+            throw 'Portable encoded OS fixtures have no classified test proof.'
+        }
+        $savedSearchPath = $env:Path
+        try {
+            $env:Path = ''
+            $systemJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'absent fixture-encoder.exe')
+            if ($LASTEXITCODE -ne 0) { throw 'Portable system-only discovery failed.' }
+            $system = ($systemJson | ConvertFrom-Json).result
+            if ($system.ffmpegPath -or $system.capabilities.backendIds.Count -ne 1 -or $system.capabilities.backendIds[0] -ne 'windows-media-foundation') {
+                throw 'Portable system route requires the bundled helper, not PATH or external Java.'
+            }
+            foreach ($name in @('b0', 'b2', 'vfr', 'audio')) {
+                $inputFixture = Join-Path $windowsFixtures "$name.mp4"
+                if ((Get-FileHash $inputFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.mp4"]) { throw 'OS fixture digest differs.' }
+                $outsideFixture = Join-Path $verify "encoded OS $name.mp4"
+                [IO.File]::Copy($inputFixture, $outsideFixture, $false)
+                $systemProbe = & $launcher probe --input $outsideFixture --decode-check
+                if ($name -eq 'audio') {
+                    if ($LASTEXITCODE -ne 3 -or ($systemProbe | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
+                        throw 'System backend must reject audio rather than claim complete video-only decode.'
+                    }
+                } elseif ($LASTEXITCODE -ne 0 -or ($systemProbe | ConvertFrom-Json).result.coverage -ne 'Partial' -or
+                    -not (($systemProbe | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) {
+                    throw "Portable encoded fixture OS decode failed: $systemProbe"
+                }
+                if ((Get-FileHash $outsideFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.mp4"]) { throw 'OS decoder mutated source.' }
+            }
+        } finally { $env:Path = $savedSearchPath }
+        Write-Host 'PORTABLE_WINDOWS_API_ENCODED_FIXTURES=SUCCESS scope=avc-bframes-vfr-audio-rejection-no-ffmpeg-no-system-java-not-device'
+    }
     $probeJson = & $launcher probe --input $referenceVideo --decode-check
     if ($media.ffmpegPath) {
         if ($LASTEXITCODE -ne 0 -or -not ((($probeJson | ConvertFrom-Json).result.issues) | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) {
             throw "Portable existing-FFmpeg decode failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=SUCCESS'
-        if ($IsWindows -and $workerExit -eq 0) {
+        if ($IsWindows -and $windowsDecoderAvailable) {
             # Explicit fixture encoding only: the OS worker itself never launches FFmpeg.
             # Microsoft H.264 decoding requires at least 48x48, unlike the smaller Core fixtures.
             $ptsBytes = [Collections.Generic.List[byte]]::new()
@@ -118,8 +163,27 @@ try {
                         $trace -notmatch "WINDOWS_MEDIA_API_DECODE=SUCCESS scope=selected-avc-video frames=4 width=64 height=64 ptsSha256=$ptsHash" -or
                         $osHash -ne (Get-FileHash $osFixture).Hash) { throw "Portable OS decoder failed independent frame/timeline/source checks: $trace" }
                 } finally { $process.Dispose() }
+                $savedSearchPath = $env:Path
+                try {
+                    $env:Path = ''
+                    $systemJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'missing OS-fallback ffmpeg.exe')
+                    if ($LASTEXITCODE -ne 0) { throw 'Portable OS fallback discovery failed.' }
+                    $system = ($systemJson | ConvertFrom-Json).result
+                    if ($system.ffmpegPath -or $system.capabilities.backendIds.Count -ne 1 -or
+                        $system.capabilities.backendIds[0] -ne 'windows-media-foundation' -or
+                        ($system.discoveryIssues | Where-Object { $_.code.value -eq 'MEDIA_BACKEND_UNAVAILABLE' })) {
+                        throw 'Portable no-PATH route did not discover the bounded bundled OS worker.'
+                    }
+                    $systemProbe = & $launcher probe --input $osFixture --decode-check
+                    if ($LASTEXITCODE -ne 0 -or ($systemProbe | ConvertFrom-Json).result.coverage -ne 'Partial' -or
+                        -not (($systemProbe | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) {
+                        throw "Portable Core system-only decode failed: $systemProbe"
+                    }
+                } finally { $env:Path = $savedSearchPath }
+                if ($osHash -ne (Get-FileHash $osFixture).Hash) { throw 'Portable Core OS decoder mutated input.' }
             }
             Write-Host 'PORTABLE_WINDOWS_API_DECODE=SUCCESS scope=selected-avc-video-not-audio-or-device'
+            Write-Host 'PORTABLE_WINDOWS_API_CORE_FALLBACK=SUCCESS scope=finite-probe-only-no-ffmpeg-no-system-java'
         }
         # Explicitly generated fixture: its encoding is not part of the remux operation.
         $remuxFixture = Join-Path $verify 'remux fixture.mp4'

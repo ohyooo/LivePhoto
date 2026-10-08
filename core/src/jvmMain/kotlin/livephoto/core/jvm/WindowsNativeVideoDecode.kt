@@ -33,6 +33,40 @@ internal object WindowsNativeVideoDecode {
     private val frameSize = "1652c33d-d6b2-4012-b834-72030849a37d"
     private const val FIRST_VIDEO = -4
 
+    fun decoderPreflight(arena: Arena, mf: SymbolLookup, ole: SymbolLookup): String {
+        val api = Api(arena)
+        val guidLayout = MemoryLayout.structLayout(ValueLayout.JAVA_INT, ValueLayout.JAVA_SHORT,
+            ValueLayout.JAVA_SHORT, MemoryLayout.sequenceLayout(8, ValueLayout.JAVA_BYTE))
+        fun type(sub: String) = arena.allocate(32, 4).also {
+            it.asSlice(0, 16).copyFrom(api.guid(video)); it.asSlice(16, 16).copyFrom(api.guid(sub))
+        }
+        val out = arena.allocate(ValueLayout.ADDRESS)
+        val countOut = arena.allocate(ValueLayout.JAVA_INT)
+        val result = api.export(mf, "MFTEnumEx", ValueLayout.JAVA_INT, guidLayout, ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
+            .invokeWithArguments(api.guid("d6c02d4b-6833-45b4-971a-05a4b04bab91"), 0x43, type(h264), type(nv12), out, countOut)
+        val array = out.get(ValueLayout.ADDRESS, 0)
+        val count = countOut.get(ValueLayout.JAVA_INT, 0)
+        try {
+            check(count in 0..128)
+            api.hr(result)
+            check(count == 0 || array.address() != 0L)
+            return "WINDOWS_MEDIA_API_DECODER=${if (count > 0) "SUCCESS" else "UNAVAILABLE"} scope=registered-software-avc-to-nv12 candidates=$count"
+        } finally {
+            if (array.address() != 0L) {
+                try {
+                    if (count in 0..128) for (index in 0 until count) {
+                        val activate = array.reinterpret(count * 8L).get(ValueLayout.ADDRESS, index * 8L)
+                        if (activate.address() != 0L) api.release(activate)
+                    }
+                } finally {
+                    Linker.nativeLinker().downcallHandle(ole.find("CoTaskMemFree").orElseThrow(),
+                        FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)).invokeWithArguments(array)
+                }
+            }
+        }
+    }
+
     fun run(request: Request, arena: Arena, mf: SymbolLookup, read: SymbolLookup, kernel: SymbolLookup): String {
         // No URLs or extension-based trust. A caller must provide an existing local file within bounds.
         val path = request.path.toRealPath()

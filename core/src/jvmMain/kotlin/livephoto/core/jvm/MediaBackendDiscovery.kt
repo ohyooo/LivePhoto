@@ -14,10 +14,10 @@ public data class BackendDiscovery(
 public object JvmMediaBackends {
     /**
      * Explicit executable, then absolute PATH entries, then injected OS API adapters.
-     * System adapters must report only their implemented runtime capabilities; none are bundled yet.
+     * Bundled system adapters report only their finite, runtime-checked implemented capabilities.
      * Unsupported operations may fall through; decode/IO/policy errors never trigger a retry.
      */
-    public fun discover(ffmpegPath: Path? = null, systemBackends: List<MediaBackend> = emptyList()): BackendDiscovery =
+    public fun discover(ffmpegPath: Path? = null, systemBackends: List<MediaBackend> = WindowsMediaFoundationBackend.available()): BackendDiscovery =
         discover(ffmpegPath, System.getenv("PATH") ?: "", System.getProperty("os.name").startsWith("Windows"), systemBackends) { path ->
             val result = ExternalProcess.run(listOf(path.toString(), "-version"), timeoutMillis = 3_000L)
             result.code == 0 && !result.outputLimited && !result.ioFailed && !result.timedOut && !result.cancelled &&

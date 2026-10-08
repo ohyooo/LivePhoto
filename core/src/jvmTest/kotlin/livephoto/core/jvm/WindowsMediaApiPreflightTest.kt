@@ -33,4 +33,15 @@ class WindowsMediaApiPreflightTest {
             assertTrue(result.output.contains(if (result.code == 0) "WINDOWS_MEDIA_API_PREFLIGHT=SUCCESS" else "WINDOWS_MEDIA_API_PREFLIGHT=UNAVAILABLE"))
         }
     }
+    @Test fun decoderEnumerationIsSeparateFromRuntimeBootstrap() {
+        val result = run(listOf("--decoder-preflight"), true)
+        assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
+        if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") {
+            assertEquals(0, result.code, result.output)
+            assertTrue(result.output.contains("WINDOWS_MEDIA_API_DECODER=SUCCESS scope=registered-software-avc-to-nv12"))
+        } else {
+            assertTrue(result.code in setOf(0, 3), result.output)
+            assertTrue(result.output.contains(if (result.code == 0) "WINDOWS_MEDIA_API_DECODER=SUCCESS" else "UNAVAILABLE"))
+        }
+    }
 }

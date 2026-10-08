@@ -21,10 +21,10 @@ class WindowsNativeVideoDecodeTest {
             classes.joinToString(File.pathSeparator), "livephoto.core.jvm.WindowsMediaApiWorker") + args, 30_000)
     }
     private fun usable(): Boolean {
-        val result = worker(listOf("--preflight"))
+        val result = worker(listOf("--decoder-preflight"))
         assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(0, result.code, result.output)
-        if (result.code == 3) { assertTrue(result.output.contains("PREFLIGHT=UNAVAILABLE")); return false }
+        if (result.code == 3) { assertTrue(result.output.contains("UNAVAILABLE")); return false }
         assertEquals(0, result.code, result.output)
         return true
     }
@@ -39,17 +39,20 @@ class WindowsNativeVideoDecodeTest {
     @Test fun actualAvcDecodeReachesEosWithIndependentPresentationTimeline(): Unit = runImmediate {
         if (!usable()) return@runImmediate // Explicit unavailable evidence, not a claimed decoder success.
         val found = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of))
-        assertNotNull(found.ffmpegPath, "Existing FFmpeg is required to generate this explicitly synthetic encoder fixture")
+        if (System.getenv("LIVEPHOTO_REQUIRE_FFMPEG") == "true") assertNotNull(found.ffmpegPath)
+        val fixtureEncoder = found.ffmpegPath.takeUnless { System.getenv("LIVEPHOTO_WINDOWS_FIXTURE_ONLY") == "true" }
         val directory = Files.createTempDirectory("livephoto-os-decode-")
         val owned = mutableListOf<Path>()
         try {
             for (bFrames in listOf(0, 2)) {
                 val path = directory.resolve("avc B $bFrames.mp4"); owned.add(path)
-                val encoded = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error",
+                if (fixtureEncoder == null) Files.write(path, WindowsEncodedFixtures.bytes("b$bFrames")) else {
+                val encoded = ExternalProcess.run(listOf(fixtureEncoder.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error",
                     "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "4", "-c:v", "libx264", "-preset", "medium",
                     "-bf", bFrames.toString(), "-g", "4", "-pix_fmt", "yuv420p", path.toString()), 60_000)
                 assertEquals(0, encoded.code, encoded.output)
                 assertFalse(encoded.ioFailed || encoded.timedOut || encoded.outputLimited)
+                }
                 val source = FileBinarySource(path)
                 val context = Context(Limits(128_000_000uL, 128_000_000uL))
                 val reader = BinaryReader(source, context)
@@ -75,10 +78,21 @@ class WindowsNativeVideoDecodeTest {
                     assertTrue(bounded.output.contains("DECODE=FAILED")); assertFalse(bounded.output.contains("DECODE=SUCCESS"))
                     assertFalse(bounded.timedOut || bounded.ioFailed || bounded.outputLimited)
                     assertEquals(before, sha256Range(reader, range).orThrow())
+                    val systems = WindowsMediaFoundationBackend.available()
+                    assertEquals(1, systems.size, "Actual registered OS AVC/NV12 decoder is required for this runtime")
+                    val discovery = JvmMediaBackends.discover(null, "", true, systems) { error("No FFmpeg or PATH lookup is authorized") }
+                    assertNull(discovery.ffmpegPath)
+                    assertEquals(listOf("windows-media-foundation"), discovery.backend!!.capabilities().backendIds)
+                    assertFalse(discovery.issues.any { it.code.value == "MEDIA_BACKEND_UNAVAILABLE" })
+                    val decoded = DefaultLivePhotoCore(discovery.backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(source)), true, context)).orThrow()
+                    assertEquals(Coverage.Partial, decoded.coverage)
+                    assertTrue(decoded.issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                    assertEquals(before, sha256Range(reader, range).orThrow())
                 } finally { source.close() }
             }
+            if (fixtureEncoder != null) {
             val small = directory.resolve("below OS decoder minimum.mp4"); owned.add(small)
-            val encoded = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error",
+            val encoded = ExternalProcess.run(listOf(fixtureEncoder.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error",
                 "-f", "lavfi", "-i", "testsrc2=size=32x32:rate=25", "-frames:v", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", small.toString()), 60_000)
             assertEquals(0, encoded.code, encoded.output)
             assertFalse(encoded.ioFailed || encoded.timedOut || encoded.outputLimited)
@@ -87,6 +101,13 @@ class WindowsNativeVideoDecodeTest {
             assertEquals(4, rejected.code, rejected.output); assertFalse(rejected.output.contains("DECODE=SUCCESS"))
             assertFalse(rejected.ioFailed || rejected.timedOut || rejected.outputLimited)
             assertContentEquals(smallBytes, Files.readAllBytes(small))
+            val source = FileBinarySource(small)
+            try {
+                val rejectedProbe = DefaultLivePhotoCore(WindowsMediaFoundationBackend.available().single()).probe(
+                    ProbeRequest(ResourceRef(SourceSet.Single(source)), true, Context(Limits(128_000_000uL, 128_000_000uL))))
+                assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(rejectedProbe).error.code.value)
+            } finally { source.close() }
+            }
         } finally { owned.forEach { Files.deleteIfExists(it) }; Files.deleteIfExists(directory) }
     }
     @Test fun malformedLocalMediaNeverReportsDecodeSuccess() {
@@ -100,5 +121,54 @@ class WindowsNativeVideoDecodeTest {
             assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
             assertContentEquals(byteArrayOf(1, 2, 3, 4), Files.readAllBytes(path))
         } finally { Files.deleteIfExists(path) }
+    }
+    @Test fun actualSystemProbeKeepsVfrPresentationTimesAndRejectsAudioRatherThanDroppingIt(): Unit = runImmediate {
+        if (!usable()) return@runImmediate
+        val ffmpeg = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of)).ffmpegPath
+            .takeUnless { System.getenv("LIVEPHOTO_WINDOWS_FIXTURE_ONLY") == "true" }
+        val directory = Files.createTempDirectory("livephoto-os-vfr-")
+        val video = directory.resolve("explicit VFR.mp4")
+        val audioVideo = directory.resolve("explicit VFR plus AAC.mp4")
+        val elementary = directory.resolve("explicit canonical AAC.aac")
+        val context = Context(Limits(128_000_000uL, 128_000_000uL))
+        fun encode(args: List<String>) {
+            val result = ExternalProcess.run(listOf(ffmpeg.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + args, 60_000)
+            assertEquals(0, result.code, result.output); assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
+        }
+        try {
+            if (ffmpeg == null) Files.write(video, WindowsEncodedFixtures.bytes("vfr")) else encode(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "8", "-vf",
+                "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)'", "-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "ultrafast",
+                "-bf", "0", "-g", "3", "-pix_fmt", "yuv420p", "-use_editlist", "0", video.toString()))
+            val backend = WindowsMediaFoundationBackend.available().single()
+            val source = FileBinarySource(video)
+            try {
+                val reader = BinaryReader(source, context)
+                val range = ByteRange(0uL, source.size().orThrow())
+                val before = sha256Range(reader, range).orThrow()
+                val track = BmffVideoProbe(reader).probe(range).orThrow().tracks.single()
+                assertEquals(8, track.samples.size)
+                assertTrue(track.samples.map { it.duration }.distinct().size > 1)
+                val result = DefaultLivePhotoCore(backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(source)), true, context)).orThrow()
+                assertEquals(Coverage.Partial, result.coverage)
+                assertTrue(result.issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                assertEquals(before, sha256Range(reader, range).orThrow())
+            } finally { source.close() }
+            if (ffmpeg == null) Files.write(audioVideo, WindowsEncodedFixtures.bytes("audio")) else {
+                encode(listOf("-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.48", "-c:a", "aac", "-b:a", "96k",
+                    "-ac", "2", "-flags:a", "+bitexact", "-f", "adts", elementary.toString()))
+                encode(listOf("-i", video.toString(), "-i", elementary.toString(), "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-bsf:a", "aac_adtstoasc", audioVideo.toString()))
+            }
+            val withAudio = FileBinarySource(audioVideo)
+            try {
+                val reader = BinaryReader(withAudio, context)
+                val range = ByteRange(0uL, withAudio.size().orThrow())
+                val before = sha256Range(reader, range).orThrow()
+                val tracks = BmffVideoProbe(reader).probe(range).orThrow().tracks
+                assertEquals(2, tracks.size); assertTrue(tracks.any { it.handler == "soun" })
+                val result = DefaultLivePhotoCore(backend).probe(ProbeRequest(ResourceRef(SourceSet.Single(withAudio)), true, context))
+                assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(result).error.code.value)
+                assertEquals(before, sha256Range(reader, range).orThrow())
+            } finally { withAudio.close() }
+        } finally { Files.deleteIfExists(audioVideo); Files.deleteIfExists(elementary); Files.deleteIfExists(video); Files.deleteIfExists(directory) }
     }
 }

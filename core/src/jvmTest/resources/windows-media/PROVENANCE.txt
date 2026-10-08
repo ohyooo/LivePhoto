@@ -1,0 +1,18 @@
+Synthetic 64x64 AVC fixtures, generated on DESKTOP-DCMRJ35 with the user-installed
+C:\Program Files\FFmpeg\bin\ffmpeg.exe. These are not vendor/device originals.
+Base64 text is decoded and SHA-256 checked by WindowsEncodedFixtures.
+Actual OS decoding has separate WindowsNativeVideoDecodeTest coverage.
+
+b0 / b2: -f lavfi -i testsrc2=size=64x64:rate=25 -frames:v 4
+         -c:v libx264 -preset medium -bf 0|2 -g 4 -pix_fmt yuv420p
+vfr: -f lavfi -i testsrc2=size=64x64:rate=25 -frames:v 8
+     -vf setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)' -fps_mode passthrough
+     -c:v libx264 -preset ultrafast -bf 0 -g 3 -pix_fmt yuv420p -use_editlist 0
+audio: the vfr video above plus an explicit AAC ADTS encode:
+       -f lavfi -i sine=frequency=440:sample_rate=48000:duration=0.48
+       -c:a aac -b:a 96k -ac 2 -flags:a +bitexact -f adts
+       then -map 0:v:0 -map 1:a:0 -c copy -bsf:a aac_adtstoasc
+
+Fixture encodes are outside Core mutation operations. No encoder is downloaded,
+bundled or required by these checked-in fixtures. Exported manifest contains
+independently parsed sample counts and exact 100ns presentation-time digests.
