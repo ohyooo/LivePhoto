@@ -59,24 +59,44 @@ Linux，在解压位置运行：
 
 例如，查看后端及执行真实解码检查：
 
+Windows（PowerShell）：
+
 ```powershell
-$LP = (Resolve-Path .\LivePhoto\LivePhoto.exe).Path
-& $LP media-capabilities --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
-& $LP probe --input '.\video.mp4' --decode-check --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
+.\LivePhoto\LivePhoto.exe media-capabilities --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
+.\LivePhoto\LivePhoto.exe probe --input '.\video.mp4' --decode-check --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto media-capabilities --ffmpeg '/usr/bin/ffmpeg'
+./LivePhoto/bin/LivePhoto probe --input './video.mp4' --decode-check --ffmpeg '/usr/bin/ffmpeg'
 ```
 
 ## 快速开始
 
-以下为 PowerShell 示例，先把 `$LP` 指向解压后的程序。Linux 用实际入口替换 `& $LP`。路径包含空格时加引号，命令名、协议 ID 和枚举值按示例大小写使用。
+分别列出 Windows 和 Linux 命令，直接从解压目录运行，无需设置命令变量。路径包含空格时加引号，命令名、协议 ID 和枚举值按示例大小写使用。
 
 ### 检测、检查与验证
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP detect --input '.\reference\livephoto.jpg'
-& $LP inspect --input '.\reference\livephoto.jpg'
-& $LP analyze --input '.\reference\livephoto.jpg'
-& $LP validate --input '.\reference\livephoto.jpg' --layers Structure,Protocol
-& $LP get-key --input '.\reference\livephoto.jpg'
+.\LivePhoto\LivePhoto.exe detect --input '.\reference\livephoto.jpg'
+.\LivePhoto\LivePhoto.exe inspect --input '.\reference\livephoto.jpg'
+.\LivePhoto\LivePhoto.exe analyze --input '.\reference\livephoto.jpg'
+.\LivePhoto\LivePhoto.exe validate --input '.\reference\livephoto.jpg' --layers Structure,Protocol
+.\LivePhoto\LivePhoto.exe get-key --input '.\reference\livephoto.jpg'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto detect --input './reference\livephoto.jpg'
+./LivePhoto/bin/LivePhoto inspect --input './reference\livephoto.jpg'
+./LivePhoto/bin/LivePhoto analyze --input './reference\livephoto.jpg'
+./LivePhoto/bin/LivePhoto validate --input './reference\livephoto.jpg' --layers Structure,Protocol
+./LivePhoto/bin/LivePhoto get-key --input './reference\livephoto.jpg'
 ```
 
 `detect` 按内容判断，可返回多个协议匹配；`inspect` 展示结构和 metadata，不等同于有效性结论。`validate` 默认检查 `Structure,Protocol,Media`，注意 `coverage`、各层 checks 以及 `NotRun` / `Partial`；退出码为 0 也不等于完整媒体或设备认证。
@@ -85,57 +105,114 @@ $LP = (Resolve-Path .\LivePhoto\LivePhoto.exe).Path
 
 ### 普通图片 + 视频 → Google Motion Photo
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP capabilities --target google.motionphoto.v2 --profile jpeg
-& $LP create --image '.\reference\video.jpg' --video '.\reference\video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir '.\out-create'
+.\LivePhoto\LivePhoto.exe capabilities --target google.motionphoto.v2 --profile jpeg
+.\LivePhoto\LivePhoto.exe create --image '.\reference\video.jpg' --video '.\reference\video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir '.\out-create'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto capabilities --target google.motionphoto.v2 --profile jpeg
+./LivePhoto/bin/LivePhoto create --image './reference\video.jpg' --video './reference\video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir './out-create'
 ```
 
 输入必须符合有限的 JPEG / 视频 profile；默认不转码。输出发布在 `out-create/assets/`，JSON 的 `result.output.assets[].path` 给出真实文件位置；**不要假设输出总叫 `livephoto.jpg`**。后续示例里的 `motion.jpg` 指你按 JSON 路径选取的结果或自己的输入文件。
 
 ### 原样提取、干净拆分、协议转换
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP extract --input '.\motion.jpg' --output-dir '.\out-extract'
-& $LP split --input '.\motion.jpg' --output-dir '.\out-split'
-& $LP convert --input '.\motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir '.\out-convert'
+.\LivePhoto\LivePhoto.exe extract --input '.\motion.jpg' --output-dir '.\out-extract'
+.\LivePhoto\LivePhoto.exe split --input '.\motion.jpg' --output-dir '.\out-split'
+.\LivePhoto\LivePhoto.exe convert --input '.\motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir '.\out-convert'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto extract --input './motion.jpg' --output-dir './out-extract'
+./LivePhoto/bin/LivePhoto split --input './motion.jpg' --output-dir './out-split'
+./LivePhoto/bin/LivePhoto convert --input './motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir './out-convert'
 ```
 
 `extract` 原样提取已确认资源，默认资源选择由 Core 决定；`split` 输出普通媒体并清除已确认的动态照片专属 metadata。两者不是同一个操作，也不一定产出相同图片字节。
 
 ### Apple 双资产与关键帧 metadata
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP inspect --input '.\IMG.jpg' --pair-video '.\IMG.mov'
-& $LP extract --input '.\IMG.jpg' --pair-video '.\IMG.mov' --output-dir '.\out-apple-raw'
-& $LP set-key --input '.\IMG.jpg' --pair-video '.\IMG.mov' --frame-index 1 --output-dir '.\out-apple-key'
+.\LivePhoto\LivePhoto.exe inspect --input '.\IMG.jpg' --pair-video '.\IMG.mov'
+.\LivePhoto\LivePhoto.exe extract --input '.\IMG.jpg' --pair-video '.\IMG.mov' --output-dir '.\out-apple-raw'
+.\LivePhoto\LivePhoto.exe set-key --input '.\IMG.jpg' --pair-video '.\IMG.mov' --frame-index 1 --output-dir '.\out-apple-key'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto inspect --input './IMG.jpg' --pair-video './IMG.mov'
+./LivePhoto/bin/LivePhoto extract --input './IMG.jpg' --pair-video './IMG.mov' --output-dir './out-apple-raw'
+./LivePhoto/bin/LivePhoto set-key --input './IMG.jpg' --pair-video './IMG.mov' --frame-index 1 --output-dir './out-apple-key'
 ```
 
 `set-key` 修改协议意义的 key/presentation 位置，**不会重新生成封面图**。Apple 修改入口只接受已确认的有限结构，不能将任意相机原片视为可写。
 
 普通媒体创建 Apple 需要**显式 profile**，并满足 JPEG metadata 与原视频容器的分类门禁：
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP create --image '.\plain.jpg' --video '.\plain.mov' --target apple.livephoto --profile jpeg-mov --output-dir '.\out-apple-create'
+.\LivePhoto\LivePhoto.exe create --image '.\plain.jpg' --video '.\plain.mov' --target apple.livephoto --profile jpeg-mov --output-dir '.\out-apple-create'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto create --image './plain.jpg' --video './plain.mov' --target apple.livephoto --profile jpeg-mov --output-dir './out-apple-create'
 ```
 
 不会隐式把 MP4 改成 MOV；MP4 输入应查询并使用 `jpeg-mp4`。省略 Apple profile 的 Generic Create 仍是 `Planned`，HEIC Create/ConvertTo 也未实现。
 
 ### 修复：先预览，再明确写入
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP repair --input '.\damaged-motion.jpg'
-& $LP repair --input '.\damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir '.\out-repair'
+.\LivePhoto\LivePhoto.exe repair --input '.\damaged-motion.jpg'
+.\LivePhoto\LivePhoto.exe repair --input '.\damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir '.\out-repair'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto repair --input './damaged-motion.jpg'
+./LivePhoto/bin/LivePhoto repair --input './damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir './out-repair'
 ```
 
 当前仅修复能够唯一证明的有限 metadata 问题，不猜协议、视频边界、ID 或单位。预览不写入；预览时不能传 `--output-dir`。Apple 冲突 ID 的 `ExplicitRePair` 尚未实现，也没有 CLI `--authority` 参数。
 
 ### 抽帧、裁剪、remux 与显式转码
 
+Windows（PowerShell）：
+
 ```powershell
-& $LP extract-frame --input '.\video.mp4' --frame-index 0 --format Jpeg --output-dir '.\out-frame'
-& $LP trim --input '.\video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir '.\out-trim'
-& $LP remux --input '.\video.mp4' --container Mov --output-dir '.\out-remux'
-& $LP transcode --input '.\video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir '.\out-transcode'
+.\LivePhoto\LivePhoto.exe extract-frame --input '.\video.mp4' --frame-index 0 --format Jpeg --output-dir '.\out-frame'
+.\LivePhoto\LivePhoto.exe trim --input '.\video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir '.\out-trim'
+.\LivePhoto\LivePhoto.exe remux --input '.\video.mp4' --container Mov --output-dir '.\out-remux'
+.\LivePhoto\LivePhoto.exe transcode --input '.\video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir '.\out-transcode'
+```
+
+Linux（Bash/Zsh）：
+
+```sh
+./LivePhoto/bin/LivePhoto extract-frame --input './video.mp4' --frame-index 0 --format Jpeg --output-dir './out-frame'
+./LivePhoto/bin/LivePhoto trim --input './video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir './out-trim'
+./LivePhoto/bin/LivePhoto remux --input './video.mp4' --container Mov --output-dir './out-remux'
+./LivePhoto/bin/LivePhoto transcode --input './video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir './out-transcode'
 ```
 
 这些示例假设可用 FFmpeg 在 PATH 中，也可追加 `--ffmpeg '完整路径'`。`LosslessPreferred` 是默认裁剪模式，应读取结果中请求与实际边界；`Exact` 必要时转码仍需 `--allow-transcode`。`--frame-index` 是 **zero-based presentation order**，不是 decode order。时间参数单位为微秒。
