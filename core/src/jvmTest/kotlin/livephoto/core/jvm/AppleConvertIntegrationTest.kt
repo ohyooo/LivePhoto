@@ -89,7 +89,16 @@ class AppleConvertIntegrationTest {
                                 assertEquals(Coverage.Partial, keyed.validation.coverage)
                                 val keyPath = directory.resolve("keyed HEIC pair real movie.mov"); owned.add(keyPath)
                                 save(keyed.output.assets[1].readableSource!!, keyPath); decode(keyPath)
-                            } finally { keyed.output.assets.forEach { it.readableSource?.close() }; heic.close() }
+                            } finally { keyed.output.assets.forEach { it.readableSource?.close() } }
+                            val heicClean = core.split(SplitRequest(SourceSet.Pair(heic, pair.video), output = MemoryOutputTransaction(context, "real-heic-mov-clean"), context = context)).orThrow()
+                            try {
+                                assertEquals("image/heic", heicClean.output.assets[0].mime)
+                                val detected = core.detect(ReadRequest(SourceSet.Single(heicClean.output.assets[0].readableSource!!), context)).orThrow()
+                                assertEquals(Disposition.Unknown, detected.disposition); assertTrue(detected.matches.isEmpty())
+                                val cleanPath = directory.resolve("clean HEIC pair real movie.mov"); owned.add(cleanPath)
+                                save(heicClean.output.assets[1].readableSource!!, cleanPath); decode(cleanPath)
+                                assertEquals(heicBefore, sha256Range(BinaryReader(heic, context), ByteRange(0uL, heic.size().orThrow())).orThrow())
+                            } finally { heicClean.output.assets.forEach { it.readableSource?.close() }; heic.close() }
                             assertEquals(before, sha256Range(original, facts.range).orThrow())
                         } finally { converted.output.assets.forEach { it.readableSource?.close() } }
                     } finally { liveMov.output.assets.forEach { it.readableSource?.close() } }

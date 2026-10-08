@@ -19,8 +19,11 @@ internal object ApplePairOperations {
                 val verified = raw.verify(id, staged)
                 val budget = ParseBudget(request.context)
                 if (role == AssetRole.PrimaryImage) {
-                    val jpeg = JpegParser.parse(staged, budget).orThrow()
-                    if (AppleImageReader.read(staged, jpeg, budget).orThrow() != null) fail("POSTCONDITION_FAILED", "Staged Apple image retains CID", Stage.Verify)
+                    if (session.heifItems != null) AppleHeifClean.validateRetired(staged, budget).orThrow()
+                    else {
+                        val jpeg = JpegParser.parse(staged, budget).orThrow()
+                        if (AppleImageReader.read(staged, jpeg, budget).orThrow() != null) fail("POSTCONDITION_FAILED", "Staged Apple image retains CID", Stage.Verify)
+                    }
                 } else {
                     if (AppleVideoReader.read(staged, budget).orThrow() != null) fail("POSTCONDITION_FAILED", "Staged movie retains CID", Stage.Verify)
                     val media = BmffVideoProbe(staged, budget, allowTimedMetadata = true).probe(ByteRange(0uL, staged.identity().orThrow().size)).orThrow()
@@ -36,7 +39,7 @@ internal object ApplePairOperations {
                         proof = "Ordinary bytes remain at the same offsets; opaque associations to removed binding are unproven")))
             })
         }
-        val assets = listOf(asset(imageReader, AssetRole.PrimaryImage, "image/jpeg"), asset(videoReader, AssetRole.MotionVideo, videoFacts(plan.media).mime!!))
+        val assets = listOf(asset(imageReader, AssetRole.PrimaryImage, session.inspection.media.first().mime!!), asset(videoReader, AssetRole.MotionVideo, videoFacts(plan.media).mime!!))
         publish(request.output, request.policy, request.context, session.readers + listOf(imageReader, videoReader), assets, changes(session)).orThrow()
     }
 

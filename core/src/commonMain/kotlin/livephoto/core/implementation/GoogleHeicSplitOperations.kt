@@ -1,14 +1,25 @@
 package livephoto.core.implementation
 
 import livephoto.core.*
+import livephoto.core.apple.AppleHeifClean
 import livephoto.core.binary.*
 import livephoto.core.heif.*
 
 internal object GoogleHeicSplitOperations {
+    private suspend fun validateCleanCarrier(reader: BinaryReader, budget: ParseBudget, stage: Stage) {
+        when (val result = HeifCodedCarrier.read(reader, budget, stage)) {
+            is CoreResult.Success -> Unit
+            is CoreResult.Failure -> {
+                if (result.error.code.value !in setOf("UNSAFE_METADATA_REWRITE", "CAPABILITY_UNSUPPORTED")) throw CoreFault(result.error)
+                // Separate finite profile; do not broaden the coded-only writer's ownership gate.
+                AppleHeifClean.validateRetired(reader, budget).orThrow()
+            }
+        }
+    }
     suspend fun preflight(request: SplitRequest, session: SourceSession, budget: ParseBudget): HeifMotionCleanup? {
         val cleanup = if (session.bindings.isEmpty()) {
             // SPL-01: an already-clean classified HEIC remains unchanged. Unknown/mixed metadata is not inferred clean.
-            HeifCodedCarrier.read(session.reader, budget, Stage.Plan).orThrow()
+            validateCleanCarrier(session.reader, budget, Stage.Plan)
             null
         } else HeifMotionCleanup.prepare(session, budget).orThrow()
         val bytes = if (cleanup == null) session.reader.identity().orThrow().size else checkedAdd(cleanup.byteLength, session.bindings.single().video!!.length)
@@ -31,7 +42,7 @@ internal object GoogleHeicSplitOperations {
                 verify = { id, reader ->
                     if (reader.identity().orThrow().size != identity.size || sha256Range(reader, ByteRange(0uL, identity.size)).orThrow() != digest)
                         fail("POSTCONDITION_FAILED", "Idempotent clean HEIC is not byte-identical", Stage.Verify)
-                    HeifCodedCarrier.read(reader, ParseBudget(request.context), Stage.Validate).orThrow()
+                    validateCleanCarrier(reader, ParseBudget(request.context), Stage.Validate)
                     val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, ParseBudget(request.context)).orThrow()
                     AssetVerification(validateSession(staged, listOf(Layer.Structure)).orThrow(), listOf(
                         GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.Verified, digest, digest),

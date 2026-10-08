@@ -208,6 +208,23 @@ try {
                 if ($LASTEXITCODE -ne 0 -or (($pairAfterJson | ConvertFrom-Json).result.pairing | ConvertTo-Json -Depth 10 -Compress) -ne $pairBefore) { throw 'Apple HEIC SetKey changed CID pairing.' }
             }
             if ((Get-FileHash $keyMovie).Hash.ToLowerInvariant() -ne $appleHeifManifest["key-motion.$container"]) { throw 'Apple HEIC key zero roundtrip did not restore every movie byte.' }
+            $cleanJson = & $launcher split --input $keyImage --pair-video $keyMovie --output-dir (Join-Path $verify "Apple HEIC clean $container")
+            if ($LASTEXITCODE -ne 0) { throw "Apple HEIC Clean failed: $cleanJson" }
+            $clean = ($cleanJson | ConvertFrom-Json).result
+            if ($clean.output.assets.Count -ne 2 -or $clean.output.assets[0].mime -ne 'image/heic' -or
+                -not ($clean.preservation.records | Where-Object { $_.guarantee -eq 'MetadataPreserving' -and $_.outcome -eq 'Unknown' }) -or
+                ($clean.execution | Where-Object { $_.transcoded -or $_.remuxed })) { throw 'Apple HEIC Clean must retain explicit unknown associations and never encode.' }
+            $ordinaryJson = & $launcher detect --input $clean.output.assets[0].path
+            if ($LASTEXITCODE -ne 0 -or ($ordinaryJson | ConvertFrom-Json).result.disposition -ne 'Unknown' -or
+                @((($ordinaryJson | ConvertFrom-Json).result.matches)).Count -ne 0) { throw 'Apple HEIC Clean must have no Apple CID candidate but retain unknown ordinary Exif associations.' }
+            foreach ($asset in $clean.output.assets) {
+                $hash = (Get-FileHash $asset.path).Hash
+                $repeatJson = & $launcher split --input $asset.path --strict --output-dir (Join-Path $verify "Apple HEIC repeat clean $container $($asset.role)")
+                if ($LASTEXITCODE -ne 0) { throw "Apple HEIC repeated Clean failed: $repeatJson" }
+                $repeat = ($repeatJson | ConvertFrom-Json).result
+                if ($repeat.output.assets.Count -ne 1 -or (Get-FileHash $repeat.output.assets[0].path).Hash -ne $hash -or
+                    @($repeat.preservation.changes).Count -ne 0 -or ($repeat.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) { throw 'Apple HEIC Clean is not byte-exact idempotent.' }
+            }
         }
         foreach ($name in $appleHeifInputs.Keys) {
             if ((Get-FileHash $appleHeifInputs[$name]).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC borrowed input changed.' }
@@ -215,6 +232,7 @@ try {
     } finally { $env:Path = $appleHeifPath }
     Write-Host 'PORTABLE_APPLE_HEIC_NO_FFMPEG=SUCCESS scope=finite-synthetic-pair-item-graph-byte-exact-not-decode-or-device'
     Write-Host 'PORTABLE_APPLE_HEIC_SETKEY_NO_FFMPEG=SUCCESS scope=classified-mp4-mov-fixed-time-fields-whole-primary-not-image-rewrite-or-device'
+    Write-Host 'PORTABLE_APPLE_HEIC_CLEAN_NO_FFMPEG=SUCCESS scope=cid-only-fixed-retirement-and-byte-exact-idempotence-unknown-associations-not-device'
     if ($IsWindows -and $windowsDecoderAvailable) {
         $windowsFixtures = Join-Path $repository 'core/build/portable-windows-fixtures'
         $fixtureManifest = @{}

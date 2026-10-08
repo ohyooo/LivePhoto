@@ -50,6 +50,13 @@ class AppleHeifPortableFixtureTest {
                 assertEquals(0, changed.keyPhoto!!.position!!.compareTo(Time(40, 1000u)))
                 assertEquals(Coverage.Partial, changed.validation.coverage)
             } finally { changed.output.assets.forEach { it.readableSource?.close() } }
+            val cleaned = core.split(SplitRequest(input, output = MemoryOutputTransaction(context, "export-heic-clean-$mov"), context = context)).orThrow()
+            try {
+                val detected = core.detect(ReadRequest(SourceSet.Single(cleaned.output.assets[0].readableSource!!), context)).orThrow()
+                assertEquals(Disposition.Unknown, detected.disposition); assertTrue(detected.matches.isEmpty())
+                AppleHeifClean.validateRetired(BinaryReader(cleaned.output.assets[0].readableSource!!, context), ParseBudget(context)).orThrow()
+                assertTrue(cleaned.preservation.records.any { it.guarantee == Guarantee.MetadataPreserving && it.outcome == GuaranteeOutcome.Unknown })
+            } finally { cleaned.output.assets.forEach { it.readableSource?.close() } }
             val suffix = if (mov) "mov" else "mp4"
             fixtures["key-$suffix.heic"] = primary; fixtures["key-motion.$suffix"] = motion
             input.image.close(); input.video.close()

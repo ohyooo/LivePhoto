@@ -13,6 +13,12 @@ internal data class AppleCleanVideoPlan(val video: BinarySource, val media: Vide
 /** Deliberately narrow: CID-only MakerNote and dedicated, fully understood movie bindings. */
 internal object AppleClean {
     suspend fun prepare(session: SourceSession, budget: ParseBudget): CoreResult<AppleCleanPlan> = attempt {
+        val image = if (session.heifItems != null) AppleHeifClean.prepare(session, budget).orThrow() else prepareJpeg(session, budget).orThrow()
+        val movie = prepareVideo(session, budget).orThrow()
+        AppleCleanPlan(image, movie.video, movie.media)
+    }
+
+    private suspend fun prepareJpeg(session: SourceSession, budget: ParseBudget): CoreResult<BinarySource> = attempt {
         val pair = session.applePair ?: unsafe("A complete Apple pair is required")
         val jpeg = session.jpeg ?: unsafe("Only JPEG Apple images have a cleanup model")
         if (jpeg.trailing.length != 0uL || jpeg.hasMpf) unsafe("Auxiliary image dependencies require a dedicated cleanup model")
@@ -46,8 +52,7 @@ internal object AppleClean {
         if (imageSession.bindings.isNotEmpty()) unsafe("Image retains another protocol binding")
         if (codingDigest(session) != codingDigest(imageSession)) fail("POSTCONDITION_FAILED", "Image coding changed during Apple cleanup", Stage.Verify)
 
-        val movie = prepareVideo(session, budget).orThrow()
-        AppleCleanPlan(image, movie.video, movie.media)
+        image
     }
 
     /** Shared closed movie ownership gate. Does not inspect, clean or rewrite the primary image. */
