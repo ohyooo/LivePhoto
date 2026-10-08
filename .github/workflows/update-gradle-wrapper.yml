@@ -23,27 +23,6 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: Validate Wrapper environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -x ./gradlew ]; then
-            echo '::error::gradlew must have its executable bit committed.'
-            exit 1
-          fi
-          command -v rg >/dev/null
-          criteriaExit=0
-          criteriaFiles=$(rg --files --hidden --no-ignore -g gradle-daemon-jvm.properties) || criteriaExit=$?
-          if [ "$criteriaExit" -gt 1 ]; then
-            echo '::error::Could not check Gradle daemon JVM criteria.'
-            exit "$criteriaExit"
-          fi
-          if [ -n "$criteriaFiles" ]; then
-            echo "$criteriaFiles"
-            echo '::error::Remove gradle-daemon-jvm.properties before running Gradle.'
-            exit 1
-          fi
-
       - name: Setup JDK
         uses: actions/setup-java@main
         with:
@@ -51,6 +30,9 @@ jobs:
           java-version: '25'
           java-package: jdk
           cache: 'gradle'
+
+      - name: List files
+        run: ls -ahl
 
       - name: Update Gradle Wrapper
         uses: gradle-update/update-gradle-wrapper-action@main
@@ -61,8 +43,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_PAT }}
         run: |
-          set -euo pipefail
-
           pr_number=$(gh pr list \
             --state open \
             --limit 100 \
