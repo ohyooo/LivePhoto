@@ -262,7 +262,8 @@ internal object GoogleOperations {
                 if (size != range.length || sha256Range(reader, ByteRange(0uL, size)).orThrow() != digest) fail("POSTCONDITION_FAILED", "Raw extraction is not byte-identical", Stage.Verify)
                 val check = CheckResult("extraction.sha256", Layer.Preservation, Verdict.Valid, Coverage.Complete)
                 val jpeg = session.jpeg
-                val metadataSafe = role == AssetRole.Composite || role == AssetRole.MotionVideo || session.legacyPair != null && range == ByteRange(0uL, inputReader.identity().orThrow().size) || role == AssetRole.PrimaryImage && jpeg != null && jpeg.trailing.length == 0uL && !jpeg.hasMpf
+                val metadataSafe = role == AssetRole.Composite || role == AssetRole.MotionVideo || session.legacyPair != null && range == ByteRange(0uL, inputReader.identity().orThrow().size) || role == AssetRole.PrimaryImage &&
+                    (jpeg != null && jpeg.trailing.length == 0uL && !jpeg.hasMpf || session.heifItems != null && range == ByteRange(0uL, inputReader.identity().orThrow().size))
                 val videoVerified = if (role == AssetRole.Composite) session.videos.isNotEmpty() else session.bindings.any { it.video == range && it.protocol in session.videos }
                 val imageVerified = if (role == AssetRole.AuxiliaryImage) session.gainMaps.any { it.range == range } else session.inspection.media.firstOrNull()?.width != null && session.inspection.media.firstOrNull()?.height != null
                 AssetVerification(ValidationReport(Verdict.Valid, Coverage.Complete, listOf(check), snapshot = session.snapshot), exactRecords(id, digest, role, metadataSafe, videoVerified, imageVerified))

@@ -48,6 +48,15 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
     override fun getProtocolCapabilities(target: ProtocolSelector): ProtocolCapabilities {
         if (target.protocol == ProtocolIds.Apple) {
             val actual = if (target.profile == null) target.copy(profile = ProfileId("jpeg-mov")) else target
+            if (actual.profile in setOf(ProfileId("heic-mov"), ProfileId("heic-mp4"))) {
+                val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey, Operation.ConvertFrom)
+                return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
+                    if (operation in reads) Implementation.Experimental else if (operation in setOf(Operation.Create, Operation.ConvertTo)) Implementation.Planned else Implementation.Unsupported,
+                    conditions = if (operation in reads) listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text("direct-hvc1-primary-one-contiguous-exif-item-unique-cdsc-formal-apple-maker-note-cid-exact-id-movie-pair"))) +
+                        if (operation == Operation.ConvertFrom) listOf(Condition(ConditionOperator.Equals, "conversionScope", Value.Text("unchanged-same-target-preserve-as-is-only-no-edits-or-format-preferences"))) else emptyList() else emptyList(),
+                    reasons = if (operation in reads) emptyList() else listOf(IssueCode(if (operation in setOf(Operation.Create, Operation.ConvertTo)) "CAPABILITY_PLANNED" else "CAPABILITY_UNSUPPORTED")),
+                    verification = if (operation in reads) listOf(Verification.SourceReviewed) else emptyList()) })
+            }
             if (actual.profile !in setOf(ProfileId("jpeg-mov"), ProfileId("jpeg-mp4"))) return ProtocolRegistry.planned().capabilities(actual)
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
             val writes = setOf(Operation.SplitClean, Operation.ConvertFrom, Operation.SetKey) + if (actual.profile == ProfileId("jpeg-mp4")) setOf(Operation.ConvertTo, Operation.Create)

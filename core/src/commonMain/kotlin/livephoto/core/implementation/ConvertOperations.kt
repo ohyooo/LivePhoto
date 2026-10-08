@@ -49,7 +49,8 @@ internal object ConvertOperations {
                 val identity = reader.identity().orThrow()
                 val role = if (session.legacyPair == null && session.applePair == null) AssetRole.Composite else if (reader === session.reader) AssetRole.PrimaryImage else AssetRole.MotionVideo
                 GoogleOperations.rawAsset(session, ByteRange(0uL, identity.size), role,
-                    if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.let { videoFacts(it).mime } ?: "application/octet-stream" else "image/jpeg", request.context,
+                    if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.let { videoFacts(it).mime } ?: "application/octet-stream"
+                    else session.inspection.media.firstOrNull { it.imageFormat != null }?.mime ?: "application/octet-stream", request.context,
                     container = if (role == AssetRole.MotionVideo) session.videos.values.firstOrNull()?.container else null, inputReader = reader)
             }
             return@attempt publish(request.output, request.policy, request.context, session.readers, assets).orThrow()

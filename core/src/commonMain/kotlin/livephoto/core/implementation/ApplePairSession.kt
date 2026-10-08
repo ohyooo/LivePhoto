@@ -6,25 +6,29 @@ import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.jpeg.*
 import livephoto.core.xmp.*
+import livephoto.core.heif.*
 
 internal data class ApplePairFacts(val imageReader: BinaryReader, val videoReader: BinaryReader)
 
 /** Only parsed identifiers establish pairing; filenames and candidate order carry no authority. */
 internal object ApplePairSession {
-    private data class Image(val reader: BinaryReader, val jpeg: JpegStructure, val id: AppleImageIdentifier)
+    private data class Image(val reader: BinaryReader, val jpeg: JpegStructure?, val id: AppleImageIdentifier, val heif: AppleHeifImage? = null)
     private data class Video(val reader: BinaryReader, val id: AppleVideoIdentifier)
 
     suspend fun open(input: SourceSet, readers: List<BinaryReader>, snapshot: Snapshot, budget: ParseBudget): CoreResult<SourceSession?> = attempt {
         val images = mutableListOf<Image>()
         val videos = mutableListOf<Video>()
         for (reader in readers) {
-            when (detectContent(reader).orThrow().kind) {
+            val content = detectContent(reader).orThrow()
+            when (content.kind) {
                 ContentKind.Jpeg -> {
                     val jpeg = JpegParser.parse(reader, budget).orThrow()
                     val id = AppleImageReader.read(reader, jpeg, budget).orThrow()
                     if (id != null) images += Image(reader, jpeg, id)
                 }
-                ContentKind.IsoBmff -> AppleVideoReader.read(reader, budget).orThrow()?.let { videos += Video(reader, it) }
+                ContentKind.IsoBmff -> if (BmffBrandHint.Heic in content.brandHints) {
+                    AppleHeifImageReader.read(reader, budget).orThrow()?.let { images += Image(reader, null, it.identifier, it) }
+                } else AppleVideoReader.read(reader, budget).orThrow()?.let { videos += Video(reader, it) }
                 else -> Unit
             }
         }
@@ -55,7 +59,7 @@ internal object ApplePairSession {
                 }
             }
         }
-        val profile = if (media?.container == VideoContainer.Mp4) "jpeg-mp4" else "jpeg-mov"
+        val profile = "${if (image?.heif != null) "heic" else "jpeg"}-${if (media?.container == VideoContainer.Mp4) "mp4" else "mov"}"
         val selector = ProtocolSelector(ProtocolIds.Apple, ProfileId(profile))
         val regions = mutableListOf<Region>()
         if (image != null) regions += Region(ResourceId("primary"), image.reader.identity().orThrow().id, ByteRange(0uL, image.reader.identity().orThrow().size), ResourceKind.PrimaryImage, ProtocolIds.Apple)
@@ -66,15 +70,15 @@ internal object ApplePairSession {
         val metadata = listOfNotNull(
             image?.let { MetadataEntry("apple:image:content-identifier", value = Value.Text(it.id.value), owner = Ownership.SourceProtocol, location = Location(source = it.reader.identity().orThrow().id, range = it.id.range), origin = FactOrigin.Parsed) },
             video?.let { MetadataEntry(APPLE_CID, value = Value.Text(it.id.value), owner = Ownership.SourceProtocol, location = Location(source = it.reader.identity().orThrow().id, range = it.id.range), origin = FactOrigin.Parsed) })
-        val facts = listOfNotNull(image?.let { jpegFacts(it.reader, it.jpeg) }, media?.let(::videoFacts))
+        val facts = listOfNotNull(image?.let { it.heif?.media ?: jpegFacts(it.reader, it.jpeg!!) }, media?.let(::videoFacts))
         val inspection = InspectionResult(snapshot, detection,
             Layout(snapshot.identities, regions.toList(), regions.map { Resource(it.id, it.kind, listOf(it), true) },
                 if (pair == null) emptyList() else listOf(Relationship(RelationshipKind.PairedWith, ResourceId("primary"), videoId(ProtocolIds.Apple)))),
             facts, metadata, key, PairingFacts(image?.id?.value, video?.id?.value, pair != null), issues.toList())
         val binding = CarrierBinding(ProtocolIds.Apple, video?.let { ByteRange(0uL, it.reader.identity().orThrow().size) }, key = key, issues = issues.toList(), profile = ProfileId(profile))
         for (reader in readers) reader.validateIdentity().orThrow()
-        SourceSession(readers, snapshot, image?.jpeg, image?.let { XmpReader.readJpeg(it.reader, it.jpeg, budget).orThrow() }, listOf(binding),
+        SourceSession(readers, snapshot, image?.jpeg, image?.jpeg?.let { XmpReader.readJpeg(image.reader, it, budget).orThrow() }, listOf(binding),
             media?.let { mapOf(ProtocolIds.Apple to it) } ?: emptyMap(), inspection,
-            applePair = pair?.let { ApplePairFacts(it.first.reader, it.second.reader) })
+            applePair = pair?.let { ApplePairFacts(it.first.reader, it.second.reader) }, heifItems = image?.heif?.graph)
     }
 }

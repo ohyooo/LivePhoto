@@ -103,6 +103,7 @@ internal class SourceSession internal constructor(
                         reader.validateIdentity().orThrow()
                         return@attempt SourceSession(readers, snapshot, null, null, listOf(binding), if (video == null) emptyMap() else mapOf(binding.protocol to video), inspection, sef = heic.directory, heifItems = heic.itemGraph, heifPrimaryIssues = heic.primaryIssues)
                     }
+                    ApplePairSession.open(input, readers, snapshot, budget).orThrow()?.let { return@attempt it }
                     HeifImageSession.open(reader, snapshot, budget).orThrow()?.let { return@attempt it }
                 }
                 val detection = DetectionResult(Disposition.Unknown, matches = emptyList(), snapshot = snapshot)

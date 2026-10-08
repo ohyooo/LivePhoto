@@ -64,6 +64,7 @@ public class ProtocolRegistry(entries: List<ProtocolCapabilities> = emptyList())
                 ProtocolIds.Huawei to "honor-extended",
                 ProtocolIds.Apple to "jpeg-mov",
                 ProtocolIds.Apple to "heic-mov",
+                ProtocolIds.Apple to "heic-mp4",
                 ProtocolIds.Apple to "jpeg-mp4",
                 ProtocolIds.Fusion to "jpeg",
             )

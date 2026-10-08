@@ -10,12 +10,17 @@ internal data class AppleImageIdentifier(val value: String, val range: ByteRange
 /** Only the MakerNote reached from IFD0's formal ExifIFD can own an Apple image identifier. */
 internal object AppleImageReader {
     suspend fun read(reader: BinaryReader, jpeg: JpegStructure, budget: ParseBudget, documents: List<TiffDocument>? = null): CoreResult<AppleImageIdentifier?> = attempt {
-        val found = mutableListOf<AppleImageIdentifier>()
-        var totalNotes = 0
         val tiffs = documents ?: jpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }.map { segment ->
             val payload = segment.payload!!
             TiffReader(reader, budget).read(ByteRange(payload.offset + 6uL, payload.length - 6uL)).orThrow()
         }
+        readDocuments(reader, tiffs, budget).orThrow()
+    }
+
+    /** TIFF offsets stay in the reader's address space, including a HEIF logical Exif view. */
+    suspend fun readDocuments(reader: BinaryReader, tiffs: List<TiffDocument>, budget: ParseBudget): CoreResult<AppleImageIdentifier?> = attempt {
+        val found = mutableListOf<AppleImageIdentifier>()
+        var totalNotes = 0
         for (tiff in tiffs) {
             val root = tiff.ifds.singleOrNull { it.relativeOffset == tiff.firstIfdOffset } ?: continue
             val pointers = root.entries.filter { it.tag == 0x8769u.toUShort() }
