@@ -23,4 +23,5 @@ tasks.named<Test>("jvmTest") {
     outputs.dir(layout.buildDirectory.dir("reports/huawei-heic-fixtures"))
     outputs.dir(layout.buildDirectory.dir("reports/samsung-remux-fixtures"))
     outputs.dir(layout.buildDirectory.dir("reports/vivo-remux-fixtures"))
+    outputs.dir(layout.buildDirectory.dir("reports/huawei-remux-fixtures"))
 }

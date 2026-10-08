@@ -7,6 +7,7 @@ import livephoto.core.google.GoogleFixtures
 import livephoto.core.implementation.videoFacts
 import livephoto.core.memory.*
 import livephoto.core.vivo.VivoFixtures
+import livephoto.core.huawei.HuaweiFixtures
 import kotlin.test.*
 
 /** Independent indexed SEF fixtures and adversarial backends; no decoder/device claim. */
@@ -232,6 +233,99 @@ class SamsungRemuxRepairTest {
             assertTrue(tx.query().orThrow().assetIds.isEmpty())
         }
         assertEquals(0, processor.calls)
+    }
+
+    @Test fun huaweiContainerCorrectionCopiesEntireImageAndOpaqueFieldsWithoutInventingKeyUnits(): Unit = runImmediate {
+        for (audio in listOf(false, true)) {
+            val bytes = GoogleFixtures.video(aac = audio, hevc = audio).bytes
+            val fixture = HuaweiFixtures.photo(mov(bytes), jpeg = GoogleFixtures.jpeg(GoogleFixtures.segment(0xfe, "ordinary copyright".encodeToByteArray())),
+                prefix = "v6_f09", history = "01:0002")
+            val original = fixture.bytes.copyOf().also { it[it.size - 54] = 0; it[it.size - 33] = 0 }
+            val input = source(original)
+            assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore().repair(request(input))).error.code.value)
+            val processor = backend(bytes)
+            val core = DefaultLivePhotoCore(processor)
+            val preview = core.repair(request(input)).orThrow()
+            assertTrue(preview.blocked.isEmpty(), preview.blocked.toString()); assertEquals(0, processor.calls)
+            assertTrue(preview.issuesBefore.any { it.code.value == "TIMESTAMP_SEMANTICS_UNKNOWN" })
+            val blocked = core.repair(request(input, allowed = listOf(IssueCode("SEF_DIRECTORY_INVALID")))).orThrow()
+            assertTrue(blocked.blocked.any { it.code.value == "UNSUPPORTED_CONTAINER" }); assertEquals(0, processor.calls)
+            val tx = MemoryOutputTransaction(context, "huawei-$audio")
+            val result = core.repair(request(input, tx, dry = false, policy = MutationPolicy(preservation = PreservationPolicy.Strict,
+                requiredGuarantees = listOf(Guarantee.ImageDataPreserving, Guarantee.MetadataPreserving, Guarantee.BitstreamPreserving)))).orThrow()
+            val operation = assertNotNull(result.operation)
+            try {
+                val output = tx.committedAssets().values.single().toByteArray()
+                assertContentEquals(fixture.jpeg, output.copyOfRange(0, fixture.jpeg.size))
+                assertContentEquals(bytes, output.copyOfRange(fixture.jpeg.size, output.size - 60))
+                assertContentEquals(original.copyOfRange(original.size - 60, original.size - 20), output.copyOfRange(output.size - 60, output.size - 20))
+                val key = core.getKeyPhotoPosition(ReadRequest(SourceSet.Single(operation.output.assets.single().readableSource!!), context)).orThrow()
+                assertNull(key.position); assertEquals(KeySource.Unknown, key.source)
+                assertTrue(key.rawFields.all { it.unit == "unknown" })
+                assertTrue(result.issuesAfter.any { it.code.value == "TIMESTAMP_SEMANTICS_UNKNOWN" })
+                assertTrue(result.issuesAfter.none { it.code.value == "UNSUPPORTED_CONTAINER" })
+                assertTrue(operation.execution.none { it.transcoded })
+                val again = DefaultLivePhotoCore().repair(request(operation.output.assets.single().readableSource!!)).orThrow()
+                assertTrue(again.proposedChanges.isEmpty()); assertNull(again.operation)
+                assertEquals(Bytes(original), input.readAt(0uL, original.size.toUInt()).orThrow())
+            } finally { operation.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
+
+    @Test fun huaweiUnconfirmedExtensionsGapsMetadataAndDishonestBackendNeverPublish(): Unit = runImmediate {
+        val fixture = GoogleFixtures.video()
+        val bytes = fixture.bytes
+        val processor = backend(bytes)
+        for (carrier in listOf(HuaweiFixtures.photo(mov(bytes), prefix = "v1_f1").bytes,
+            HuaweiFixtures.photo(mov(bytes), extra = byteArrayOf(1)).bytes,
+            HuaweiFixtures.photo(mov(bytes), jpeg = GoogleFixtures.jpeg(GoogleFixtures.segment(0xe3, byteArrayOf(1)))).bytes,
+            HuaweiFixtures.photo(mov(bytes) + GoogleFixtures.box("uuid", ByteArray(16))).bytes)) {
+            val tx = MemoryOutputTransaction(context, "huawei-refused")
+            assertIs<CoreResult.Failure>(DefaultLivePhotoCore(processor).repair(request(source(carrier), tx, dry = false)))
+            assertTrue(tx.query().orThrow().assetIds.isEmpty())
+        }
+        assertEquals(0, processor.calls)
+        for (dishonest in listOf(backend(bytes, encoded = true), backend(bytes.copyOf().also { it[fixture.sampleOffset.toInt() + 5] = 0x89.toByte() }))) {
+            val tx = MemoryOutputTransaction(context, "huawei-dishonest")
+            assertEquals("POSTCONDITION_FAILED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore(dishonest)
+                .repair(request(source(HuaweiFixtures.photo(mov(bytes)).bytes), tx, dry = false))).error.code.value)
+            assertTrue(tx.committedAssets().isEmpty())
+        }
+    }
+
+    @Test fun huaweiOpaqueTailTamperWriteFailureCancellationAndLimitsNeverCommit(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video().bytes
+        for (fault in 0..3) {
+            var cancelled = false; var commits = 0
+            val current = context.copy(cancellation = Cancellation { cancelled })
+            val base = MemoryOutputTransaction(current, "huawei-final-fault-$fault")
+            val output = object : OutputTransaction by base {
+                override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> {
+                    if (fault == 1) return CoreResult.Failure(CoreError(IssueCode("IO_WRITE_FAILED"), Stage.WriteProtocol, "Synthetic final write failure"))
+                    return base.create(spec)
+                }
+                override suspend fun prepare(): CoreResult<Unit> {
+                    if (fault == 2) cancelled = true
+                    return base.prepare()
+                }
+                override suspend fun openStaged(id: AssetId): CoreResult<BinarySource> {
+                    val staged = base.openStaged(id).orThrow()
+                    if (fault != 0) return CoreResult.Success(staged)
+                    val identity = staged.identity().orThrow()
+                    val changed = BinaryReader(staged, current).readExactly(0uL, identity.size.toUInt()).orThrow().toByteArray()
+                    staged.close()
+                    changed[changed.size - 56] = '9'.code.toByte() // A valid opaque prefix, not an authorized length change.
+                    return CoreResult.Success(MemoryBinarySource(Bytes(changed), identity.id))
+                }
+                override suspend fun commit(): CoreResult<Receipt> { commits++; return base.commit() }
+            }
+            val processor = backend(bytes)
+            val req = request(source(HuaweiFixtures.photo(mov(bytes)).bytes), output, dry = false).copy(context =
+                if (fault == 3) current.copy(limits = current.limits.copy(maxSpoolBytes = 16uL)) else current)
+            assertEquals(listOf("POSTCONDITION_FAILED", "IO_WRITE_FAILED", "CANCELLED", "RESOURCE_LIMIT_EXCEEDED")[fault],
+                assertIs<CoreResult.Failure>(DefaultLivePhotoCore(processor).repair(req)).error.code.value)
+            assertEquals(0, commits); assertTrue(base.committedAssets().isEmpty())
+        }
     }
 
     private class CopyBackend(val bytes: ByteArray, val encoded: Boolean, val after: () -> Unit) : MediaBackend {

@@ -4,6 +4,7 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.google.*
+import livephoto.core.huawei.*
 import livephoto.core.jpeg.*
 import livephoto.core.memory.MemoryOutputTransaction
 import livephoto.core.samsung.*
@@ -13,7 +14,7 @@ import livephoto.core.xml.*
 /** One evidenced container correction, not arbitrary media recovery. Intermediate assets stay private. */
 internal object RemuxRepairOperations {
     private data class Prepared(val session: SourceSession, val binding: CarrierBinding, val image: BinarySource,
-        val movie: BinarySource, val rawKey: String, val key: KeyPhotoResult, val result: RepairResult)
+        val movie: BinarySource, val rawKey: String?, val key: KeyPhotoResult, val result: RepairResult)
 
     private suspend fun prepare(request: RepairRequest, backend: MediaBackend?): Prepared {
         RequestValidation.validate(request).orThrow()
@@ -23,13 +24,14 @@ internal object RemuxRepairOperations {
             fail("PRESERVATION_REQUIREMENT_FAILED", "Container repair cannot preserve the entire original carrier byte-exactly", Stage.Plan)
         val budget = ParseBudget(request.context)
         val session = SourceSession.open(request.input, request.context, budget).orThrow()
-        val binding = session.bindings.singleOrNull { it.protocol in setOf(ProtocolIds.Samsung, ProtocolIds.VivoModern) }
-            ?: fail("CAPABILITY_UNSUPPORTED", "Explicit remux requires canonical Samsung JPEG mpv3 or minimal vivo version-one JPEG", Stage.Plan)
+        val binding = session.bindings.singleOrNull { it.protocol in setOf(ProtocolIds.Samsung, ProtocolIds.VivoModern, ProtocolIds.Huawei) }
+            ?: fail("CAPABILITY_UNSUPPORTED", "Explicit remux requires a confirmed finite Samsung, vivo or Huawei JPEG profile", Stage.Plan)
         val jpeg = session.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "HEIC container repair is not implemented", Stage.Plan)
-        if (!binding.structurallyValid || session.bindings.size != 2 ||
-            session.bindings.count { it.protocol == ProtocolIds.GoogleV2 } != 1 || session.gainMaps.isNotEmpty() ||
+        val huawei = binding.protocol == ProtocolIds.Huawei
+        if (!binding.structurallyValid || session.bindings.size != (if (huawei) 1 else 2) ||
+            session.bindings.count { it.protocol == ProtocolIds.GoogleV2 } != (if (huawei) 0 else 1) || session.gainMaps.isNotEmpty() ||
             jpeg.segments.any { it.payloadKind in setOf(AppPayloadKind.Exif, AppPayloadKind.Mpf, AppPayloadKind.ExtendedXmp) } ||
-            session.xmp?.rewriteAllowed != true)
+            (if (huawei) session.xmp?.packets?.isNotEmpty() != false else session.xmp?.rewriteAllowed != true))
             fail("REPAIR_AMBIGUOUS", "Container repair refuses unknown authority, legacy/ordinary SEF, auxiliary or opaque offset metadata", Stage.Plan)
         val jfif = ReplaceOperations.canonicalJfif(session)
         if (jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown && it != jfif })
@@ -39,9 +41,10 @@ internal object RemuxRepairOperations {
         val video = session.videos[binding.protocol] ?: fail("REPAIR_NOT_POSSIBLE", "Indexed movie is not independently valid", Stage.Plan)
         if (video.container !in setOf(VideoContainer.Mp4, VideoContainer.Mov))
             fail("CAPABILITY_UNSUPPORTED", "Unknown containers cannot authorize a correction", Stage.Plan)
-        val rawKey = session.xmp.scalar(CAMERA_URI, "MotionPhotoPresentationTimestampUs").orThrow()
-            ?: fail("REPAIR_AMBIGUOUS", "Container correction requires an existing explicit key field", Stage.Plan)
-        val key = if (rawKey == "-1") KeyPhotoResult(source = KeySource.Unknown) else {
+        val rawKey = if (huawei) null else (session.xmp!!.scalar(CAMERA_URI, "MotionPhotoPresentationTimestampUs").orThrow()
+            ?: fail("REPAIR_AMBIGUOUS", "Container correction requires an existing explicit key field", Stage.Plan))
+        val key = if (huawei) binding.key else if (rawKey == "-1") KeyPhotoResult(source = KeySource.Unknown) else {
+            val rawKey = rawKey!!
             val ticks = rawKey.takeIf { it.isNotEmpty() && it.all { c -> c in '0'..'9' } }?.toLongOrNull()
                 ?: fail("REPAIR_AMBIGUOUS", "Unknown timestamp semantics cannot be rewritten", Stage.Plan)
             if (ticks.toString() != rawKey) fail("UNSAFE_METADATA_REWRITE", "Container correction does not normalize timestamp spelling", Stage.Plan)
@@ -50,7 +53,7 @@ internal object RemuxRepairOperations {
         val before = session.inspection.issues
         val independent = before.filter { issue -> !(issue.code.value == "UNSUPPORTED_CONTAINER" && issue.layer == Layer.Protocol && issue.severity == Severity.Warning) &&
             !(issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Compatibility && issue.severity == Severity.Warning && issue.location?.selector == "{$ITEM_URI}Padding") &&
-            !compatibleBaseDiagnostic(session, issue) }
+            !compatibleBaseDiagnostic(session, issue) && !preservedHuaweiDiagnostic(session, issue) }
         val issue = before.firstOrNull { it.code.value == "UNSUPPORTED_CONTAINER" && it.layer == Layer.Protocol }
         val changes = if (video.container == VideoContainer.Mov) listOf(Change("videoContainer", Value.Text("Mov"), Value.Text("Mp4"),
             "Existing verified ${binding.protocol.value} profile requires MP4; preserve every encoded sample/configuration/timestamp and rebuild owned lengths", true)) else emptyList()
@@ -78,6 +81,14 @@ internal object RemuxRepairOperations {
     }
 
     private suspend fun profileRewrite(session: SourceSession, binding: CarrierBinding, request: RepairRequest, budget: ParseBudget): JpegRewritePlan {
+        if (binding.protocol == ProtocolIds.Huawei) {
+            val tail = session.huaweiTail ?: fail("REPAIR_NOT_POSSIBLE", "No independently confirmed fixed tail", Stage.Plan)
+            if (binding.profile != ProfileId("basic60") || tail.variant != HuaweiTailVariant.Basic60 || tail.gap != null ||
+                tail.videoRange != binding.video || binding.video?.offset != session.jpeg!!.primary.endExclusive ||
+                binding.video.endExclusive != tail.tailRange.offset)
+                fail("REPAIR_AMBIGUOUS", "Huawei container correction refuses HEIC, gaps, Honor or unconfirmed extensions", Stage.Plan)
+            return HuaweiJpegWriter.cleanPlan(session).orThrow()
+        }
         if (binding.protocol == ProtocolIds.Samsung) {
             val directory = session.sef ?: fail("REPAIR_NOT_POSSIBLE", "No independently indexed SEF movie", Stage.Plan)
             if (binding.profile != ProfileId("jpeg-sef-mpv3") || directory.legacyDialect || directory.gaps.isNotEmpty() || directory.records.size != 2 ||
@@ -121,6 +132,15 @@ internal object RemuxRepairOperations {
             issue.location?.range == ByteRange(range.offset, directory.footer.endExclusive - range.offset)
     }
 
+    /** Preserving opaque fixed fields does not establish their units or a normalized key. */
+    private fun preservedHuaweiDiagnostic(session: SourceSession, issue: Issue): Boolean {
+        val tail = session.huaweiTail ?: return false
+        return session.bindings.singleOrNull()?.protocol == ProtocolIds.Huawei && tail.variant == HuaweiTailVariant.Basic60 &&
+            tail.gap == null && issue in tail.issues && issue.code.value == "TIMESTAMP_SEMANTICS_UNKNOWN" &&
+            issue.layer == Layer.Protocol && issue.severity == Severity.Warning &&
+            issue.location == tail.rawFrameFields.singleOrNull { it.selector == "huawei:tail:history-field" }?.location
+    }
+
     private suspend fun checkOutput(request: RepairRequest) {
         val output = request.output ?: fail("INVALID_ARGUMENT", "Repair application needs output", Stage.Plan)
         val caps = output.capabilities()
@@ -145,6 +165,7 @@ internal object RemuxRepairOperations {
                 listOf(CapabilityEntry(Operation.Repair, if (prepared.result.blocked.isEmpty()) Implementation.Experimental else Implementation.Unsupported,
                     conditions = listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text(if (prepared.binding.protocol == ProtocolIds.Samsung)
                         "canonical-jpeg-sef-mpv3-mov-to-mp4-classified-metadata-private-remux-no-encoding" else
+                        if (prepared.binding.protocol == ProtocolIds.Huawei) "huawei-basic60-no-xmp-jpeg-no-gap-no-extensions-raw-fields-preserved-private-remux-no-encoding" else
                         "minimal-vivo-version-one-jpeg-no-auxiliary-mov-to-mp4-private-remux-no-encoding"))))), prepared.result.blocked),
             issues = prepared.result.issuesBefore)
     }
@@ -161,6 +182,7 @@ internal object RemuxRepairOperations {
             val movie = remuxed.output.assets.single().readableSource ?: fail("POSTCONDITION_FAILED", "Private remux result is unreadable", Stage.Verify)
             val proof = remuxed.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }
             if (proof.outcome != GuaranteeOutcome.Verified) fail("POSTCONDITION_FAILED", "Private remux did not preserve samples", Stage.Verify)
+            if (prepared.binding.protocol == ProtocolIds.Huawei) return@attempt publishHuawei(request, prepared, movie, remuxed, proof)
             var after: List<Issue> = emptyList()
             val originalCoding = codingDigest(prepared.session)
             val originalMetadata = ordinaryDigest(prepared.session)
@@ -185,5 +207,50 @@ internal object RemuxRepairOperations {
                 execution = remuxed.execution.filter { it.stage == Stage.Remux } + operation.execution)
             prepared.result.copy(proposedChanges = changes, changesApplied = changes, issuesAfter = after, operation = verified)
         } finally { remuxed.output.assets.forEach { it.readableSource?.close() } }
+    }
+
+    private suspend fun publishHuawei(request: RepairRequest, prepared: Prepared, movie: BinarySource,
+        remuxed: OperationResult, proof: GuaranteeRecord): RepairResult {
+        val source = prepared.session
+        val original = source.huaweiTail!!
+        val video = BinaryReader(movie, request.context)
+        val size = video.identity().orThrow().size
+        val live = HuaweiTail.lengthField(size, ParseBudget(request.context)).orThrow()
+        // Do not serialize, normalize, truncate or infer either original historical field.
+        val tail = Bytes(original.rawTail.slice(0, 40).toByteArray() + live.toByteArray())
+        val imageHash = sha256Range(source.reader, source.jpeg!!.primary).orThrow()
+        val videoHash = sha256Range(video, ByteRange(0uL, size)).orThrow()
+        val newLive = checkedAdd(size, 20uL)
+        val changes = prepared.result.proposedChanges + if (newLive != original.liveValue) listOf(Change("huawei:tail:LIVE", Value.Text("LIVE_${original.liveValue}"),
+            Value.Text("LIVE_$newLive"), "Update only the owned fixed-length field for the verified MP4; raw key units remain unknown", true)) else emptyList()
+        var after: List<Issue> = emptyList()
+        val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
+            write = { writer ->
+                copyRange(source.reader, writer, source.jpeg.primary, request.context).orThrow()
+                copyRange(video, writer, ByteRange(0uL, size), request.context).orThrow()
+                writer.writeAll(tail).orThrow()
+            }, verify = { id, reader ->
+                val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, ParseBudget(request.context)).orThrow()
+                val binding = staged.bindings.singleOrNull()
+                val resultTail = staged.huaweiTail
+                val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol), target = prepared.binding.selector).orThrow()
+                if (binding == null || binding.protocol != ProtocolIds.Huawei || !binding.structurallyValid || staged.videos[ProtocolIds.Huawei]?.container != VideoContainer.Mp4 ||
+                    resultTail == null || resultTail.rawTail != tail || resultTail.gap != null || binding.video?.length != size ||
+                    staged.jpeg?.primary != source.jpeg.primary || sha256Range(reader, source.jpeg.primary).orThrow() != imageHash ||
+                    sha256Range(reader, binding.video).orThrow() != videoHash || staged.inspection.keyPhoto.position != null ||
+                    report.verdict == Verdict.Invalid || report.checks.any { it.coverage != Coverage.Complete } ||
+                    staged.inspection.issues.any { issue -> !preservedHuaweiDiagnostic(staged, issue) ||
+                        prepared.result.issuesBefore.none { it.code == issue.code && it.layer == issue.layer && it.severity == issue.severity } })
+                    fail("POSTCONDITION_FAILED", "Huawei container correction changed image bytes, opaque tail fields, media or unknown-key semantics", Stage.Verify)
+                after = staged.inspection.issues
+                AssetVerification(report, listOf(
+                    GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable),
+                    GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.Verified, imageHash, imageHash, "Complete original JPEG copied byte-identically at its original offset"),
+                    GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.Verified, proof.sourceDigest, proof.outputDigest, proof.proof),
+                    GuaranteeRecord(id, Guarantee.MetadataPreserving, GuaranteeOutcome.Verified, imageHash, imageHash, "Complete original JPEG metadata and the first forty raw trailer bytes unchanged; only authorized container/length corrected")), staged.inspection.keyPhoto)
+            })
+        val operation = publish(request.output!!, request.policy, request.context, source.readers + video, listOf(asset), changes).orThrow()
+        return prepared.result.copy(proposedChanges = changes, changesApplied = changes, issuesAfter = after,
+            operation = operation.copy(execution = remuxed.execution.filter { it.stage == Stage.Remux } + operation.execution))
     }
 }

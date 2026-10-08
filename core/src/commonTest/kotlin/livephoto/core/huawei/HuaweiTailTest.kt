@@ -10,6 +10,14 @@ class HuaweiTailTest {
     private val context = Context(Limits(2_000_000uL, 2_000_000uL, maxMetadataBytes = 1_000_000uL))
     private fun reader(bytes: ByteArray, context: Context = this.context) = BinaryReader(MemoryBinarySource(Bytes(bytes), SourceId("huawei-tail")), context)
 
+    @Test fun lengthEncoderOwnsOnlyTwentyBytesAndRefusesEmptyOverflowOrTruncation() {
+        assertEquals(Bytes(HuaweiFixtures.tail(live = "LIVE_3020").copyOfRange(40, 60)), value(HuaweiTail.lengthField(3000uL, ParseBudget(context))))
+        for ((length, code) in listOf(0uL to "INVALID_ARGUMENT", ULong.MAX_VALUE to "INTEGER_OVERFLOW",
+            999_999_999_999_980uL to "VALUE_NOT_REPRESENTABLE")) {
+            assertEquals(code, assertIs<CoreResult.Failure>(HuaweiTail.lengthField(length, ParseBudget(context))).error.code.value)
+        }
+    }
+
     @Test
     fun writerChecksAllThreeFixedFieldWidthsWithoutTruncation() {
         assertEquals(Bytes(HuaweiFixtures.tail("v6_f99", "999:9999", "LIVE_3020")), value(HuaweiTail.create(3000uL, "v6_f99", "999:9999", ParseBudget(context))))

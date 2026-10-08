@@ -6,6 +6,7 @@ import livephoto.core.bmff.*
 import livephoto.core.memory.*
 import livephoto.core.samsung.SamsungFixtures
 import livephoto.core.vivo.VivoFixtures
+import livephoto.core.huawei.HuaweiFixtures
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
@@ -37,9 +38,10 @@ class SamsungRemuxRepairIntegrationTest {
                 try {
                     val movie = mov.output.assets.single().readableSource!!
                     val movieBytes = BinaryReader(movie, context).readExactly(0uL, movie.size().orThrow().toUInt()).orThrow().toByteArray()
-                    for (profile in listOf("samsung", "vivo")) {
+                    for (profile in listOf("samsung", "vivo", "huawei")) {
                         val carrierBytes = if (profile == "samsung") SamsungFixtures.photo(movieBytes, xmp = true, timestamp = "40000").bytes
-                            else VivoFixtures.photo(movieBytes, timestamp = "40000").bytes
+                            else if (profile == "vivo") VivoFixtures.photo(movieBytes, timestamp = "40000").bytes
+                            else HuaweiFixtures.photo(movieBytes, prefix = "v6_f09", history = "01:0002").bytes
                         val carrier = MemoryBinarySource(Bytes(carrierBytes), SourceId("synthetic-$profile-mov"))
                         val hash = sha256Range(BinaryReader(carrier, context), ByteRange(0uL, carrier.size().orThrow())).orThrow()
                         val tx = MemoryOutputTransaction(context, "real-repair-$profile")
@@ -53,6 +55,14 @@ class SamsungRemuxRepairIntegrationTest {
                             assertTrue(operation.execution.none { it.transcoded })
                             assertTrue(repaired.issuesAfter.none { it.code.value == "UNSUPPORTED_CONTAINER" && it.layer == Layer.Protocol })
                             val output = operation.output.assets.single().readableSource!!
+                            if (profile == "huawei") {
+                                val resultSize = output.size().orThrow()
+                                assertEquals(Bytes(carrierBytes.copyOfRange(carrierBytes.size - 60, carrierBytes.size - 20)),
+                                    BinaryReader(output, context).readExactly(resultSize - 60uL, 40u).orThrow())
+                                val key = core.getKeyPhotoPosition(ReadRequest(SourceSet.Single(output), context)).orThrow()
+                                assertNull(key.position); assertEquals(KeySource.Unknown, key.source)
+                                assertTrue(key.rawFields.all { it.unit == "unknown" })
+                            }
                             val raw = core.extract(ExtractRequest(SourceSet.Single(output), emptyList(),
                                 output = MemoryOutputTransaction(context, "real-repaired-raw-$profile"), context = context)).orThrow()
                             try {
@@ -70,7 +80,7 @@ class SamsungRemuxRepairIntegrationTest {
                             val reports = Path.of("build/reports/$profile-remux-fixtures")
                             Files.createDirectories(reports)
                             Files.write(reports.resolve("carrier.jpg"), carrierBytes)
-                            Files.writeString(reports.resolve("manifest.txt"), "scope=synthetic-real-avc-streamcopy-not-device-proof\nrun=${UUID.randomUUID()}\ncarrier=${hash.value}\nkey=40000\n")
+                            Files.writeString(reports.resolve("manifest.txt"), "scope=synthetic-real-avc-streamcopy-not-device-proof\nrun=${UUID.randomUUID()}\ncarrier=${hash.value}\nkey=${if (profile == "huawei") "unknown" else "40000"}\n")
                         } finally { operation.output.assets.forEach { it.readableSource?.close() } }
                     }
                 } finally { mov.output.assets.forEach { it.readableSource?.close() } }

@@ -369,7 +369,7 @@ try {
             throw "Portable existing-FFmpeg decode failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=SUCCESS'
-        foreach ($repairProfile in @('samsung', 'vivo')) {
+        foreach ($repairProfile in @('samsung', 'vivo', 'huawei')) {
             $repairFixtures = Join-Path $repository "core/build/reports/$repairProfile-remux-fixtures"
             $repairManifest = @{}
             foreach ($line in Get-Content (Join-Path $repairFixtures 'manifest.txt')) {
@@ -399,7 +399,20 @@ try {
             $repairDecode = & $launcher probe --input $repairVideo.path --decode-check --ffmpeg $media.ffmpegPath
             if ($LASTEXITCODE -ne 0 -or -not (($repairDecode | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Repaired video did not completely decode.' }
             $repairKey = & $launcher get-key --input $repairedCarrier
-            if ($LASTEXITCODE -ne 0 -or (($repairKey | ConvertFrom-Json).result.position.value -ne $repairManifest['key'])) { throw 'Container repair changed the key.' }
+            if ($LASTEXITCODE -ne 0) { throw 'Container repair key inspection failed.' }
+            $keyResult = ($repairKey | ConvertFrom-Json).result
+            if ($repairProfile -eq 'huawei') {
+                if ($null -ne $keyResult.position -or $keyResult.source -ne 'Unknown' -or
+                    @($keyResult.rawFields).Count -ne 2 -or ($keyResult.rawFields | Where-Object unit -ne 'unknown')) {
+                    throw 'Huawei container repair invented timestamp units.'
+                }
+                $originalBytes = [IO.File]::ReadAllBytes($repairCarrier)
+                $resultBytes = [IO.File]::ReadAllBytes($repairedCarrier)
+                if ([Convert]::ToHexString($originalBytes[($originalBytes.Length - 60)..($originalBytes.Length - 21)]) -ne
+                    [Convert]::ToHexString($resultBytes[($resultBytes.Length - 60)..($resultBytes.Length - 21)])) {
+                    throw 'Huawei container repair changed opaque fixed fields.'
+                }
+            } elseif ($keyResult.position.value -ne $repairManifest['key']) { throw 'Container repair changed the key.' }
             $repairPath = $env:Path
             try {
                 $env:Path = ''
@@ -409,7 +422,9 @@ try {
                 if ($LASTEXITCODE -ne 3 -or ($disabled | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Unavailable remux backend must not authorize repair.' }
             } finally { $env:Path = $repairPath }
             if ((Get-FileHash $repairCarrier).Hash.ToLowerInvariant() -ne $repairManifest['carrier']) { throw 'Container repair mutated its source.' }
-            $repairScope = if ($repairProfile -eq 'samsung') { 'canonical-sef-mov-to-mp4-no-encoding-not-device-proof' } else { 'minimal-vivo-version-one-no-auxiliary-mov-to-mp4-no-encoding-not-device-proof' }
+            $repairScope = if ($repairProfile -eq 'samsung') { 'canonical-sef-mov-to-mp4-no-encoding-not-device-proof' }
+                elseif ($repairProfile -eq 'vivo') { 'minimal-vivo-version-one-no-auxiliary-mov-to-mp4-no-encoding-not-device-proof' }
+                else { 'huawei-basic60-jpeg-original-raw-fields-unknown-key-mov-to-mp4-no-encoding-not-device-proof' }
             Write-Host "PORTABLE_$($repairProfile.ToUpperInvariant())_EXPLICIT_REMUX=SUCCESS scope=$repairScope"
         }
         if ($IsWindows -and $windowsDecoderAvailable) {

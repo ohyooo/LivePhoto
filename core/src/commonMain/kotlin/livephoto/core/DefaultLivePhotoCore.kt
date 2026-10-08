@@ -101,12 +101,13 @@ public class DefaultLivePhotoCore(private val backend: MediaBackend? = null) : L
             if (actual.profile !in setOf(ProfileId("basic60"), ProfileId("honor-extended"))) return ProtocolRegistry.planned().capabilities(actual)
             val basic = actual.profile == ProfileId("basic60")
             val reads = setOf(Operation.Detect, Operation.Analyze, Operation.Inspect, Operation.Validate, Operation.ExtractRaw, Operation.GetKey)
-            val writes = if (basic) setOf(Operation.Create, Operation.SplitClean) else emptySet()
+            val writes = if (basic) setOf(Operation.Create, Operation.SplitClean, Operation.Repair) else emptySet()
             return ProtocolCapabilities(actual, Operation.entries.map { operation -> CapabilityEntry(operation,
                 when { operation in reads -> if (basic) Implementation.Supported else Implementation.Experimental; operation in writes -> Implementation.Experimental; else -> Implementation.Unsupported },
                 conditions = listOf(Condition(ConditionOperator.Equals, "sourceContent", Value.Text(if (operation in reads) "jpeg-or-tail-bounded-heic-item-graph-fixed-sixty-byte-tail" else "jpeg-fixed-sixty-byte-tail")),
                     Condition(ConditionOperator.Equals, "keySemantics", Value.Text("raw-fields-unknown-units"))) +
-                    if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("plain-jpeg-mp4-no-gap-no-honor-extensions-no-explicit-key"))) else if (!basic)
+                    if (operation == Operation.Repair && basic) listOf(Condition(ConditionOperator.Equals, "repairScope", Value.Text("explicit-remux-only-basic60-no-xmp-exif-mpf-or-unclassified-app-jpeg-no-gap-no-honor-or-private-extensions-original-raw-forty-byte-fields-preserved-mov-to-mp4-no-encoding")))
+                    else if (operation in writes) listOf(Condition(ConditionOperator.Equals, "rewriteScope", Value.Text("plain-jpeg-mp4-no-gap-no-honor-extensions-no-explicit-key"))) else if (!basic)
                         listOf(Condition(ConditionOperator.Equals, "mediaBinding", Value.Text("unconfirmed-extensions-not-a-pure-video-claim"))) else emptyList(),
                 reasons = if (operation in reads + writes) emptyList() else listOf(IssueCode("CAPABILITY_UNSUPPORTED")),
                 verification = if (operation in reads + writes) listOf(Verification.SourceReviewed) else emptyList()) })

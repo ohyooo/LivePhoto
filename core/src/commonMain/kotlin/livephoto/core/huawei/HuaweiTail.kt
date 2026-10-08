@@ -22,6 +22,16 @@ internal data class HuaweiTailFacts(
 
 /** Fixed end-of-file layout only. Native's milliseconds interpretation is not adopted as protocol fact. */
 internal object HuaweiTail {
+    /** Encode only the owned length; never manufacture the two opaque historical fields. */
+    fun lengthField(videoLength: ULong, budget: ParseBudget): CoreResult<Bytes> = attemptNow {
+        budget.poll()
+        if (videoLength == 0uL) fail("INVALID_ARGUMENT", "Huawei motion payload must be nonempty")
+        val live = "LIVE_${checkedAdd(videoLength, 20uL)}"
+        if (live.length > 20) fail("VALUE_NOT_REPRESENTABLE", "Huawei LIVE_ length exceeds its fixed twenty-byte field")
+        budget.item(); budget.retain(80uL)
+        Bytes(ByteArray(20) { 0x20 }.also { live.encodeToByteArray().copyInto(it) })
+    }
+
     suspend fun read(reader: BinaryReader, jpegEnd: ULong? = null, budget: ParseBudget = ParseBudget(reader.context)): CoreResult<HuaweiTailFacts?> = attempt {
         val identity = reader.identity().orThrow()
         if (jpegEnd != null && jpegEnd > identity.size) fail("OFFSET_OUT_OF_BOUNDS", "Image boundary exceeds Huawei carrier")
