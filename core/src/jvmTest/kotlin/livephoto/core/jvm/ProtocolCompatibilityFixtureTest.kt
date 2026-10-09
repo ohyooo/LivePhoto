@@ -8,6 +8,8 @@ import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import livephoto.core.*
 import livephoto.core.binary.orThrow
+import livephoto.core.binary.BinaryReader
+import livephoto.core.bmff.BmffVideoProbe
 import livephoto.core.memory.*
 import org.junit.Assume.assumeTrue
 import kotlin.test.*
@@ -36,6 +38,24 @@ class ProtocolCompatibilityFixtureTest {
     @Test fun huaweiHeicH265LabelIsNotCodecEvidenceAndExtractsExactMovie() = huaweiHeic("video_HUAWEI_MovingPhoto_HEIC+MP4 (H.265).heic")
     @Test fun appleJpegMovPairKeepsIfd0MakerNoteOutsideFormalWriterScope() = applePair("jpeg", "jpg")
     @Test fun appleHeicMovPairKeepsIfd0MakerNoteOutsideFormalWriterScope() = applePair("heic", "heic")
+    @Test fun capturedDurationDifferencesAreLastFrameStartsNotCompleteCompositionDurations(): Unit = runImmediate {
+        val cases = listOf(
+            Triple(captured("vivo-legacy.video.mp4"), listOf(9009L, 8008L, 2002L, 9009L, 10010L, 2002L), 8),
+            Triple(captured("video_MicroVideo_JPEG+MOV.jpg").copyOfRange(294469, 294469 + 8121451),
+                listOf(152152L, 150150L, 3003L, 152152L, 153153L, 3003L), 150),
+        )
+        for ((movie, expected, count) in cases) {
+            // Independent table arithmetic over SHA-verified fixed bytes. A one/two-frame
+            // header difference is not permission to reinterpret or normalize the media.
+            assertEquals(expected, capturedVideoTiming(movie, count))
+            val source = MemoryBinarySource(Bytes(movie), SourceId("captured-duration-boundary"))
+            val before = sha(movie)
+            val rejected = assertIs<CoreResult.Failure>(BmffVideoProbe(BinaryReader(source, context)).probe(ByteRange(0uL, movie.size.toULong())))
+            assertEquals("CORRUPTED_CONTAINER", rejected.error.code.value)
+            assertTrue(rejected.error.message.contains("Sample counts/duration"))
+            assertEquals(before, sha(source.readAt(0uL, movie.size.toUInt()).orThrow().toByteArray()))
+        }
+    }
     @Test fun vivoLegacyPairCapturesDurationBoundaryGapWithoutCallingItDeviceTested(): Unit = runImmediate {
         val image = captured("vivo-legacy.image.jpg")
         val movie = captured("vivo-legacy.video.mp4")
@@ -199,6 +219,52 @@ class ProtocolCompatibilityFixtureTest {
         assertTrue(result.error.message.contains("formal ExifIFD"), "Do not silently authorize an IFD0 MakerNote as formal ExifIFD")
         assertEquals(imageHash, sha(input.image.readAt(0uL, image.size.toUInt()).orThrow().toByteArray()))
         assertEquals(movieHash, sha(input.video.readAt(0uL, movie.size.toUInt()).orThrow().toByteArray()))
+    }
+
+    private fun capturedVideoTiming(bytes: ByteArray, expectedCount: Int): List<Long> {
+        fun box(start: Int, end: Int, type: String): Pair<Int, Int> {
+            var offset = start
+            while (offset < end) {
+                assertTrue(end - offset >= 8)
+                val size = word(bytes, offset)
+                assertTrue(size in 8..(end - offset), "Only measured complete 32-bit fixture boxes")
+                if (bytes.copyOfRange(offset + 4, offset + 8).toString(Charsets.US_ASCII) == type)
+                    return (offset + 8) to (offset + size)
+                offset += size
+            }
+            error("Missing measured fixture box $type")
+        }
+        fun Pair<Int, Int>.child(type: String) = box(first, second, type)
+        fun table(range: Pair<Int, Int>): List<Long> {
+            val (start, end) = range
+            assertEquals(0, word(bytes, start), "Measured unsigned v0 table")
+            val runs = word(bytes, start + 4)
+            assertTrue(runs in 1..expectedCount)
+            assertEquals(start + 8 + runs * 8, end)
+            return buildList {
+                repeat(runs) { index ->
+                    val count = word(bytes, start + 8 + index * 8)
+                    val value = word(bytes, start + 12 + index * 8).toLong()
+                    assertTrue(count in 1..(expectedCount - size)); assertTrue(value >= 0)
+                    repeat(count) { add(value) }
+                }
+                assertEquals(expectedCount, size)
+            }
+        }
+        val track = (0 to bytes.size).child("moov").child("trak")
+        val media = track.child("mdia")
+        val handler = media.child("hdlr").first + 8
+        assertEquals("vide", bytes.copyOfRange(handler, handler + 4).toString(Charsets.US_ASCII))
+        val header = media.child("mdhd").first
+        assertEquals(0, word(bytes, header)); assertEquals(30000, word(bytes, header + 12))
+        val samples = media.child("minf").child("stbl")
+        val deltas = table(samples.child("stts")); val offsets = table(samples.child("ctts"))
+        var dts = 0L
+        val pts = deltas.indices.map { index -> (dts + offsets[index]).also { dts += deltas[index] } }
+        val edits = track.child("edts").child("elst").first
+        assertEquals(0, word(bytes, edits)); assertEquals(1, word(bytes, edits + 4))
+        return listOf(word(bytes, header + 16).toLong(), dts, pts.first(), pts.last(),
+            pts.indices.maxOf { pts[it] + deltas[it] }, word(bytes, edits + 12).toLong())
     }
 
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }

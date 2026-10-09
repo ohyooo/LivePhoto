@@ -521,7 +521,8 @@ Windows 有限系统 SDR 抽帧：新远程全量 **764 tests，0 failures / err
 - [x] 有限 Samsung ExplicitRemux：全量/真实媒体测试、新便携包验收通过；其它协议/未知媒体恢复不在此范围，各提交 CI 见 Actions。
 - [x] 最小版本一 vivo ExplicitRemux：全量/双协议真实媒体与新便携验收通过；保持原 vendor 字段、未知 key 和既有 Google 基础层诊断。
 - [x] Huawei basic60 JPEG 有限 ExplicitRemux：全量/三协议真实媒体与新便携验收通过，完整原图与前 40 字节尾标保持；未知时间单位仍报告，HEIC/Honor/扩展不授权修复。
-- [ ] 继续核查兼容读取边界：MOV/vivo 的 `mdhd` 与 `stts` 差异须结合 CTS/edit 与官方语义核对；Apple IFD0 MakerNote 的有限兼容读取需独立确认，不猜容差，不自动授权旧结构写入。
+- [x] 核清当前固定 MOV/vivo 素材的时间线差异并补回归：`mdhd` 恰等最后一帧 PTS，而非解码时长或完整呈现结束时间；保持严格拒绝，不猜一/两帧容差。另测合法正 CTS/edit 映射，防止混淆解码与呈现时间。新增远程全量 **766 tests，0 failures / errors / skips**；这不是新增设备兼容声明。
+- [ ] 扩展其它有明确规范证据的媒体时间线变体及 Apple MakerNote 兼容读取。当前 Apple 固定素材的 IFD0 MakerNote 不取得正式 ExifIFD 权威；保持读写边界，不自动授权旧结构改写。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。

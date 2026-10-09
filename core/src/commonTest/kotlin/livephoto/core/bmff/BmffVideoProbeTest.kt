@@ -85,6 +85,24 @@ class BmffVideoProbeTest {
     }
 
     @Test
+    fun positiveCtsAndEditsDoNotAuthorizeLastFramePtsAsMediaDuration(): Unit = runImmediate {
+        val composition = GoogleFixtures.fullBox("ctts", GoogleFixtures.u32(1u) + GoogleFixtures.u32(2u) + GoogleFixtures.u32(120u))
+        val edit = GoogleFixtures.fullBox("elst", GoogleFixtures.u32(1u) + GoogleFixtures.u32(80u) +
+            GoogleFixtures.u32(120u) + byteArrayOf(0, 1, 0, 0))
+        val fixture = GoogleFixtures.video(composition = composition, editList = edit, trackDuration = 80u)
+        val valid = probe(fixture.bytes).tracks.single()
+        assertEquals(80uL, valid.duration)
+        assertEquals(listOf(0L, 40L), valid.samples.map { it.presentationTime })
+        // Raw composition starts at 120/160 and ends at 200. None changes the
+        // sum of decoding deltas (80) required by this finite structural profile.
+        for (duration in listOf(120u, 160u, 200u)) {
+            val malformed = fixture.bytes.copyOf()
+            put32(malformed, payloadOffset(malformed, "mdhd") + 16, duration)
+            failure("CORRUPTED_CONTAINER", result(malformed))
+        }
+    }
+
+    @Test
     fun signedCompositionOffsetsAndEditMappingDoNotConfuseDecodeAndPresentationOrder(): Unit = runImmediate {
         val composition = GoogleFixtures.box("ctts", byteArrayOf(1, 0, 0, 0) +
             GoogleFixtures.u32(2u) + GoogleFixtures.u32(1u) + GoogleFixtures.u32(50u) +
