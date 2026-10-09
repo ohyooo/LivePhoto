@@ -3,17 +3,33 @@ package livephoto.core.bmff
 import livephoto.core.*
 import livephoto.core.binary.*
 
-/** Closed iTunes UTF-8 text envelope; never a keys table, reference or Live Photo authority.
- * Shape and types follow FFmpeg movenc.c's long-style string metadata. Raw bytes must still
+/** Closed iTunes / short-style QuickTime UTF-8 text; never a reference or Live Photo authority.
+ * Shape and types follow FFmpeg movenc.c's string metadata. Raw bytes must still
  * be retained by the caller; classification alone does not authorize a remuxer to rewrite it.
  */
 internal object OrdinaryMovieText {
     private val names = setOf("\u00a9nam", "\u00a9ART", "\u00a9cmt", "\u00a9too", "cprt")
+    private val quickTimeNames = setOf("\u00a9nam", "\u00a9ART", "\u00a9des", "\u00a9cmt", "\u00a9swr", "\u00a9cpy")
 
     suspend fun matches(reader: BinaryReader, boxes: BmffReader, udta: BmffBox, depth: UInt,
         budget: ParseBudget): Boolean {
         if (udta.type != "udta" || udta.extendsToParentEnd) return false
-        val meta = boxes.readBoxes(udta.payload, depth + 1u).orThrow().singleOrNull()
+        val children = boxes.readBoxes(udta.payload, depth + 1u).orThrow()
+        if (children.none { it.type == "meta" }) {
+            // Confirmed FFmpeg short style: u16 byte length + packed ISO-639 "und" + UTF-8.
+            // Do not guess MacRoman, localized variants, nested data boxes or implicit strings.
+            if (children.isEmpty() || children.size > quickTimeNames.size ||
+                children.map { it.type }.distinct().size != children.size) return false
+            for (child in children) {
+                if (child.type !in quickTimeNames || child.extendsToParentEnd || child.payload.length !in 5uL..65_539uL) return false
+                val length = reader.readU16(child.payload.offset).orThrow().toUInt()
+                if (length.toULong() != child.payload.length - 4uL || reader.readU16(child.payload.offset + 2uL).orThrow() != 0x55c4u.toUShort()) return false
+                budget.retain(length.toULong())
+                if ('\u0000' in decodeUtf8Strict(reader.readExactly(child.payload.offset + 4uL, length).orThrow(), budget)) return false
+            }
+            return true
+        }
+        val meta = children.singleOrNull()
         if (meta?.type != "meta" || meta.extendsToParentEnd || meta.payload.length < 4uL ||
             reader.readU32(meta.payload.offset).orThrow() != 0u) return false
         val nodes = boxes.readBoxes(ByteRange(meta.payload.offset + 4uL, meta.payload.length - 4uL), depth + 2u).orThrow()

@@ -181,6 +181,8 @@ Linux（Bash/Zsh）：
 
 视频允许一个经完整校验的 iTunes 普通文本目录：标题、作者、注释、编码工具与版权，每个字段必须唯一、UTF-8、locale=0，非空且不超过 64 KiB。目录原字节、媒体样本和时间线保留，不重封装、不转码；结构参考 [FFmpeg 的实际写入实现](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c)。freeform、其它 keys 表、未知字段/编码及多个目录仍拒绝。支持有限 Apple 追加写入、读取和 Clean/Split，以及有限 Apple→Google 转换；不放宽 remux/trim/transcode 的 metadata 门禁。首次清理/转换仍有未知关联，`MetadataPreserving=Unknown`，因此严格策略拒绝；清理后的普通视频再次 Split 才可证明整文件字节不变。
 
+另支持经验证的旧式 QuickTime 普通文本目录：`©nam/©ART/©des/©cmt/©swr/©cpy`；每个 atom 唯一，使用精确 16-bit 字节长度、`und` 语言码和有效 UTF-8，非空且不超过 65,535 字节。不猜测 MacRoman、其它语言编码或混合目录；目录仍只原样保留，不重写普通字段。两种注释 atom 可并存，不将其当作 Live Photo CID。
+
 ### 修复：先预览，再明确写入
 
 Windows（PowerShell）：
@@ -430,6 +432,8 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 ### 最新可核验检查点
 
+Apple 普通 MOV 短文本扩展：新全量 **823 tests，802 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。合成结构正反例与真实编码 MOV 验证目录原字节保留、严格 Create、Clean 与再次严格复制；新完整 Windows 无 FFmpeg 便携包对 MP4/MOV 分别执行全部新验收。长度/语言/重复字段/未知类型/混合目录继续拒绝，不等同于通用 QuickTime metadata 或设备认证。
+
 Apple 普通电影文本 Clean/Split 与有限 Apple→Google 转换：新全量 **821 tests，800 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。仅清除确认的 CID/专用轨，普通目录原字节与媒体样本不变；再次对普通视频 Split 为严格整文件复制。首次未知关联、严格拒绝、篡改整对回滚与转换后原样提取回归通过。新完整 Windows 无 FFmpeg 便携验收通过 Create、首次 Clean、严格拒绝和再次整文件复制；不等同于通用 mdta/MakerNote/HEIC 写入或设备认证。
 
 Apple 普通电影文本保留：本轮全量 **817 tests，796 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。有限 iTunes 文本目录原字节与媒体样本保留；多目录/重复字段/freeform/非 UTF-8/类型与 locale 反例、整对篡改回滚通过。新完整 Windows 无 FFmpeg 便携包通过严格 Create 与 Pair 验证；不开放通用 mdta、Clean、媒体重封装或真机认证。
@@ -568,6 +572,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。raw 保留的追加装配与读取不授权 remux/trim/transcode 改写。
 - [x] Apple 有限普通文本 Clean/Split 与 Apple→Google：821 项新全量，800 项执行成功、21 项历史系统专项跳过；选择性清除 CID/专用轨、原目录/样本保留、再次 Split 整文件复制；首次 Unknown 与严格拒绝、篡改回滚及转换后原样提取回归通过。
 - [ ] 其它普通电影 metadata / mdta、混合 timed metadata 的选择性清理和转换：需要独立 ownership/引用关系证明，不能借有限文本的保留结果开放未知结构。
+- [x] 有限旧式 QuickTime 普通文本：823 项新全量与完整 Windows 双容器便携验收通过；真实 MOV、精确长度/und/UTF-8/唯一 atom、目录原样保留，未知语言/编码/混合目录继续拒绝。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。

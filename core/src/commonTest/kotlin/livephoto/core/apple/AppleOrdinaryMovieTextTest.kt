@@ -19,6 +19,10 @@ internal object OrdinaryMovieTextFixtures {
         item("\u00a9too", "encoder".encodeToByteArray()) + item("cprt", "copyright".encodeToByteArray()),
         extra: ByteArray = byteArrayOf()): ByteArray = atom("udta", GoogleFixtures.fullBox("meta",
             atom("hdlr", ByteArray(8) + "mdirappl".encodeToByteArray() + ByteArray(9)) + atom("ilst", items) + extra))
+    fun quickTimeItem(type: String, text: ByteArray, length: UInt = text.size.toUInt(), language: UInt = 0x55c4u): ByteArray =
+        atom(type, unsignedBytes(length.toULong(), 2, Endian.Big).toByteArray() + unsignedBytes(language.toULong(), 2, Endian.Big).toByteArray() + text)
+    fun quickTimeEnvelope(): ByteArray = atom("udta", listOf("\u00a9nam", "\u00a9ART", "\u00a9des", "\u00a9cmt", "\u00a9swr", "\u00a9cpy")
+        .fold(byteArrayOf()) { bytes, type -> bytes + quickTimeItem(type, "ordinary 文本 $type".encodeToByteArray()) })
 
     /** Retire old moov without moving any sample, append its unchanged children plus the test envelope. */
     fun movie(base: ByteArray = GoogleFixtures.video().bytes, metadata: ByteArray = envelope()): ByteArray {
@@ -101,6 +105,37 @@ class AppleOrdinaryMovieTextTest {
         for ((trim, transcode) in listOf(false to false, true to false, true to true)) {
             val result = attempt { RemuxVerification.metadata(reader, video, trim, transcode) }
             assertEquals(IssueCode("UNSAFE_METADATA_REWRITE"), assertIs<CoreResult.Failure>(result).error.code)
+        }
+    }
+
+    @Test fun shortQuickTimeTextSurvivesStrictCreateAndCleanAndIsNotASecondIdentifierAuthority(): Unit = runImmediate {
+        val bytes = OrdinaryMovieTextFixtures.movie(metadata = OrdinaryMovieTextFixtures.quickTimeEnvelope())
+        val result = core.create(request(bytes, MemoryOutputTransaction(context, "qt-text-create"))).orThrow()
+        val video = result.output.assets[1].readableSource!!
+        assertEquals(Bytes(OrdinaryMovieTextFixtures.quickTimeEnvelope()), envelope(video))
+        assertEquals(Verdict.Valid, result.validation.verdict)
+        val split = core.split(SplitRequest(SourceSet.Pair(result.output.assets[0].readableSource!!, video),
+            output = MemoryOutputTransaction(context, "qt-text-clean"), context = context)).orThrow()
+        assertEquals(envelope(video), envelope(split.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!))
+        val reader = BinaryReader(source(bytes, "qt-text-remux"), context)
+        val facts = BmffVideoProbe(reader).probe(ByteRange(0uL, bytes.size.toULong())).orThrow()
+        assertEquals(IssueCode("UNSAFE_METADATA_REWRITE"), assertIs<CoreResult.Failure>(attempt { RemuxVerification.metadata(reader, facts) }).error.code)
+    }
+
+    @Test fun shortStyleLengthsLanguagesDuplicateFieldsMixedHierarchiesAndUnknownTagsRemainBlocked(): Unit = runImmediate {
+        val text = "ordinary".encodeToByteArray()
+        val valid = OrdinaryMovieTextFixtures.quickTimeItem("\u00a9nam", text)
+        val bad = listOf(valid + valid, OrdinaryMovieTextFixtures.quickTimeItem("\u00a9nam", text, length = 7u),
+            OrdinaryMovieTextFixtures.quickTimeItem("\u00a9nam", text, length = 9u),
+            OrdinaryMovieTextFixtures.quickTimeItem("\u00a9nam", text, language = 0u),
+            OrdinaryMovieTextFixtures.quickTimeItem("\u00a9xyz", text),
+            OrdinaryMovieTextFixtures.quickTimeItem("\u00a9nam", byteArrayOf(0xc0.toByte(), 0x80.toByte())),
+            OrdinaryMovieTextFixtures.quickTimeItem("\u00a9nam", byteArrayOf(65, 0, 66)),
+            valid + GoogleFixtures.fullBox("meta", byteArrayOf()))
+        for ((index, fields) in bad.withIndex()) {
+            val output = MemoryOutputTransaction(context, "qt-text-bad-$index")
+            assertIs<CoreResult.Failure>(core.create(request(OrdinaryMovieTextFixtures.movie(metadata = OrdinaryMovieTextFixtures.atom("udta", fields)), output)))
+            assertTrue(output.query().orThrow().assetIds.isEmpty())
         }
     }
 
