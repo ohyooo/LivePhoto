@@ -7,6 +7,9 @@ import livephoto.core.bmff.*
 import livephoto.core.exif.ExifPositionIndependenceProof
 import livephoto.core.huawei.HuaweiTailVariant
 import livephoto.core.jpeg.*
+import livephoto.core.vivo.VIVO_FIELDS
+import livephoto.core.vivo.VIVO_URI
+import livephoto.core.xml.XmlElement
 import kotlin.uuid.Uuid
 
 /** Shared finite assembler with distinct ordinary-media Create and live-source Convert gates. */
@@ -101,6 +104,24 @@ internal object AppleAssemblyOperations {
                     source.bindings.count { it.protocol == ProtocolIds.Samsung && it.compatibleBaseOf == null } == 1 &&
                     source.bindings.all { it.protocol == ProtocolIds.Samsung && it.compatibleBaseOf == null ||
                         it.protocol == ProtocolIds.GoogleV2 && it.compatibleBaseOf == ProtocolIds.Samsung }
+            }
+            ProtocolIds.VivoModern -> {
+                val binding = source.bindings.singleOrNull { it.protocol == ProtocolIds.VivoModern && it.compatibleBaseOf == null }
+                val packet = source.xmp?.packets?.singleOrNull()
+                val fields = mapOf("VMotionPhotoVersion" to "1", "VMotionPhotoSource" to "1", "VMediaKitVersion" to "1.0.0.9")
+                binding != null && binding.structurallyValid && binding.profile == ProfileId("jpeg") &&
+                    binding.items.size == 2 && binding.padding == null && binding.video == source.jpeg?.trailing &&
+                    source.sef == null && source.gainMaps.isEmpty() &&
+                    binding.video?.offset == source.jpeg?.primary?.endExclusive &&
+                    source.videos[ProtocolIds.VivoModern]?.container == VideoContainer.Mp4 &&
+                    source.bindings.all { it.protocol == ProtocolIds.VivoModern && it.compatibleBaseOf == null ||
+                        it.protocol == ProtocolIds.GoogleV2 && it.compatibleBaseOf == ProtocolIds.VivoModern } &&
+                    packet != null && fields.all { (field, value) -> packet.scalar(VIVO_URI, field).orThrow() == value } &&
+                    packet.descriptions.none { description ->
+                        description.attributes.any { it.name.expanded.uri == VIVO_URI && it.name.expanded.local !in VIVO_FIELDS } ||
+                            description.children.filterIsInstance<XmlElement>().any { it.name.expanded.uri == VIVO_URI &&
+                                (it.name.expanded.local !in VIVO_FIELDS || it.attributes.isNotEmpty()) }
+                    }
             }
             ProtocolIds.Huawei -> {
                 val tail = source.huaweiTail

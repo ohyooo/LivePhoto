@@ -260,7 +260,7 @@ try {
     }
     foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) {
         $sourceProtocols = @('google.microvideo.v1', 'google.motionphoto.v2')
-        if ($container -eq 'mp4') { $sourceProtocols += @('samsung.motionphoto', 'huawei.movingphoto') }
+        if ($container -eq 'mp4') { $sourceProtocols += @('samsung.motionphoto', 'huawei.movingphoto', 'vivo.motionphoto') }
         foreach ($sourceProtocol in $sourceProtocols) {
         $label = "$endian-$container-$sourceProtocol"
         $sourceJson = & $launcher create --image (Join-Path $ordinaryExifFixtures "ordinary-$endian.jpg") --video (Join-Path $ordinaryExifFixtures "motion.$container") --target $sourceProtocol --output-dir (Join-Path $verify "ordinary EXIF source $label")

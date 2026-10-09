@@ -66,7 +66,7 @@ class AppleOrdinaryExifPortableFixtureTest {
             ordinaryResult.output.assets.forEach { it.readableSource?.close() }; ordinary.close()
         }
         for (endian in listOf("big", "little")) for (container in listOf("mp4", "mov")) for (protocol in
-            listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) + if (container == "mp4") listOf(ProtocolIds.Samsung, ProtocolIds.Huawei) else emptyList()) {
+            listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) + if (container == "mp4") listOf(ProtocolIds.Samsung, ProtocolIds.Huawei, ProtocolIds.VivoModern) else emptyList()) {
             val image = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-$endian.jpg")), SourceId("conversion-image"))
             val movie = MemoryBinarySource(Bytes(fixtures.getValue("motion.$container")), SourceId("conversion-video"))
             val core = DefaultLivePhotoCore()
