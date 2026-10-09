@@ -191,6 +191,8 @@ Google V1/V2 JPEG 的标准 EXIF 现可用于有限 Apple 转换：要求一个�
 
 Samsung 标准 JPEG SEF 的普通 EXIF 也可用于有限 `jpeg-mp4` 转换：仅版本 107、非 Legacy、无空隙的 MotionPhoto_Data / MotionPhoto_Version 两记录、原 MP4；可带已确认的 Google V2 基础层，不接受其它混合绑定。来源清理与 EXIF 保留分别验证，不删除普通/私有 SEF 以绕过限制。无已知 key 时必须显式指定 `--frame-index`；来源 metadata 关联仍为 Unknown，严格策略拒绝。不是 Samsung 相册或 Apple 真机兼容认证。
 
+Huawei `basic60` JPEG 的标准 EXIF 支持有限 `jpeg-mp4` 转换：仅原图紧接完整 MP4、随后恰 60 字节已确认尾标、无间隙或其它绑定的结构。原尾标的时间单位未知，不按字段名猜测；必须显式选择 `--frame-index`（从 0 开始），例如 `LivePhoto convert --input 'huawei.jpg' --target apple.livephoto --profile jpeg-mp4 --frame-index 0 --output-dir 'out-apple'`。EXIF 原字节、图像编码和视频样本分别验证，未知关联仍不支持 `--strict`。Honor、HEIC、额外扩展和未知字段不因此获得写入权限；不代表相册兼容认证。
+
 Windows：
 
 ```powershell
@@ -534,7 +536,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google/有限 Samsung 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google/有限 Samsung/Huawei basic60 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 纯协议能力及统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；运行时查询实际能力 | 更多 FFmpeg 媒体 profile 与三平台真实验收；最后移动端系统媒体 API |
@@ -596,6 +598,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] Apple 普通标准 EXIF Create：813 项本轮全量和完整 Windows 便携验收通过，大小端/GPS/方向/UserComment/原值位置保持、无 ExifIFD 追加、私有数据拒绝与整对回滚；仅有限 JPEG＋原 MOV/MP4，不开放已有 MakerNote 合并或 Convert 来源清理。
 - [x] Google V1/V2 标准 EXIF→Apple：831 项新全量及新完整 Windows 8 组合便携验收、8 视频完整解码通过；来源清理与追加独立证明，未知关联/严格拒绝边界保留。
 - [x] 有限 Samsung JPEG 标准 EXIF→Apple：835 项新全量、新完整 Windows 10 组合便携验收与 10 视频解码通过；非 Legacy 两记录 SEF＋原 MP4，未知 key 要求显式选择，不丢普通 SEF，不借清理证明升级 Strict。
+- [x] Huawei basic60 JPEG 标准 EXIF→Apple：838 项新全量（817 执行成功、21 历史系统专项跳过）、新完整 Windows 12 组合便携验收通过；独立尾标/EXIF 来源证明、显式 key、Honor/间隙/未知时间拒绝、源不变和清理视图篡改零输出。对应提交后的三平台 CI/产物见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)，不借用上一批 CI，不证明设备兼容。
 - [ ] 其它含 EXIF 来源的 Apple 转换与 Normalize：按各协议分别证明清理 ownership 和普通字段保留，不能直接借用 Google 路径；已有 MakerNote 合并仍未实现。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。raw 保留的追加装配与读取不授权 remux/trim/transcode 改写。

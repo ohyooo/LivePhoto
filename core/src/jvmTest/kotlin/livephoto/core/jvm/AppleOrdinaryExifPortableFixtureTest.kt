@@ -66,15 +66,16 @@ class AppleOrdinaryExifPortableFixtureTest {
             ordinaryResult.output.assets.forEach { it.readableSource?.close() }; ordinary.close()
         }
         for (endian in listOf("big", "little")) for (container in listOf("mp4", "mov")) for (protocol in
-            listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) + if (container == "mp4") listOf(ProtocolIds.Samsung) else emptyList()) {
+            listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) + if (container == "mp4") listOf(ProtocolIds.Samsung, ProtocolIds.Huawei) else emptyList()) {
             val image = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-$endian.jpg")), SourceId("conversion-image"))
             val movie = MemoryBinarySource(Bytes(fixtures.getValue("motion.$container")), SourceId("conversion-video"))
             val core = DefaultLivePhotoCore()
             val google = core.create(CreateRequest(image, movie, ProtocolSelector(protocol),
                 output = MemoryOutputTransaction(context, "ordinary-google"), context = context)).orThrow()
             val live = google.output.assets.single().readableSource!!
+            val edits = if (protocol == ProtocolIds.Huawei) EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)) else EditSpec()
             val converted = core.convert(ConvertRequest(SourceSet.Single(live), ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-$container")),
-                output = MemoryOutputTransaction(context, "ordinary-apple-convert"), context = context)).orThrow()
+                edits = edits, output = MemoryOutputTransaction(context, "ordinary-apple-convert"), context = context)).orThrow()
             assertEquals(Verdict.Valid, converted.validation.verdict)
             assertTrue(converted.execution.none { it.remuxed || it.transcoded })
             assertTrue(converted.preservation.records.any { it.guarantee == Guarantee.MetadataPreserving && it.outcome == GuaranteeOutcome.Unknown })
@@ -88,7 +89,7 @@ class AppleOrdinaryExifPortableFixtureTest {
                 assertEquals(field.value, after.ifds.flatMap { it.entries }.single { it.tag == field.tag }.value)
             val blocked = MemoryOutputTransaction(context, "ordinary-strict-convert")
             assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.convert(ConvertRequest(SourceSet.Single(live),
-                ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-$container")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-$container")), edits = edits, policy = MutationPolicy(preservation = PreservationPolicy.Strict),
                 output = blocked, context = context))).error.code)
             assertTrue(blocked.query().orThrow().assetIds.isEmpty())
             converted.output.assets.forEach { it.readableSource?.close() }; google.output.assets.forEach { it.readableSource?.close() }; image.close(); movie.close()

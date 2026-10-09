@@ -5,6 +5,7 @@ import livephoto.core.apple.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.exif.ExifPositionIndependenceProof
+import livephoto.core.huawei.HuaweiTailVariant
 import livephoto.core.jpeg.*
 import kotlin.uuid.Uuid
 
@@ -100,6 +101,15 @@ internal object AppleAssemblyOperations {
                     source.bindings.count { it.protocol == ProtocolIds.Samsung && it.compatibleBaseOf == null } == 1 &&
                     source.bindings.all { it.protocol == ProtocolIds.Samsung && it.compatibleBaseOf == null ||
                         it.protocol == ProtocolIds.GoogleV2 && it.compatibleBaseOf == ProtocolIds.Samsung }
+            }
+            ProtocolIds.Huawei -> {
+                val tail = source.huaweiTail
+                val binding = source.bindings.singleOrNull()
+                tail != null && tail.variant == HuaweiTailVariant.Basic60 && tail.gap == null &&
+                    binding?.protocol == ProtocolIds.Huawei && binding.profile == ProfileId("basic60") &&
+                    binding.video == tail.videoRange && binding.video?.offset == source.jpeg?.primary?.endExclusive &&
+                    binding.video?.endExclusive == tail.tailRange.offset && tail.tailRange.length == 60uL &&
+                    source.videos[ProtocolIds.Huawei]?.container == VideoContainer.Mp4
             }
             else -> false
         }

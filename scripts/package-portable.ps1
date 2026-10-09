@@ -260,14 +260,16 @@ try {
     }
     foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) {
         $sourceProtocols = @('google.microvideo.v1', 'google.motionphoto.v2')
-        if ($container -eq 'mp4') { $sourceProtocols += 'samsung.motionphoto' }
+        if ($container -eq 'mp4') { $sourceProtocols += @('samsung.motionphoto', 'huawei.movingphoto') }
         foreach ($sourceProtocol in $sourceProtocols) {
         $label = "$endian-$container-$sourceProtocol"
         $sourceJson = & $launcher create --image (Join-Path $ordinaryExifFixtures "ordinary-$endian.jpg") --video (Join-Path $ordinaryExifFixtures "motion.$container") --target $sourceProtocol --output-dir (Join-Path $verify "ordinary EXIF source $label")
         if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF source creation failed.' }
         $source = ($sourceJson | ConvertFrom-Json).result.output.assets[0].path
         $sourceHash = (Get-FileHash $source).Hash
-        $convertedJson = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" --output-dir (Join-Path $verify "ordinary EXIF Apple conversion $label")
+        $keyArguments = @()
+        if ($sourceProtocol -eq 'huawei.movingphoto') { $keyArguments = @('--frame-index', '0') }
+        $convertedJson = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" @keyArguments --output-dir (Join-Path $verify "ordinary EXIF Apple conversion $label")
         if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF Apple conversion failed.' }
         $converted = ($convertedJson | ConvertFrom-Json).result
         if (@($converted.output.assets).Count -ne 2 -or ($converted.execution | Where-Object { $_.remuxed -or $_.transcoded }) -or
@@ -275,7 +277,7 @@ try {
         $validated = & $launcher validate --input $converted.output.assets[0].path --pair-video $converted.output.assets[1].path --layers Structure,Protocol
         if ($LASTEXITCODE -ne 0 -or ($validated | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Converted EXIF pair validation failed.' }
         $strictDir = Join-Path $verify "ordinary EXIF strict conversion $label"
-        $blocked = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" --strict --output-dir $strictDir
+        $blocked = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" @keyArguments --strict --output-dir $strictDir
         if ($LASTEXITCODE -ne 3 -or ($blocked | ConvertFrom-Json).error.code.value -ne 'PRESERVATION_REQUIREMENT_FAILED' -or (Test-Path (Join-Path $strictDir 'assets'))) { throw 'Unknown conversion associations must refuse Strict without assets.' }
         if ((Get-FileHash $source).Hash -ne $sourceHash) { throw 'EXIF conversion changed its source.' }
         Write-Host "PORTABLE_APPLE_ORDINARY_EXIF_CONVERT=SUCCESS profile=$label scope=unchanged-standard-source-exif-first-conversion-unknown-not-device-proof"
