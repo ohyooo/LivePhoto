@@ -258,10 +258,13 @@ try {
         if ($LASTEXITCODE -ne 3 -or ($textStrictJson | ConvertFrom-Json).error.code.value -ne 'PRESERVATION_REQUIREMENT_FAILED' -or (Test-Path (Join-Path $textStrictDir 'assets'))) { throw 'First text Clean must not borrow repeated-copy Strict evidence.' }
         Write-Host "PORTABLE_APPLE_ORDINARY_TEXT_CLEAN=SUCCESS container=$textContainer profile=$textLabel scope=raw-directory-preserved-neutral-copy-exact-first-clean-unknown"
     }
-    foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) { foreach ($googleProtocol in @('google.microvideo.v1', 'google.motionphoto.v2')) {
-        $label = "$endian-$container-$googleProtocol"
-        $sourceJson = & $launcher create --image (Join-Path $ordinaryExifFixtures "ordinary-$endian.jpg") --video (Join-Path $ordinaryExifFixtures "motion.$container") --target $googleProtocol --output-dir (Join-Path $verify "ordinary EXIF Google source $label")
-        if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF Google source creation failed.' }
+    foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) {
+        $sourceProtocols = @('google.microvideo.v1', 'google.motionphoto.v2')
+        if ($container -eq 'mp4') { $sourceProtocols += 'samsung.motionphoto' }
+        foreach ($sourceProtocol in $sourceProtocols) {
+        $label = "$endian-$container-$sourceProtocol"
+        $sourceJson = & $launcher create --image (Join-Path $ordinaryExifFixtures "ordinary-$endian.jpg") --video (Join-Path $ordinaryExifFixtures "motion.$container") --target $sourceProtocol --output-dir (Join-Path $verify "ordinary EXIF source $label")
+        if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF source creation failed.' }
         $source = ($sourceJson | ConvertFrom-Json).result.output.assets[0].path
         $sourceHash = (Get-FileHash $source).Hash
         $convertedJson = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" --output-dir (Join-Path $verify "ordinary EXIF Apple conversion $label")

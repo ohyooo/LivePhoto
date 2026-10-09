@@ -87,12 +87,23 @@ internal object AppleAssemblyOperations {
         return Prepared(image, rewrite, movie, unknown, Snapshot(identities, GenerationToken(hash.finish().value)))
     }
 
-    /** Source cleanup and new CID append are separate proofs. Only unchanged standard Google JPEG EXIF is admitted. */
+    /** Source cleanup and new CID append are separate proofs; source ownership is checked per protocol. */
     private suspend fun verifySourceExif(original: SourceSession?, clean: SourceSession, budget: ParseBudget) {
         val source = original ?: fail("UNSAFE_METADATA_REWRITE", "Conversion EXIF requires its original source snapshot", Stage.Plan)
-        if (source.applePair != null || source.legacyPair != null ||
-            source.inspection.detection.primaryProtocol?.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) ||
-            source.bindings.size != 1)
+        val classified = when (source.inspection.detection.primaryProtocol?.protocol) {
+            ProtocolIds.GoogleV1, ProtocolIds.GoogleV2 -> source.bindings.size == 1
+            ProtocolIds.Samsung -> {
+                val directory = source.sef
+                directory != null && !directory.legacyDialect && directory.version == 107u && directory.gaps.isEmpty() &&
+                    source.videos[ProtocolIds.Samsung]?.container == VideoContainer.Mp4 &&
+                    directory.records.size == 2 && directory.records.map { it.type }.toSet() == setOf(0x0a30u.toUShort(), 0x0a31u.toUShort()) &&
+                    source.bindings.count { it.protocol == ProtocolIds.Samsung && it.compatibleBaseOf == null } == 1 &&
+                    source.bindings.all { it.protocol == ProtocolIds.Samsung && it.compatibleBaseOf == null ||
+                        it.protocol == ProtocolIds.GoogleV2 && it.compatibleBaseOf == ProtocolIds.Samsung }
+            }
+            else -> false
+        }
+        if (source.applePair != null || source.legacyPair != null || !classified)
             fail("UNSAFE_METADATA_REWRITE", "This source protocol has no unchanged-EXIF conversion proof", Stage.Plan)
         val before = source.jpeg?.segments?.singleOrNull { it.payloadKind == AppPayloadKind.Exif }?.payload
             ?: fail("UNSAFE_METADATA_REWRITE", "Conversion needs one original EXIF payload", Stage.Plan)
