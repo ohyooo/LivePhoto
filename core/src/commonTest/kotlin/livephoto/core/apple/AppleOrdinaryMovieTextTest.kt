@@ -71,9 +71,10 @@ class AppleOrdinaryMovieTextTest {
         assertEquals(Bytes(bytes), before.readExactly(0uL, bytes.size.toUInt()).orThrow())
         // Reading this ordinary directory grants no cleanup/unknown-association write permission.
         val split = MemoryOutputTransaction(context, "text-split-blocked")
-        assertIs<CoreResult.Failure>(core.split(SplitRequest(SourceSet.Pair(result.output.assets[0].readableSource!!, movie),
-            output = split, context = context)))
-        assertTrue(split.query().orThrow().assetIds.isEmpty())
+        assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.split(
+            SplitRequest(SourceSet.Pair(result.output.assets[0].readableSource!!, movie),
+                policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = split, context = context))).error.code)
+        assertTrue(split.committedAssets().isEmpty())
     }
 
     @Test fun secondaryAuthoritiesDuplicatesNonUtf8AndUnexpectedDataCannotAuthorizeCreate(): Unit = runImmediate {

@@ -64,8 +64,10 @@ internal object AppleClean {
         val roots = parser.readBoxes(ByteRange(0uL, videoReader.identity().orThrow().size)).orThrow()
         val movie = roots.single { it.type == "moov" }
         val children = parser.readBoxes(movie.payload, 1u).orThrow()
-        if (children.any { it.type !in setOf("mvhd", "trak", "meta", "free", "udta") } ||
-            children.filter { it.type == "udta" }.any { !EmptyMovieMetadata.matches(videoReader, parser, it, 1u) })
+        val ordinary = children.filter { it.type == "udta" }
+        if (children.any { it.type !in setOf("mvhd", "trak", "meta", "free", "udta") } || ordinary.size > 1 ||
+            ordinary.any { !EmptyMovieMetadata.matches(videoReader, parser, it, 1u) &&
+                !OrdinaryMovieText.matches(videoReader, parser, it, 1u, budget) })
             unsafe("Unclassified movie-level dependencies prevent track retirement")
         val fields = parser.readBoxes(movieId.meta.payload, 2u).orThrow()
         if (fields.any { it.type !in setOf("hdlr", "keys", "ilst") }) unsafe("Movie metadata includes unclassified ordinary fields")
@@ -102,6 +104,11 @@ internal object AppleClean {
         }
         val video = FixedPatchSource.create(videoReader, patches).orThrow()
         val cleanReader = BinaryReader(video, videoReader.context)
+        // Fixed-width retirement never relocates or reserializes an ordinary text directory.
+        for (box in ordinary) {
+            if (sha256Range(videoReader, box.range).orThrow() != sha256Range(cleanReader, box.range).orThrow())
+                fail("POSTCONDITION_FAILED", "Apple cleanup changed ordinary movie text bytes", Stage.Verify)
+        }
         if (AppleVideoReader.read(cleanReader, budget).orThrow() != null) unsafe("Movie identifier survived cleanup")
         val clean = BmffVideoProbe(cleanReader, budget, allowTimedMetadata = true).probe(ByteRange(0uL, cleanReader.identity().orThrow().size)).orThrow()
         if (clean.tracks != original.tracks.filter { it.handler != "meta" }) fail("POSTCONDITION_FAILED", "Apple cleanup changed retained movie tracks", Stage.Verify)

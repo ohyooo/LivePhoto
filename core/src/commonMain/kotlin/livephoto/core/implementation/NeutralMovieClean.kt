@@ -26,13 +26,18 @@ internal object NeutralMovieClean {
             "minf" to setOf("vmhd", "smhd", "hdlr", "dinf", "stbl"), "dinf" to setOf("dref"),
             "stbl" to setOf("stsd", "stts", "ctts", "stsc", "stsz", "stco", "co64", "stss", "sdtp", "sgpd", "sbgp"))
         suspend fun visit(range: ByteRange, kind: String, depth: UInt) {
-            for (box in parser.readBoxes(range, depth).orThrow()) {
+            val children = parser.readBoxes(range, depth).orThrow()
+            if (kind == "moov" && children.count { it.type == "udta" } > 1)
+                fail("UNSAFE_METADATA_REWRITE", "Neutral movie has multiple user metadata directories", Stage.Plan)
+            for (box in children) {
                 budget.poll()
                 if (box.type !in schemas.getValue(kind))
                     fail("UNSAFE_METADATA_REWRITE", "Unclassified movie hierarchy cannot be declared clean", Stage.Plan, Location(selector = box.type))
                 when {
                     box.type in schemas -> visit(box.payload, box.type, depth + 1u)
-                    box.type == "udta" -> if (!EmptyMovieMetadata.matches(reader, parser, box, depth))
+                    // This path copies the entire already-neutral file with an exact SHA proof.
+                    box.type == "udta" -> if (!EmptyMovieMetadata.matches(reader, parser, box, depth) &&
+                        !(kind == "moov" && OrdinaryMovieText.matches(reader, parser, box, depth, budget)))
                         fail("UNSAFE_METADATA_REWRITE", "Ordinary movie metadata needs a dedicated neutral classification", Stage.Plan)
                     box.type in setOf("free", "wide") -> {
                         var offset = box.payload.offset

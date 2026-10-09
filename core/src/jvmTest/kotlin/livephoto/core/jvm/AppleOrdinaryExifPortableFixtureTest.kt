@@ -43,6 +43,15 @@ class AppleOrdinaryExifPortableFixtureTest {
         assertEquals(Verdict.Valid, ordinaryResult.validation.verdict)
         assertEquals(AppleOrdinaryMovieTextTest().envelope(ordinary),
             AppleOrdinaryMovieTextTest().envelope(ordinaryResult.output.assets[1].readableSource!!))
+        val clean = DefaultLivePhotoCore().split(SplitRequest(SourceSet.Pair(ordinaryResult.output.assets[0].readableSource!!,
+            ordinaryResult.output.assets[1].readableSource!!), output = MemoryOutputTransaction(context, "ordinary-text-clean"), context = context)).orThrow()
+        val cleanMovie = clean.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!
+        assertEquals(AppleOrdinaryMovieTextTest().envelope(ordinary), AppleOrdinaryMovieTextTest().envelope(cleanMovie))
+        val repeated = DefaultLivePhotoCore().split(SplitRequest(SourceSet.Single(cleanMovie), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+            output = MemoryOutputTransaction(context, "ordinary-text-repeat"), context = context)).orThrow()
+        assertEquals(sha256Range(BinaryReader(cleanMovie, context), ByteRange(0uL, cleanMovie.size().orThrow())).orThrow(),
+            sha256Range(BinaryReader(repeated.output.assets.single().readableSource!!, context), ByteRange(0uL, cleanMovie.size().orThrow())).orThrow())
+        clean.output.assets.forEach { it.readableSource?.close() }; repeated.output.assets.forEach { it.readableSource?.close() }
         ordinaryResult.output.assets.forEach { it.readableSource?.close() }; ordinary.close()
         val directory = Path.of("build", "portable-apple-ordinary-exif-fixtures")
         Files.createDirectories(directory)

@@ -179,7 +179,7 @@ Linux（Bash/Zsh）：
 
 可显式指定 `--profile jpeg-mov`，效果相同。不需要媒体后端，也不会隐式把 MP4 改成 MOV；MP4 输入必须显式使用 `--profile jpeg-mp4`。默认 Create 为 `Experimental`，不代表任意相机 JPEG/MakerNote 的 Generic Create 已完成；默认 ConvertTo 仍为 `Planned`，转换须指定已实现的 profile，HEIC Create/ConvertTo 也未实现。
 
-视频允许一个经完整校验的 iTunes 普通文本目录：标题、作者、注释、编码工具与版权，每个字段必须唯一、UTF-8、locale=0，非空且不超过 64 KiB。目录原字节、媒体样本和时间线保留，不重封装、不转码；结构参考 [FFmpeg 的实际写入实现](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c)。freeform、其它 keys 表、未知字段/编码及多个目录仍拒绝。该权限仅用于 Apple 追加写入与读取，不放宽 remux/trim/transcode 或 Clean 的门禁。
+视频允许一个经完整校验的 iTunes 普通文本目录：标题、作者、注释、编码工具与版权，每个字段必须唯一、UTF-8、locale=0，非空且不超过 64 KiB。目录原字节、媒体样本和时间线保留，不重封装、不转码；结构参考 [FFmpeg 的实际写入实现](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c)。freeform、其它 keys 表、未知字段/编码及多个目录仍拒绝。支持有限 Apple 追加写入、读取和 Clean/Split，以及有限 Apple→Google 转换；不放宽 remux/trim/transcode 的 metadata 门禁。首次清理/转换仍有未知关联，`MetadataPreserving=Unknown`，因此严格策略拒绝；清理后的普通视频再次 Split 才可证明整文件字节不变。
 
 ### 修复：先预览，再明确写入
 
@@ -430,6 +430,8 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 ### 最新可核验检查点
 
+Apple 普通电影文本 Clean/Split 与有限 Apple→Google 转换：新全量 **821 tests，800 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。仅清除确认的 CID/专用轨，普通目录原字节与媒体样本不变；再次对普通视频 Split 为严格整文件复制。首次未知关联、严格拒绝、篡改整对回滚与转换后原样提取回归通过。新完整 Windows 无 FFmpeg 便携验收通过 Create、首次 Clean、严格拒绝和再次整文件复制；不等同于通用 mdta/MakerNote/HEIC 写入或设备认证。
+
 Apple 普通电影文本保留：本轮全量 **817 tests，796 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。有限 iTunes 文本目录原字节与媒体样本保留；多目录/重复字段/freeform/非 UTF-8/类型与 locale 反例、整对篡改回滚通过。新完整 Windows 无 FFmpeg 便携包通过严格 Create 与 Pair 验证；不开放通用 mdta、Clean、媒体重封装或真机认证。
 
 当前方向：桌面媒体后端仅使用用户已有 FFmpeg；以下 Windows 系统 API 检查点是保留代码的历史证据，不代表当前默认桌面入口仍调用这些 API。Android/iOS 构建、IO/事务和系统媒体适配尚未实施，列在最后一项移动端 TODO。
@@ -502,7 +504,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入，Create 允许经证明安全的标准 EXIF，默认限 JPEG＋MOV；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | 已有 MakerNote 合并、复杂 Generic/HEIC 写入、更多原片与跨协议路径 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 纯协议能力及统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；运行时查询实际能力 | 更多 FFmpeg 媒体 profile 与三平台真实验收；最后移动端系统媒体 API |
@@ -563,8 +565,9 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] Apple JPEG/HEIC CID 的 EXIF 已知范围归属检查：大小端、普通独立字段、整块/部分共享范围及 Repair 零输出回归；808 项本轮全量与完整 Windows 便携验收通过。未知字段类型/私有内部引用仍不获得写入权限。
 - [x] Apple 普通标准 EXIF Create：813 项本轮全量和完整 Windows 便携验收通过，大小端/GPS/方向/UserComment/原值位置保持、无 ExifIFD 追加、私有数据拒绝与整对回滚；仅有限 JPEG＋原 MOV/MP4，不开放已有 MakerNote 合并或 Convert 来源清理。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
-- [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。仅 raw 保留的追加装配与读取，不授权 Clean/remux/trim/transcode 改写。
-- [ ] Apple 普通文本 Clean/Split 与后续 Convert：须选择性清除 CID/专用轨、独立证明普通目录原字节不变；未知关联和 Strict 边界仍明确报告。
+- [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。raw 保留的追加装配与读取不授权 remux/trim/transcode 改写。
+- [x] Apple 有限普通文本 Clean/Split 与 Apple→Google：821 项新全量，800 项执行成功、21 项历史系统专项跳过；选择性清除 CID/专用轨、原目录/样本保留、再次 Split 整文件复制；首次 Unknown 与严格拒绝、篡改回滚及转换后原样提取回归通过。
+- [ ] 其它普通电影 metadata / mdta、混合 timed metadata 的选择性清理和转换：需要独立 ownership/引用关系证明，不能借有限文本的保留结果开放未知结构。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
