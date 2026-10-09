@@ -893,9 +893,21 @@ try {
         $trimCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.microvideo.v1 --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim create')
         if ($LASTEXITCODE -ne 3 -or ($trimCreateJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trimmed Create gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_CREATE_TRIM=UNAVAILABLE'
-        $replacementCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --replacement-frame-index 0 --output-dir (Join-Path $verify 'disabled replacement create')
-        if ($LASTEXITCODE -ne 3 -or ($replacementCreateJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend replacement Create gate failed.' }
-        Write-Host 'PORTABLE_FFMPEG_CREATE_REPLACEMENT=UNAVAILABLE'
+        $replacementDirectory = Join-Path $verify 'disabled replacement create'
+        $replacementCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --replacement-frame-index 0 --output-dir $replacementDirectory
+        # A finite system frame adapter can be available without FFmpeg. In that case
+        # planning reaches the reference JPEG's ordinary-metadata preservation gate;
+        # it must still refuse rather than silently discard metadata or publish files.
+        $hasSystemFrames = @($media.capabilities.operations | Where-Object {
+            $_.operation -eq 'ExtractFrame' -and $_.implementation -in @('Experimental', 'Supported')
+        }).Count -gt 0
+        $expectedReplacementError = if ($hasSystemFrames) { 'UNSAFE_METADATA_REWRITE' } else { 'CAPABILITY_UNSUPPORTED' }
+        $replacementError = ($replacementCreateJson | ConvertFrom-Json).error
+        if ($LASTEXITCODE -ne 3 -or $replacementError.code.value -ne $expectedReplacementError -or
+            $replacementError.stage -ne 'Plan' -or (Test-Path -LiteralPath $replacementDirectory)) {
+            throw "Portable no-FFmpeg replacement Create rejection differs: $replacementCreateJson"
+        }
+        Write-Host "PORTABLE_NO_FFMPEG_CREATE_REPLACEMENT=REFUSED error=$expectedReplacementError scope=planning-no-output"
     }
     $createdJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --output-dir (Join-Path $verify 'roundtrip')
     if ($LASTEXITCODE -ne 0) { throw "Portable reference Create failed: $createdJson" }
