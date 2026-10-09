@@ -6,7 +6,7 @@
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；当前构建目标为 JVM，尚未交付 Native、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux 便携包已交付；Apple 有限 ExplicitRePair 已完成测试、便携包和 CI 验收。后续仍有显式修复模式、Apple 写入及系统媒体后端扩展；真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付；Apple 有限 ExplicitRePair 已完成测试、便携包和 CI 验收。后续仍有显式修复模式、Apple 写入、系统媒体后端扩展及分阶段 Native 迁移；真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -30,7 +30,7 @@ Actions 的 artifact 是外层下载包；解压后再展开里面的 `.zip` / `
 | --- | --- | --- | --- |
 | Windows x64 | `LivePhoto-windows-x64.zip` | `LivePhoto/LivePhoto.exe` | 已构建与便携验收 |
 | Linux x64 | `LivePhoto-linux-x64.tar.gz` | `LivePhoto/bin/LivePhoto` | 已通过 CI 构建与便携验收 |
-| macOS ARM64 | 尚无已交付包 | 脚本预留 `LivePhoto.app/Contents/MacOS/LivePhoto` | runner 环境问题，暂缓 |
+| macOS ARM64 | `LivePhoto-macos-arm64.tar.gz` | `LivePhoto.app/Contents/MacOS/LivePhoto` | 已通过 CI 构建、打包与本机成品验收 |
 
 不提供 Intel macOS、Windows ARM 或 Linux ARM 包。当前是便携应用目录，**不是单个独立 EXE，也不是 Kotlin/Native 二进制**：通过 `jpackage app-image` 携带精简 Java 运行时，无需在使用机器上另外安装 Java。不要只复制 EXE、删除 `runtime/`、应用 JAR 或 Windows 媒体 helper。暂不提供 MSI/DMG 安装器。
 
@@ -409,11 +409,11 @@ reference 测试使用仓库中的 `reference/video.jpg`、`reference/video.mp4`
 
 Destination 必须使用新路径，脚本不覆盖既有应用 image；会调用 `jpackage`、生成归档与 SHA-256，解压到带空格路径进行 smoke tests。它还消费 jvmTest 导出的合成 fixture，不能只构建 CLI 就跳过这些前提。成功归档是 `LivePhoto-windows-x64.zip`，最后输出 `PORTABLE_SUCCESS`；任何前面单项 SUCCESS 都不能代替完整打包结果。
 
-Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架构的构建机运行，不支持交叉 jpackage**；本项目已通过 GitHub Actions 执行该流程。macOS ARM64 仅预留脚本入口，尚无成功交付证明。建议复用现有 Gradle 缓存，保留数 GB 磁盘余量；image、解压验收目录与素材副本会明显增加空间使用。
+Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Platform macos-arm64`，**必须在对应 OS/架构的构建机运行，不支持交叉 jpackage**；均已通过 GitHub Actions 执行该流程。macOS bundle 打包版本为 `1.0.0`，用于满足 jpackage 的首段非零要求；产品/CLI/API 仍为开发版 `0.1.0`，不是稳定版声明。建议复用现有 Gradle 缓存，保留数 GB 磁盘余量；image、解压验收目录与素材副本会明显增加空间使用。
 
 ## CI 与产物
 
-[Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux 直接执行仓库中带可执行位的 `gradlew`。
+[Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 / macOS ARM64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux/macOS 直接执行仓库中带可执行位的 `gradlew`。便携 smoke 启用 trace，日志随报告上传。
 
 每个平台上传三类 artifacts，默认保留 **14 天**：
 
@@ -421,11 +421,13 @@ Linux x64 使用同一脚本的 `-Platform linux-x64`，**必须在对应 OS/架
 - `build-outputs-...`：JAR 与 JVM 分发包。
 - `build-reports-...`：测试报告、XML、合成 fixture、兼容回归素材包及哈希清单、Gradle 和便携日志；构建失败时也尝试上传已有报告。
 
-两平台成功通常共 6 个 artifacts。CI 可能没有 FFmpeg，不能把它的协议/便携测试等同于配置完整媒体后端的集成验收，也不能把缺失工具后的 skip 当作该媒体操作成功。
+三平台成功通常共 9 个 artifacts。CI 可能没有 FFmpeg，不能把它的协议/便携测试等同于配置完整媒体后端的集成验收，也不能把缺失工具后的 skip 当作该媒体操作成功。
 
 ## 进度、已完成与 TODO
 
 ### 最新可核验检查点
+
+macOS ARM64 便携交付与可选诊断日志：CLI 改动实际全量 **787 tests，0 failures / errors / skips**。修复 macOS jpackage 包版本后，[CI 37877380716](https://github.com/ohyooo/LivePhoto/actions/runs/37877380716) 三平台构建、测试、打包成功，9 个 artifacts 已核对。同提交 macOS 包下载后核对外层 GitHub artifact digest、内层归档 SHA-256、ARM64 启动器和运行时；本机在仓库外工作目录通过 13 个 CLI 检查，包括 Create/Validate/Extract/Split/Convert、reference 预期 Invalid 和错误退出码。Raw 视频字节一致、输入未改变，trace 独立写入 stderr。未验证 macOS 系统媒体处理或 Apple 相册兼容；Native 迁移另列 TODO。
 
 Apple 有限 ExplicitRePair 已交付：[`fceb13c`](https://github.com/ohyooo/LivePhoto/commit/fceb13c5c226e0861515795abaadcc2978930b02) 实际全量构建 **711 tests，0 failures / errors / skips**，包含真实编码 MOV 修复后完整解码；Windows 新便携包全部验收成功，新增空 PATH 两侧权威/两种容器的重配对 smoke。[对应 CI 37742117365](https://github.com/ohyooo/LivePhoto/actions/runs/37742117365) 成功，Windows/Linux 合计 6 个非空、未过期 artifacts 已核对。
 
@@ -485,7 +487,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；有限 Probe、SDR 抽帧和同 MP4 remux 已实际测试 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe、SDR JPEG、Baseline 单轨 MP4 → MP4；全量和便携验收 | 更多 remux/抽帧 profile、系统裁剪/transcode、其它 OS 官方 API |
-| CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
+| CLI / 三平台便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、可选 stderr 日志、三平台打包与 smoke/artifacts、macOS 本机成品验收 | Native 原生发布尚未实施；新 Core 能力仍需逐项接入 CLI |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
 每个实施工作包完成后，应同时更新本表、下面的 TODO 和对应提交/验收检查点。只有完成实际构建、测试与 CLI 验收并核对相应 CI/产物，才把该批次标记为完成；测试数增加本身不代表某个阶段全部完成。
@@ -514,7 +516,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | 3 | 系统 MediaBackend 扩展 | 未实现系统编辑；逐个平台检查官方 API 与运行时可用性 | 能力查询真实，抽帧/裁剪/remux/transcode 分别验证；无实现则禁用 |
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
-| 当前优先 | macOS ARM64 便携包 | **进行中：恢复 ARM64 CI，并增加可选诊断日志** | ARM64 构建、归档解压、CI smoke 与本机成品验收全部实际通过 |
+| 已完成批次 | macOS ARM64 便携包 | **已完成当前便携范围**，仍为 jpackage/JVM | ARM64 CI 构建、归档解压、smoke 与本机 13 个 CLI 检查通过；不是系统媒体后端或设备认证 |
 | macOS 验收后逐步推进 | Kotlin/Native Core 与原生 CLI | **TODO：尚未实现，不在本批重写** | 先复用 commonMain 并增加 Native 库/测试，再替换 JVM 文件 IO、原子事务、进程调用和 JSON/日志适配，最后接入原生媒体后端；逐平台交付不依赖 JVM 的产物 |
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
 | 当前范围之外 | Compose UI、Android/iOS/Native 入口 | 未来规划，不计入本轮 Core + CLI 交付 | 复用统一 Core/Application API，不提前引入 GUI 依赖 |
@@ -552,7 +554,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] 扩展系统 remux 的 B 帧、音轨、复杂 edits、MOV 和更多 profile；各自补独立证据，不能靠丢字段或放宽时间线检查开放能力。
 - [ ] 扩展 Windows 抽帧 profile、系统裁剪/remux/transcode；macOS/其它平台官方 API 后端。未知 HDR/布局及没有合格后端的操作继续禁用，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
-- [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
+- [x] 恢复 macOS ARM64 runner 前置条件与真实打包验收；下载同提交 CI 包，核对 artifact 与内层归档哈希、ARM64 启动器/运行时，本机 13 个 CLI 检查通过，Raw 视频字节一致、源未改变。不是 Apple 相册认证或 AVFoundation 实现。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
 - [ ] Kotlin/Native 分阶段迁移：先 Native Core 库与协议测试，再原生 CLI/IO/事务/进程/JSON/日志，再平台媒体后端和原生发布 CI。目标为 macOS ARM64、Windows x64、Linux x64；每个平台独立验证，不能把当前 jpackage 包称为 Native。JVM 适配与 Native 产物分离，不为迁移提前引入 GUI。
@@ -561,6 +563,15 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 ### 诊断日志
 
 排查异常时可使用 `LivePhoto detect --input 'livephoto.jpg' --log-level trace 2>trace.log`。默认不记录日志；debug 提供操作结果，trace 增加阶段进度、耗时及未捕获异常的有界调用栈。异常消息和命令参数不写入诊断，避免泄露素材路径或 metadata。已转为结构化 Core 错误的异常仅记录错误码和阶段，不保证拥有底层调用栈。独立 `--help` / `--version` 不产生诊断。
+
+macOS 在解压目录使用实际入口（终端 CLI，无需双击 `.app`）：
+
+```sh
+./LivePhoto.app/Contents/MacOS/LivePhoto --version
+./LivePhoto.app/Contents/MacOS/LivePhoto detect --input './livephoto.jpg' --log-level trace 2>trace.log
+```
+
+该包未提供 Apple 公证或发行证书签名；不同下载方式可能触发 Gatekeeper，不要为运行它关闭全局安全检查。
 
 ## 常见问题
 
