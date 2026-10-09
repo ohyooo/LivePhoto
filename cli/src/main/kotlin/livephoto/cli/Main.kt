@@ -31,7 +31,8 @@ Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred
 Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
 Probe: [--resource ID] [--decode-check] (never downloads media tools)
 Remux/transcode: --container Mp4|Mov; remux [--resource ID]; transcode --codec Avc|Hevc --allow-transcode
-Common: --strict, --max-bytes N (default 1 GiB), --help, --version
+Common: --strict, --max-bytes N (default 1 GiB), --log-level off|error|debug|trace, --help, --version
+Diagnostics: stderr only; LIVEPHOTO_LOG_LEVEL is the default; arguments and exception messages are redacted
 
 Output is JSON. Exit: 0 success, 2 arguments, 3 Core/IO failure, 4 invalid validation/blocked repair.
 Unsupported/Planned operations return errors, never simulated media output.
@@ -51,13 +52,17 @@ internal fun <T> blocking(block: suspend () -> T): T {
 }
 
 internal class Cli(private val providedCore: LivePhotoCore? = null,
-    private val discover: (Path?) -> BackendDiscovery = { JvmMediaBackends.discover(it) }) {
+    private val discover: (Path?) -> BackendDiscovery = { JvmMediaBackends.discover(it) },
+    private val diagnostic: (String) -> Unit = { System.err.println(it) }) {
     suspend fun run(args: List<String>, emit: (String) -> Unit): Int {
         if (args.isEmpty() || args == listOf("--help") || args == listOf("help")) { emit(HELP); return 0 }
         if (args == listOf("--version")) { emit("LivePhoto 0.1.0"); return 0 }
         val sources = mutableListOf<FileBinarySource>()
+        val log = Diagnostics(diagnostic)
+        val started = System.nanoTime()
         var output: DirectoryOutputTransaction? = null
         try {
+            log.configure(System.getenv("LIVEPHOTO_LOG_LEVEL"))
             val command = args.first()
             val read = setOf("detect", "inspect", "analyze", "validate", "get-key", "probe")
             val writes = setOf("create", "convert", "extract", "split", "repair", "set-key", "extract-frame", "replace-cover", "trim", "remux", "transcode")
@@ -70,7 +75,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 require(args[i - 1].startsWith("--") && key.isNotEmpty() && key !in options) { "Expected a unique --option" }
                 options[key] = if (key in flags) "true" else { require(i < args.size && !args[i].startsWith("--")) { "Missing value for --$key" }; args[i++] }
             }
-            val common = setOf("max-bytes")
+            val common = setOf("max-bytes", "log-level")
             val inputKeys = setOf("input", "pair-video")
             val positionKeys = setOf("frame-index", "time-us", "track-id")
             val replacementKeys = positionKeys.map { "replacement-$it" }.toSet()
@@ -96,15 +101,18 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 else -> inputKeys
             }
             require(options.keys.all { it in allowed }) { "Unknown or inapplicable option: ${options.keys.first { it !in allowed }}" }
+            options["log-level"]?.let(log::configure)
+            log.debug("operation=$command event=start")
             val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
                 command in setOf("create", "convert") && (options.keys.any { it in trimKeys + replacementKeys } || "ffmpeg" in options) ||
                 command == "repair" && (options["mode"] == RepairMode.ExplicitRemux.name || "ffmpeg" in options)
             val discovery = if (providedCore == null && needsBackend) discover(options["ffmpeg"]?.let(Path::of)) else null
+            log.trace("event=backend-discovery requested=$needsBackend ffmpeg-found=${discovery?.ffmpegPath != null}")
             val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
             fun required(name: String): String = options[name] ?: errorArgument("Missing --$name")
             val maxBytes = options["max-bytes"]?.toULong() ?: 1_073_741_824uL
             require(maxBytes in 1uL..Long.MAX_VALUE.toULong()) { "Invalid byte budget" }
-            val context = Context(Limits(maxBytes, maxBytes))
+            val context = Context(Limits(maxBytes, maxBytes), progress = ProgressReceiver { log.progress(it.stage.name, it.completed, it.total) })
             fun file(name: String): BinarySource = FileBinarySource(Path.of(required(name))).also { sources += it }
             fun source(): SourceSet = if (options.containsKey("pair-video")) SourceSet.Pair(file("input"), file("pair-video")) else SourceSet.Single(file("input"))
             fun target() = ProtocolSelector(ProtocolId(required("target")), options["profile"]?.let(::ProfileId))
@@ -155,6 +163,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 else -> core.transcode(TranscodeRequest(ResourceRef(source()), VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container"))), policy, destination(), context))
             }
             emit(Json.encode(result, output))
+            if (result is CoreResult.Failure) log.failure(result.error.code.value, result.error.stage.name)
+            log.debug("operation=$command event=result status=${if (result is CoreResult.Failure) "failure" else "success"}")
             return when (result) {
                 is CoreResult.Failure -> 3
                 is CoreResult.Success -> when (val value = result.value) {
@@ -165,14 +175,20 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 }
             }
         } catch (e: IllegalArgumentException) {
+            log.exception(e)
             emit(Json.encode(mapOf("error" to mapOf("code" to "INVALID_ARGUMENT", "message" to e.message))))
             return 2
+        } catch (e: Exception) {
+            log.exception(e)
+            emit(Json.encode(mapOf("error" to mapOf("code" to "UNEXPECTED_ERROR", "message" to "Unexpected failure; enable trace diagnostics for redacted call frames"))))
+            return 3
         } finally {
             sources.forEach { it.close() }
             output?.let { transaction ->
                 val state = (transaction.query() as? CoreResult.Success)?.value?.state
                 if (state in setOf(TransactionState.Open, TransactionState.Prepared)) transaction.abort()
             }
+            log.trace("event=finished elapsed-ms=${(System.nanoTime() - started) / 1_000_000}")
         }
     }
 }

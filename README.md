@@ -288,6 +288,7 @@ Linux（Bash/Zsh）：
 
 | 参数 | 取值 / 约束 |
 | --- | --- |
+| `--log-level` | `off`（默认）、`error`、`debug`、`trace`；诊断写入 stderr，JSON 仍在 stdout。也可通过 `LIVEPHOTO_LOG_LEVEL` 设置默认级别 |
 | `--max-bytes N` | 所有命令可用；正整数，默认 `1073741824`（1 GiB），设置 Context 的缓存/materialize 与输出字节预算，不是总内存上限，也并非只限制输入文件大小 |
 | `--layers` | 逗号分隔 `Structure,Protocol,Media`，不加空格 |
 | `--target`、`--profile` | 下节列出的协议 ID / profile；未知组合不会静默回退 |
@@ -513,7 +514,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | 3 | 系统 MediaBackend 扩展 | 未实现系统编辑；逐个平台检查官方 API 与运行时可用性 | 能力查询真实，抽帧/裁剪/remux/transcode 分别验证；无实现则禁用 |
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
-| 条件恢复后 | macOS ARM64 便携包 | **暂缓：runner 环境前置问题** | ARM64 主机/已有 JDK、构建、归档解压与 CLI smoke 全部实际通过 |
+| 当前优先 | macOS ARM64 便携包 | **进行中：恢复 ARM64 CI，并增加可选诊断日志** | ARM64 构建、归档解压、CI smoke 与本机成品验收全部实际通过 |
+| macOS 验收后逐步推进 | Kotlin/Native Core 与原生 CLI | **TODO：尚未实现，不在本批重写** | 先复用 commonMain 并增加 Native 库/测试，再替换 JVM 文件 IO、原子事务、进程调用和 JSON/日志适配，最后接入原生媒体后端；逐平台交付不依赖 JVM 的产物 |
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
 | 当前范围之外 | Compose UI、Android/iOS/Native 入口 | 未来规划，不计入本轮 Core + CLI 交付 | 复用统一 Core/Application API，不提前引入 GUI 依赖 |
 
@@ -553,7 +555,12 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
-- [ ] 未来 Compose UI、Android/iOS/Native targets：不属于当前 Core + CLI 交付范围，不提前引入 GUI 依赖。
+- [ ] Kotlin/Native 分阶段迁移：先 Native Core 库与协议测试，再原生 CLI/IO/事务/进程/JSON/日志，再平台媒体后端和原生发布 CI。目标为 macOS ARM64、Windows x64、Linux x64；每个平台独立验证，不能把当前 jpackage 包称为 Native。JVM 适配与 Native 产物分离，不为迁移提前引入 GUI。
+- [ ] 未来 Compose UI、Android/iOS targets：不属于当前 Core + CLI 交付范围，不提前引入 GUI 依赖。
+
+### 诊断日志
+
+排查异常时可使用 `LivePhoto detect --input 'livephoto.jpg' --log-level trace 2>trace.log`。默认不记录日志；debug 提供操作结果，trace 增加阶段进度、耗时及未捕获异常的有界调用栈。异常消息和命令参数不写入诊断，避免泄露素材路径或 metadata。已转为结构化 Core 错误的异常仅记录错误码和阶段，不保证拥有底层调用栈。独立 `--help` / `--version` 不产生诊断。
 
 ## 常见问题
 

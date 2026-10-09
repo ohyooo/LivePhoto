@@ -24,10 +24,16 @@ jobs:
         include:
           - platform: windows-x64
             runner: windows-2025
+            architecture: x64
+            runner-architecture: X64
           - platform: linux-x64
             runner: ubuntu-24.04
-          # macOS ARM64 is deferred: hosted-runner environment
-          # preflight failed.
+            architecture: x64
+            runner-architecture: X64
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: aarch64
+            runner-architecture: ARM64
 
     steps:
       - name: Checkout
@@ -36,8 +42,8 @@ jobs:
       - name: Validate environment
         shell: pwsh
         run: |
-          if ($env:RUNNER_ARCH -ne 'X64') {
-            throw 'Expected an X64 runner.'
+          if ($env:RUNNER_ARCH -ne '${{ matrix.runner-architecture }}') {
+            throw 'Unexpected runner architecture.'
           }
 
           if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
@@ -50,7 +56,7 @@ jobs:
           distribution: zulu
           java-version: '25'
           java-package: jdk
-          architecture: x64
+          architecture: ${{ matrix.architecture }}
           cache-jdk: true
 
       - name: Setup Gradle
@@ -88,6 +94,8 @@ jobs:
 
       - name: Package and smoke test
         shell: pwsh
+        env:
+          LIVEPHOTO_LOG_LEVEL: trace
         run: |
           $ErrorActionPreference = 'Stop'
           # Exercise packaging under a strict caller: its negative tests check exact exit codes locally.
