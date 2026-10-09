@@ -15,7 +15,9 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
         CapabilityEntry(Operation.Probe, Implementation.Experimental, conditions = listOf(
             Condition(ConditionOperator.Equals, "decodeScope", Value.Text("one-mp4-or-mov-avc-video-no-audio-48x48-to-4096x2304-at-most-64-visible-unique-exact-100ns-frames")),
             Condition(ConditionOperator.Equals, "runtime", Value.Text("registered-software-avc-nv12-decoder-512MiB-isolated-process-per-input-format-verification-not-HDR-or-metadata-conformance"))))) +
-        listOf(Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame).map {
+        listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
+            Condition(ConditionOperator.Equals, "frameProfile", Value.Text("single-avc-baseline-main-no-audio-even-48-to-1024-at-most-64-exact-100ns-frames-bt709-limited-progressive-square-left-default-jpeg"))))) +
+        listOf(Operation.Trim, Operation.Remux, Operation.Transcode).map {
             CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
         })
 
@@ -110,7 +112,7 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
     override suspend fun trim(job: BackendJob) = unsupported(job, Operation.Trim)
     override suspend fun remux(job: BackendJob) = unsupported(job, Operation.Remux)
     override suspend fun transcode(job: BackendJob) = unsupported(job, Operation.Transcode)
-    override suspend fun extractFrame(job: BackendJob) = unsupported(job, Operation.ExtractFrame)
+    override suspend fun extractFrame(job: BackendJob) = WindowsFrame.run(command, job)
 
     companion object {
         private val installed: List<MediaBackend> by lazy {

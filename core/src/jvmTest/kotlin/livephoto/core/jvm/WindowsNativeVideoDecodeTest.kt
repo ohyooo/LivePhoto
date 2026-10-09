@@ -56,7 +56,8 @@ class WindowsNativeVideoDecodeTest {
                 assertFalse(bounded.output.contains("DECODE=SUCCESS"))
                 assertContentEquals(bytes, Files.readAllBytes(path))
             }
-            assertEquals(Implementation.Unsupported, WindowsMediaFoundationBackend.available().single().capabilities().operations.single { it.operation == Operation.ExtractFrame }.implementation)
+            // Payload evidence remains separate from the gated public frame operation.
+            assertEquals(Implementation.Experimental, WindowsMediaFoundationBackend.available().single().capabilities().operations.single { it.operation == Operation.ExtractFrame }.implementation)
         } finally { Files.deleteIfExists(path) }
     }
     @Test fun actualAvcDecodeReachesEosWithIndependentPresentationTimeline(): Unit = runImmediate {

@@ -52,7 +52,7 @@ Linux，在解压位置运行：
 
 - **只做协议操作通常不需要 FFmpeg。** 检测、结构检查、原样提取及有限的协议封装/编辑，可直接由 Core 完成。结构检查不代表已经解码视频。
 - **抽帧、裁剪、转码等推荐使用自己准备的 FFmpeg。** 后端选择顺序为：`--ffmpeg` 显式路径 → 系统 `PATH` → 已实现且运行时可用的系统 API → 禁用相应能力。工具不会自动下载或安装 FFmpeg、Java 或其他后端，也不识别 shell 的 FFmpeg 别名；PATH 中使用绝对目录。
-- Windows 系统 API 提供有限的 AVC/MP4 或 MOV、无音轨、完整软件解码 Probe 回退：单视频轨、48×48 至 4096×2304、至多 64 帧、唯一且可精确表示为 100ns 的 presentation 时间。新 MOV 路径已通过实际测试与 Windows 便携验收；并非通用媒体处理后端。系统抽帧/裁剪/remux/transcode 与其它 OS 系统适配器仍待实现。先用 `media-capabilities` 查看当前机器实际可用能力。
+- Windows 系统 API 提供有限 AVC/MP4 或 MOV 完整软件解码 Probe 回退：无音轨、单视频轨、48×48 至 4096×2304、至多 64 个唯一且可精确表示为 100ns 的呈现时间。另有有限 SDR JPEG 抽帧：Baseline/Main AVC、偶数尺寸 48×48 至 1024×1024、至多 64 帧；SPS/VUI 必须明确逐行、方形像素、BT.709 limited-range/left chroma，容器字段不能冲突。拒绝未知色彩、HDR、SEI、变化的参数集及未分类辅助信息；不支持 PNG 或自定义 JPEG 质量。两项均为 `Experimental`，不代表通用媒体处理后端。系统裁剪/remux/transcode 与其它 OS 适配器仍未实现；先用 `media-capabilities` 查看当前机器实际能力。
 - 使用 shared 版 FFmpeg 时，要保留它旁边的 DLL；不要只移动 EXE。CLI 使用 `--ffmpeg` 或 PATH；测试另支持 `LIVEPHOTO_FFMPEG`，`FFMPEG_HOME` 本身不是 CLI 的查找入口。
 - 推荐先 `inspect` / `analyze`，再执行修改；重要原片另行备份。输入保持不可变，输出使用**尚不存在的新目录**，不会覆盖输入或已有输出。
 - 默认禁止转码。`--allow-transcode` 只是显式授权，仍受操作、输入及目标的能力和安全条件限制。不要用它绕过未知 metadata、HDR、GainMap、MakerNote 或资源依赖风险。
@@ -444,7 +444,9 @@ Huawei HEIC 有限读取批次：全量 **740 tests，0 failures / errors / skip
 
 Apple 有限默认 Create 入口：[`2f6554a`](https://github.com/ohyooo/LivePhoto/commit/2f6554a61122265ba1d5beebd59aee0727d4e0ea)，新全量 **757 tests，0 failures / errors / skips**。省略 profile 只接入普通 JPEG＋MOV 的已有 assembler，计划解析为 `jpeg-mov`；保持样本、配置、时间线及源文件不变，不执行 remux/转码。包含 AVC/HEVC 合成正负例、真实 AVC MOV 独立样本验证与完整解码。新完整 Windows 便携验收成功，新增空 PATH 创建、key 保持、MP4 拒绝且不发布输出的 smoke；[对应 CI 37806758463](https://github.com/ohyooo/LivePhoto/actions/runs/37806758463) 两平台成功，6 个非空、未过期 artifacts 已核对。
 
-Windows 系统解码缓冲区读取：[`686fa4c`](https://github.com/ohyooo/LivePhoto/commit/686fa4cf01f77d5db2520ed2bf078e3017dd9b55)，新全量 **758 tests，0 failures / errors / skips**。隔离 worker 实际锁定并读取有效帧缓冲区，验证字节预算、返回原始缓冲区证据；包含 B 帧与小预算拒绝回归。该证据不解释像素 stride/色彩、不输出图片，系统 `ExtractFrame` 仍为 `Unsupported`。新完整 Windows 便携验收成功，验证内置 worker 新模式与原有 Core 系统回退；[对应 CI 37808199497](https://github.com/ohyooo/LivePhoto/actions/runs/37808199497) 两平台成功，6 个非空、未过期 artifacts 已核对。
+Windows 系统解码缓冲区读取前置：[`686fa4c`](https://github.com/ohyooo/LivePhoto/commit/686fa4cf01f77d5db2520ed2bf078e3017dd9b55)，当批全量 **758 tests，0 failures / errors / skips**。隔离 worker 实际锁定并读取有效帧缓冲区，验证字节预算、返回原始缓冲区证据；包含 B 帧与小预算拒绝回归。该批证据不解释像素 stride/色彩、不输出图片，尚未接入系统 `ExtractFrame`。新完整 Windows 便携验收成功，验证内置 worker 新模式与原有 Core 系统回退；[对应 CI 37808199497](https://github.com/ohyooo/LivePhoto/actions/runs/37808199497) 两平台成功，6 个非空、未过期 artifacts 已核对。
+
+Windows 有限系统 SDR 抽帧：新远程全量 **764 tests，0 failures / errors / skips**，118 份报告均属本轮。系统二维缓冲区输出紧密 NV12；8 个实际 B/VFR 呈现帧逐字节等于独立解码基准。Core 独立核对 SPS/VUI、容器色彩、完整 PTS 与零基索引，再编码并回读标准 sRGB JPEG，验证源不变后原子发布。包含未知/HDR 色彩、截断 SPS、越界选择、禁止覆盖、取消与预算不足回归。新完整 Windows 便携验收通过，空 PATH 下只用内置运行时/系统 helper 生成 JPEG；不依赖 FFmpeg 或系统 Java。该批 CI 发布结果及归档按对应提交在 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 查阅，不算设备认证。
 
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
@@ -469,7 +471,7 @@ Windows 系统解码缓冲区读取：[`686fa4c`](https://github.com/ohyooo/Live
 | Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入，默认 Create 限 JPEG＋MOV；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | 复杂 Generic/HEIC 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
-| MediaBackend | 部分完成；有限 MOV Probe 已交付 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe；完整解码、便携包与 CI 验收 | 系统媒体编辑、其它 OS 官方 API 适配 |
+| MediaBackend | 部分完成；有限 Probe 与 SDR 抽帧已实际测试 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe 与 SPS/VUI 门禁下的 SDR JPEG；全量和便携验收 | 扩展抽帧 profile、系统裁剪/remux/transcode、其它 OS 官方 API |
 | CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
@@ -525,8 +527,8 @@ Windows 系统解码缓冲区读取：[`686fa4c`](https://github.com/ohyooo/Live
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [x] Windows 真实解码缓冲区读取前置：758 项全量测试、新完整 Windows 便携包、对应两平台 CI 与 6 个 artifacts 已验收；不是已完成抽帧。
-- [ ] Windows 系统抽帧下一工作包：证明 NV12 像素布局与 SDR 色彩、按呈现顺序选定实际帧并核对 PTS，再生成 JPEG、独立验证图片和双重源不变检查后原子发布；未知 HDR/布局继续拒绝。
-- [ ] Windows 系统抽帧/裁剪/remux/transcode；macOS/其它平台官方 API 后端。没有合格后端时继续禁用相关操作，不自动安装工具。
+- [x] Windows 有限 SDR 系统抽帧实现及 NAS/便携验收：紧密 NV12、独立 SPS/VUI/容器色彩门禁、完整呈现时间线与实际帧像素、JPEG 回读、源不变与原子发布；764 项全量通过，空 PATH 便携入口通过。CI 发布状态按上述对应提交 Actions 检查；不是通用 AVC/HDR/真机支持。
+- [ ] 扩展 Windows 抽帧 profile、系统裁剪/remux/transcode；macOS/其它平台官方 API 后端。未知 HDR/布局及没有合格后端的操作继续禁用，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。

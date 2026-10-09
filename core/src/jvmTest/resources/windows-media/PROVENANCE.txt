@@ -1,7 +1,19 @@
-Synthetic 64x64 AVC fixtures, generated on DESKTOP-DCMRJ35 with the user-installed
-C:\Program Files\FFmpeg\bin\ffmpeg.exe. These are not vendor/device originals.
+Synthetic 64x64 AVC fixtures generated with an existing FFmpeg installation.
+These are not vendor/device originals; no private host or installation path is required.
 Base64 text is decoded and SHA-256 checked by WindowsEncodedFixtures.
 Actual OS decoding has separate WindowsNativeVideoDecodeTest coverage.
+
+frame-main.mp4: eight Main-profile AVC B/VFR frames, explicit BT.709 limited
+range, progressive square pixels and left chroma; auxiliary SEI removed.
+frame-main.nv12: independently decoded packed NV12 for those eight presentation
+frames (6144 bytes each). WindowsFrameTest verifies every selected frame against
+these bytes, plus actual Core/JPEG output. Hashes are checked before use.
+MP4 SHA256: 3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd
+NV12 SHA256: 42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562
+frame-unknown.mp4: container says BT.709, but SPS primaries/transfer are
+unspecified (2). Must be rejected before output; container labels alone are
+not an SDR authorization. SHA256:
+30ef2b00aec325af47749d08ab210a174fc18765da71d7f6f45281738f95fd6b
 
 b0 / b2: -f lavfi -i testsrc2=size=64x64:rate=25 -frames:v 4
          -c:v libx264 -preset medium -bf 0|2 -g 4 -pix_fmt yuv420p
