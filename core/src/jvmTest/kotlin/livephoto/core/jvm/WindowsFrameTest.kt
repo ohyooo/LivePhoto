@@ -47,6 +47,9 @@ class WindowsFrameTest {
     @Test fun actualHighEightBitFramesMatchIndependentPixelsWithoutHdrDowngrade(): Unit = runImmediate {
         checkProfile("high")
     }
+    @Test fun actualBaselineVfrFramesMatchIndependentPixelsWithoutHighOrCabacAssumptions(): Unit = runImmediate {
+        checkProfile("baseline")
+    }
     @Test fun actualQuickTimeNclcFramesMatchIndependentPixelsWithoutRangeGuessing(): Unit = runImmediate {
         checkProfile("high", mov = true)
     }
@@ -68,7 +71,7 @@ class WindowsFrameTest {
         try {
             if (ffmpeg != null) {
             process(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "8", "-vf", "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
-                "-fps_mode", "vfr", "-c:v", "libx264", "-profile:v", profile, "-bf", "2", "-g", "8", "-pix_fmt", "yuv420p",
+                "-fps_mode", "vfr", "-c:v", "libx264", "-profile:v", profile, "-bf", if (profile == "baseline") "0" else "2", "-g", "8", "-pix_fmt", "yuv420p",
                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-chroma_sample_location", "left",
                 "-bsf:v", "filter_units=remove_types=6",
                 "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", (if (mov) encoded else input).toString()))
@@ -76,8 +79,17 @@ class WindowsFrameTest {
                 "-fflags", "+bitexact", "-movflags", "+write_colr", "-write_btrt", "0", "-f", "mov", input.toString()))
             process(listOf("-i", input.toString(), "-an", "-fps_mode", "passthrough", "-pix_fmt", "nv12", "-f", "rawvideo", independent.toString()))
             } else {
-                Files.write(input, golden("$profile.$extension", if (mov) "5929ddf215c236013abb1dff65c2c3537a878fe4c2ad40fa0af7e46ada2efe19" else if (profile == "high") "1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39" else "3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd"))
-                Files.write(independent, golden("$profile.nv12", if (profile == "high") "0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14" else "42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562"))
+                Files.write(input, golden("$profile.$extension", when {
+                    mov -> "5929ddf215c236013abb1dff65c2c3537a878fe4c2ad40fa0af7e46ada2efe19"
+                    profile == "high" -> "1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39"
+                    profile == "baseline" -> "0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6"
+                    else -> "3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd"
+                }))
+                Files.write(independent, golden("$profile.nv12", when (profile) {
+                    "high" -> "0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14"
+                    "baseline" -> "af52f1462171e1a324e09601bc6bd21989f8d706bf8a05da981ce43fad7764a3"
+                    else -> "42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562"
+                }))
             }
             val expected = Files.readAllBytes(independent); assertEquals(6144 * 8, expected.size)
             val java = Path.of(System.getProperty("java.home"), "bin", "java.exe")

@@ -362,19 +362,21 @@ try {
         } finally { $env:Path = $savedSearchPath }
         Write-Host 'PORTABLE_WINDOWS_API_ENCODED_FIXTURES=SUCCESS scope=avc-bframes-vfr-audio-rejection-no-ffmpeg-no-system-java-not-device'
         Write-Host 'PORTABLE_WINDOWS_API_MOV_FIXTURES=SUCCESS scope=synthetic-qt-brand-real-avc-bframes-vfr-audio-rejection-not-camera-or-general-remux'
-        foreach ($frameProfile in @('main', 'high', 'high-mov')) {
+        foreach ($frameProfile in @('baseline', 'main', 'high', 'high-mov')) {
         $frameDirectory = Join-Path $verify "finite system frame $frameProfile"
         New-Item -ItemType Directory -Path $frameDirectory | Out-Null
         $frameInput = Join-Path $frameDirectory 'frame.mp4'
         $rawFrame = Join-Path $frameDirectory 'selected.nv12'
         $fixtureDirectory = Join-Path $repository 'core/src/jvmTest/resources/windows-media'
         $fixtureName = if ($frameProfile -eq 'high-mov') { 'high.mov' } else { "$frameProfile.mp4" }
-        $pixelProfile = if ($frameProfile -eq 'main') { 'main' } else { 'high' }
+        $pixelProfile = if ($frameProfile -eq 'high-mov') { 'high' } else { $frameProfile }
         $fixtureBytes = [Convert]::FromBase64String((Get-Content (Join-Path $fixtureDirectory "frame-$fixtureName.base64") -Raw).Trim())
         $goldenBytes = [Convert]::FromBase64String((Get-Content (Join-Path $fixtureDirectory "frame-$pixelProfile.nv12.base64") -Raw).Trim())
         $frameHash = if ($frameProfile -eq 'high-mov') { '5929ddf215c236013abb1dff65c2c3537a878fe4c2ad40fa0af7e46ada2efe19' }
+            elseif ($frameProfile -eq 'baseline') { '0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6' }
             elseif ($frameProfile -eq 'high') { '1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39' } else { '3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd' }
-        $goldenHash = if ($pixelProfile -eq 'high') { '0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14' } else { '42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562' }
+        $goldenHash = if ($pixelProfile -eq 'baseline') { 'af52f1462171e1a324e09601bc6bd21989f8d706bf8a05da981ce43fad7764a3' }
+            elseif ($pixelProfile -eq 'high') { '0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14' } else { '42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562' }
         if ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($fixtureBytes)).ToLowerInvariant() -ne $frameHash -or
             [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($goldenBytes)).ToLowerInvariant() -ne $goldenHash) { throw 'Frame golden fixture hash differs.' }
         [IO.File]::WriteAllBytes($frameInput, $fixtureBytes)

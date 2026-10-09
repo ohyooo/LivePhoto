@@ -38,27 +38,59 @@ class AvcSdrFrameProfileTest {
         }
         return Bytes(bytes.toByteArray())
     }
-    private fun pps(scaling: Boolean = false, groups: Int = 0, redundant: Boolean = false, chromaOffset: Int = 0): Bytes {
+    private fun pps(scaling: Boolean = false, groups: Int = 0, redundant: Boolean = false, chromaOffset: Int = 0,
+        cabac: Boolean = true, transform8: Boolean = true, extension: Boolean = true,
+        weighted: Boolean = false, weightedBi: Int = 0): Bytes {
         val bits = mutableListOf<Int>()
         fun bit(value: Int) { bits += value }
         fun ue(value: Int) {
             val number = value + 1; val size = 32 - number.countLeadingZeroBits()
             repeat(size - 1) { bit(0) }; for (shift in size - 1 downTo 0) bit((number ushr shift) and 1)
         }
-        ue(0); ue(0); bit(1); bit(0); ue(groups); ue(0); ue(0)
-        repeat(3) { bit(0) }; ue(0); ue(0); ue(0)
+        ue(0); ue(0); bit(if (cabac) 1 else 0); bit(0); ue(groups); ue(0); ue(0)
+        bit(if (weighted) 1 else 0); bit(weightedBi ushr 1); bit(weightedBi and 1)
+        ue(0); ue(0); ue(0)
         bit(1); bit(0); bit(if (redundant) 1 else 0)
-        bit(1); bit(if (scaling) 1 else 0)
-        ue(if (chromaOffset <= 0) -2 * chromaOffset else 2 * chromaOffset - 1)
+        if (extension) {
+            bit(if (transform8) 1 else 0); bit(if (scaling) 1 else 0)
+            ue(if (chromaOffset <= 0) -2 * chromaOffset else 2 * chromaOffset - 1)
+        }
         bit(1); while (bits.size % 8 != 0) bit(0)
         return nal(0x68, bits)
     }
     @Test fun highPpsCannotIntroduceUnclassifiedScalingOrRedundantPictures() {
-        assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyHighPps(pps()))
+        assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyPps(pps(), 100))
         for (input in listOf(pps(scaling = true), pps(groups = 1), pps(redundant = true), pps(chromaOffset = 13)))
-            assertEquals("HDR_PRESERVATION_UNAVAILABLE", assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyHighPps(input)).error.code.value)
-        assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyHighPps(Bytes(byteArrayOf(0x68))))
-        assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyHighPps(Bytes(pps().toByteArray() + byteArrayOf(1))))
+            assertEquals("HDR_PRESERVATION_UNAVAILABLE", assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(input, 100)).error.code.value)
+        assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(Bytes(byteArrayOf(0x68)), 100))
+        assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(Bytes(pps().toByteArray() + byteArrayOf(1)), 100))
+    }
+    @Test fun baselineAndMainPpsDoNotBorrowHighAuthorization() {
+        for (profile in listOf(66, 77)) {
+            val safe = pps(cabac = false, transform8 = false)
+            assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyPps(safe, profile))
+            assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyPps(pps(cabac = false, extension = false), profile))
+            for (unsafe in listOf(pps(cabac = false), pps(cabac = false, scaling = true, transform8 = false),
+                pps(cabac = false, groups = 1, transform8 = false), pps(cabac = false, redundant = true, transform8 = false),
+                pps(cabac = false, chromaOffset = 13, transform8 = false)))
+                assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(unsafe, profile))
+            for (length in 0 until safe.size)
+                assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(safe.slice(0, length), profile))
+        }
+        assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(pps(transform8 = false), 66))
+        assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyPps(pps(transform8 = false), 77))
+        assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(pps(), 110))
+    }
+    @Test fun weightedPredictionIsProfileBoundAndReservedValuesAreCorrupt() {
+        for (input in listOf(pps(cabac = false, transform8 = false, weighted = true),
+            pps(cabac = false, transform8 = false, weightedBi = 1),
+            pps(cabac = false, transform8 = false, weightedBi = 2))) {
+            assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(input, 66))
+            for (profile in listOf(77, 100)) assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyPps(input, profile))
+        }
+        for (profile in listOf(66, 77, 100))
+            assertEquals("CORRUPTED_CONTAINER", assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyPps(
+                pps(cabac = false, transform8 = false, weightedBi = 3), profile)).error.code.value)
     }
     @Test fun quickTimeColourIndexesDoNotDefaultRangeOrAuthorizeIsoNclc() {
         val indexes = byteArrayOf(0, 1, 0, 1, 0, 1)

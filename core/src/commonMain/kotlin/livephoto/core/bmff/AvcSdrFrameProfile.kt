@@ -54,20 +54,23 @@ internal object AvcSdrFrameProfile {
         bits.finish()
     }
 
-    /** High PPS extension can declare scaling matrices independently of the SPS. */
-    fun verifyHighPps(nal: Bytes): CoreResult<Unit> = attemptNow {
+    /** Every PPS is classified independently; a safe SPS cannot authorize FMO/scaling. */
+    fun verifyPps(nal: Bytes, profile: Int): CoreResult<Unit> = attemptNow {
+        if (profile !in setOf(66, 77, 100)) unsupported()
         val bits = bits(nal, 0x68)
         bits.ue(255); bits.ue(31)
-        bits.bit() // CABAC/CAVLC: both are handled by the selected software decoder.
+        if (bits.bit() && profile == 66) unsupported() // Baseline cannot authorize CABAC.
         if (bits.bit() || bits.ue(7) != 0) unsupported() // bottom-field ordering/FMO
         bits.ue(31); bits.ue(31)
-        bits.bit()
-        if (bits.read(2) == 3L) corrupt()
+        if (bits.bit() && profile == 66) unsupported() // weighted_pred is outside Baseline.
+        val weightedBi = bits.read(2)
+        if (weightedBi == 3L) corrupt()
+        if (profile == 66 && weightedBi != 0L) unsupported()
         bits.se(-26, 25); bits.se(-26, 25); bits.se(-12, 12)
         bits.bit(); bits.bit()
         if (bits.bit()) unsupported() // redundant pictures
         if (bits.moreData()) {
-            bits.bit() // transform_8x8_mode_flag
+            if (bits.bit() && profile != 100) unsupported() // High-only transform_8x8_mode_flag
             if (bits.bit()) unsupported() // pic_scaling_matrix_present_flag
             bits.se(-12, 12)
         }

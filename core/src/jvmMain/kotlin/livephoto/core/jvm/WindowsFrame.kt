@@ -52,11 +52,11 @@ internal object WindowsFrame {
             AvcSdrFrameProfile.verify(config.slice(offset + 2, offset + count + 2), track.width, track.height).orThrow()
             offset += count + 2
         }
-        if (profile == 100) {
+        run {
             val count = config[offset++].toInt() and 255
             repeat(count) {
                 val length = ((config[offset].toInt() and 255) shl 8) or (config[offset + 1].toInt() and 255)
-                AvcSdrFrameProfile.verifyHighPps(config.slice(offset + 2, offset + length + 2)).orThrow()
+                AvcSdrFrameProfile.verifyPps(config.slice(offset + 2, offset + length + 2), profile).orThrow()
                 offset += length + 2
             }
         }

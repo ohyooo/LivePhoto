@@ -52,7 +52,7 @@ Linux，在解压位置运行：
 
 - **只做协议操作通常不需要 FFmpeg。** 检测、结构检查、原样提取及有限的协议封装/编辑，可直接由 Core 完成。结构检查不代表已经解码视频。
 - **抽帧、裁剪、转码等推荐使用自己准备的 FFmpeg。** 后端选择顺序为：`--ffmpeg` 显式路径 → 系统 `PATH` → 已实现且运行时可用的系统 API → 禁用相应能力。工具不会自动下载或安装 FFmpeg、Java 或其他后端，也不识别 shell 的 FFmpeg 别名；PATH 中使用绝对目录。
-- Windows 系统 API 提供有限 AVC/MP4 或 MOV 完整软件解码 Probe 回退：无音轨、单视频轨、48×48 至 4096×2304、至多 64 个唯一且可精确表示为 100ns 的呈现时间。另有有限 SDR JPEG 抽帧：Baseline/Main 与有明确 8-bit/4:2:0 证据的 High AVC、偶数尺寸 48×48 至 1024×1024、至多 64 帧；SPS/VUI 必须明确逐行、方形像素、BT.709 limited-range/left chroma，容器字段不能冲突。High 另拒绝 SPS/PPS 自定义 scaling matrix、transform bypass、FMO 和冗余图片。拒绝 High10/422/444、未知色彩、HDR、SEI、变化的参数集及未分类辅助信息；不支持 PNG 或自定义 JPEG 质量。两项均为 `Experimental`，不代表通用媒体处理后端。系统裁剪/remux/transcode 与其它 OS 适配器仍未实现；先用 `media-capabilities` 查看当前机器实际能力。
+- Windows 系统 API 提供有限 AVC/MP4 或 MOV 完整软件解码 Probe 回退：无音轨、单视频轨、48×48 至 4096×2304、至多 64 个唯一且可精确表示为 100ns 的呈现时间。另有有限 SDR JPEG 抽帧：Baseline/Main 与有明确 8-bit/4:2:0 证据的 High AVC、偶数尺寸 48×48 至 1024×1024、至多 64 帧；SPS/VUI 必须明确逐行、方形像素、BT.709 limited-range/left chroma，容器字段不能冲突。所有 profile 逐 PPS 拒绝 FMO、冗余图片、自定义 scaling；Baseline 另拒绝 CABAC/加权预测，非 High 拒绝 8×8 transform。High SPS 另拒绝自定义 scaling matrix 和 transform bypass。拒绝 High10/422/444、未知色彩、HDR、SEI、变化的参数集及未分类辅助信息；不支持 PNG 或自定义 JPEG 质量。两项均为 `Experimental`，不代表通用媒体处理后端。系统裁剪/remux/transcode 与其它 OS 适配器仍未实现；先用 `media-capabilities` 查看当前机器实际能力。
 - 使用 shared 版 FFmpeg 时，要保留它旁边的 DLL；不要只移动 EXE。CLI 使用 `--ffmpeg` 或 PATH；测试另支持 `LIVEPHOTO_FFMPEG`，`FFMPEG_HOME` 本身不是 CLI 的查找入口。
 - 推荐先 `inspect` / `analyze`，再执行修改；重要原片另行备份。输入保持不可变，输出使用**尚不存在的新目录**，不会覆盖输入或已有输出。
 - 默认禁止转码。`--allow-transcode` 只是显式授权，仍受操作、输入及目标的能力和安全条件限制。不要用它绕过未知 metadata、HDR、GainMap、MakerNote 或资源依赖风险。
@@ -452,6 +452,8 @@ Windows 有限系统 SDR 抽帧：新远程全量 **764 tests，0 failures / err
 
 有限 MOV 抽帧色彩扩展：新全量 **771 tests，0 failures / errors / skips**，118 份报告均属本轮；完整 Windows 便携验收通过 Main/High/High-MOV 三组实际像素、PTS 与 JPEG。只接受 MOV 中精确长度、三个 BT.709 索引的 `nclc`，范围仍由独立 SPS/VUI 证明；不从缺失 range 位推定 limited。MP4 中的 `nclc`、未知索引、ICC、错误长度和范围冲突继续拒绝。合成 MOV 的完整媒体解码已验证，不算相机或真机认证；该提交 CI/产物另按 Actions 检查。
 
+Baseline 实际像素与全 profile PPS 验收：新全量 **774 tests，0 failures / errors / skips**，118 份报告均属本轮。新增 Baseline 八个 VFR 帧逐字节独立解码证据，合法 Main/High 保持；补齐所有 PPS 的 profile 门禁与截断/冲突反例。新完整无 FFmpeg Windows 便携验收通过 Baseline/Main/High/High-MOV 四组像素、时间与 JPEG，原协议往返及拒绝无输出门禁保持。对应提交 CI/产物以 Actions 为准，不借用上一批报告。
+
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
 - 完整验收 **706 tests，0 failures / errors / skips**；结果对应上述提交，不借用旧报告。
@@ -535,6 +537,7 @@ Windows 有限系统 SDR 抽帧：新远程全量 **764 tests，0 failures / err
 - [x] Windows 有限 SDR 系统抽帧实现及 NAS/便携验收：紧密 NV12、独立 SPS/VUI/容器色彩门禁、完整呈现时间线与实际帧像素、JPEG 回读、源不变与原子发布；764 项全量通过，空 PATH 便携入口通过。CI 发布状态按上述对应提交 Actions 检查；不是通用 AVC/HDR/真机支持。
 - [x] 有限 High 8-bit/4:2:0 抽帧扩展：SPS/PPS 独立门禁、实际八帧像素和 JPEG 回读；新 769 项全量及无 FFmpeg 双 profile 便携验收通过。不开放 High10/422/444、自定义 scaling matrix 或 HDR。
 - [x] 有限 MOV `nclc` 抽帧扩展：独立 SPS range 与容器色彩一致性检查，实际 High MOV 八帧逐字节及 JPEG 回读；771 项全量和无 FFmpeg 三 profile 完整便携验收通过。不开放未知色彩或通用 MOV 支持。
+- [x] Baseline 实际八帧像素和全 profile PPS 验收：774 项全量及无 FFmpeg 四 profile 完整便携验收通过；Baseline 不借用 CABAC/加权预测或 High transform 授权。
 - [ ] 扩展 Windows 抽帧 profile、系统裁剪/remux/transcode；macOS/其它平台官方 API 后端。未知 HDR/布局及没有合格后端的操作继续禁用，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
