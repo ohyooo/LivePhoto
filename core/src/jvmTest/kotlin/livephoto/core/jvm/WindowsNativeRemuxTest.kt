@@ -24,11 +24,11 @@ class WindowsNativeRemuxTest {
             assertNull(WindowsNativeRemux.request(bad.toTypedArray()))
         }
     }
-    @Test fun actualCompressedPacketsAreVerifiedWhilePublicRemuxRemainsDisabled(): Unit = runImmediate {
+    @Test fun actualCompressedPacketsAreVerifiedIndependentlyOfPublicRemux(): Unit = runImmediate {
         val backends = WindowsMediaFoundationBackend.available()
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(1, backends.size)
         assumeTrue("Windows native experiment unavailable; no remux was run", backends.isNotEmpty())
-        assertEquals(Implementation.Unsupported, backends.single().capabilities().operations.single { it.operation == Operation.Remux }.implementation)
+        assertEquals(Implementation.Experimental, backends.single().capabilities().operations.single { it.operation == Operation.Remux }.implementation)
         val context = Context(Limits(128_000_000uL, 128_000_000uL))
         val dir = Files.createTempDirectory("livephoto-native-remux-test-")
         val input = dir.resolve("input.mp4"); val output = dir.resolve("remux.mp4")

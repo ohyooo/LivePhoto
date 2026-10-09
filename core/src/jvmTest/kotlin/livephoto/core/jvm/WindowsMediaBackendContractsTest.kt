@@ -14,7 +14,8 @@ class WindowsMediaBackendContractsTest {
         assertEquals(listOf("windows-media-foundation"), backend.capabilities().backendIds)
         assertEquals(Implementation.Experimental, backend.capabilities().operations.single { it.operation == Operation.Probe }.implementation)
         assertEquals(Implementation.Experimental, backend.capabilities().operations.single { it.operation == Operation.ExtractFrame }.implementation)
-        assertTrue(backend.capabilities().operations.filter { it.operation !in setOf(Operation.Probe, Operation.ExtractFrame) }.all { it.implementation == Implementation.Unsupported })
+        assertEquals(Implementation.Experimental, backend.capabilities().operations.single { it.operation == Operation.Remux }.implementation)
+        assertTrue(backend.capabilities().operations.filter { it.operation !in setOf(Operation.Probe, Operation.ExtractFrame, Operation.Remux) }.all { it.implementation == Implementation.Unsupported })
         val staging = object : StagingArea {
             override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> = error("Unsupported cannot stage")
             override suspend fun openForRead(id: AssetId): CoreResult<BinarySource> = error("Unsupported cannot read staging")

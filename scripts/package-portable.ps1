@@ -451,7 +451,19 @@ try {
             if (-not $originalDuration -or -not $producedDuration -or
                 [long]$originalDuration.value * [long]$producedDuration.timescale -ne [long]$producedDuration.value * [long]$originalDuration.timescale) { throw 'Portable private packet output changed the exact source presentation duration.' }
             $packetCaps = & $launcher media-capabilities
-            if ($LASTEXITCODE -ne 0 -or (($packetCaps | ConvertFrom-Json).result.capabilities.operations | Where-Object { $_.operation -eq 'Remux' }).implementation -ne 'Unsupported') { throw 'Private experiment must not advertise public remux.' }
+            if ($LASTEXITCODE -ne 0 -or (($packetCaps | ConvertFrom-Json).result.capabilities.operations | Where-Object { $_.operation -eq 'Remux' }).implementation -ne 'Experimental') { throw 'Finite system remux must be advertised as Experimental only.' }
+            $systemRemuxDirectory = Join-Path $verify 'finite system remux output'
+            $systemRemux = & $launcher remux --input $packetInput --container Mp4 --strict --output-dir $systemRemuxDirectory
+            if ($LASTEXITCODE -ne 0) { throw 'Portable finite system remux failed.' }
+            $systemRemuxResult = ($systemRemux | ConvertFrom-Json).result
+            if (-not ($systemRemuxResult.execution | Where-Object { $_.backendId -eq 'windows-media-foundation' -and $_.remuxed -and -not $_.transcoded }) -or
+                ($systemRemuxResult.execution | Where-Object { $_.transcoded })) { throw 'Portable finite system remux did not declare actual no-encoding system execution.' }
+            $systemRemuxFile = $systemRemuxResult.output.assets[0].path
+            if ((Get-FileHash $systemRemuxFile).Hash -ne (Get-FileHash $packetInput).Hash) { throw 'Portable system remux changed preserved source bytes.' }
+            $movRefusalDirectory = Join-Path $verify 'unsupported system remux mov'
+            $refusedRemux = & $launcher remux --input $packetInput --container Mov --output-dir $movRefusalDirectory
+            if ($LASTEXITCODE -ne 3 -or ($refusedRemux | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED' -or (Test-Path (Join-Path $movRefusalDirectory 'assets'))) { throw 'Unsupported system MOV remux must not publish.' }
+            Write-Host 'PORTABLE_WINDOWS_API_REMUX=SUCCESS scope=finite-baseline-same-mp4-all-samples-config-metadata-full-decode-no-ffmpeg-not-device'
         } finally { $env:Path = $savedSearchPath }
         if ((Get-FileHash $packetInput).Hash.ToLowerInvariant() -ne '0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6') { throw 'Private remux experiment changed its input.' }
         Write-Host 'PORTABLE_WINDOWS_API_PRIVATE_REMUX=SUCCESS scope=finite-compressed-packets-exact-vfr-clock-complete-decode-not-public-remux-or-metadata-preservation'
@@ -921,9 +933,13 @@ try {
             throw "Portable missing-backend gate failed: $probeJson"
         }
         Write-Host 'PORTABLE_FFMPEG_DECODE=UNAVAILABLE'
-        $remuxJson = & $launcher remux --input $referenceVideo --container Mov --output-dir (Join-Path $verify 'disabled remux')
-        if ($LASTEXITCODE -ne 3 -or ($remuxJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') {
-            throw 'Portable missing-backend remux gate failed.'
+        $disabledRemuxDirectory = Join-Path $verify 'disabled remux'
+        $remuxJson = & $launcher remux --input $referenceVideo --container Mov --output-dir $disabledRemuxDirectory
+        $expectedRemuxError = if ($IsWindows -and $decoderExit -eq 0) { 'UNSAFE_METADATA_REWRITE' } else { 'CAPABILITY_UNSUPPORTED' }
+        $remuxError = ($remuxJson | ConvertFrom-Json).error
+        if ($LASTEXITCODE -ne 3 -or $remuxError.code.value -ne $expectedRemuxError -or
+            ($expectedRemuxError -eq 'UNSAFE_METADATA_REWRITE' -and $remuxError.stage -ne 'Plan') -or (Test-Path (Join-Path $disabledRemuxDirectory 'assets'))) {
+            throw 'Portable missing-FFmpeg/finite-system-profile remux refusal gate failed.'
         }
         Write-Host 'PORTABLE_FFMPEG_REMUX=UNAVAILABLE'
         $frameJson = & $launcher extract-frame --input $referenceVideo --frame-index 0 --format Jpeg --output-dir (Join-Path $verify 'disabled frame')

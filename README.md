@@ -52,7 +52,7 @@ Linux，在解压位置运行：
 
 - **只做协议操作通常不需要 FFmpeg。** 检测、结构检查、原样提取及有限的协议封装/编辑，可直接由 Core 完成。结构检查不代表已经解码视频。
 - **抽帧、裁剪、转码等推荐使用自己准备的 FFmpeg。** 后端选择顺序为：`--ffmpeg` 显式路径 → 系统 `PATH` → 已实现且运行时可用的系统 API → 禁用相应能力。工具不会自动下载或安装 FFmpeg、Java 或其他后端，也不识别 shell 的 FFmpeg 别名；PATH 中使用绝对目录。
-- Windows 系统 API 提供有限 AVC/MP4 或 MOV 完整软件解码 Probe 回退：无音轨、单视频轨、48×48 至 4096×2304、至多 64 个唯一且可精确表示为 100ns 的呈现时间。另有有限 SDR JPEG 抽帧：Baseline/Main 与有明确 8-bit/4:2:0 证据的 High AVC、偶数尺寸 48×48 至 1024×1024、至多 64 帧；SPS/VUI 必须明确逐行、方形像素、BT.709 limited-range/left chroma，容器字段不能冲突。所有 profile 逐 PPS 拒绝 FMO、冗余图片、自定义 scaling；Baseline 另拒绝 CABAC/加权预测，非 High 拒绝 8×8 transform。High SPS 另拒绝自定义 scaling matrix 和 transform bypass。拒绝 High10/422/444、未知色彩、HDR、SEI、变化的参数集及未分类辅助信息；不支持 PNG 或自定义 JPEG 质量。两项均为 `Experimental`，不代表通用媒体处理后端。系统裁剪/remux/transcode 与其它 OS 适配器仍未实现；先用 `media-capabilities` 查看当前机器实际能力。
+- Windows 系统 API 提供有限 AVC/MP4 或 MOV 完整软件解码 Probe 回退：无音轨、单视频轨、48×48 至 4096×2304、至多 64 个唯一且可精确表示为 100ns 的呈现时间。另有有限 SDR JPEG 抽帧：Baseline/Main 与有明确 8-bit/4:2:0 证据的 High AVC、偶数尺寸 48×48 至 1024×1024、至多 64 帧；SPS/VUI 必须明确逐行、方形像素、BT.709 limited-range/left chroma，容器字段不能冲突。所有 profile 逐 PPS 拒绝 FMO、冗余图片、自定义 scaling；Baseline 另拒绝 CABAC/加权预测，非 High 拒绝 8×8 transform。High SPS 另拒绝自定义 scaling matrix 和 transform bypass。拒绝 High10/422/444、未知色彩、HDR、SEI、变化的参数集及未分类辅助信息；不支持 PNG 或自定义 JPEG 质量。上述能力均为 `Experimental`，不代表通用媒体处理后端。另有有限同容器 remux 回退：单轨 Baseline AVC 的 MP4 → MP4、48 至 1024、至多 64 帧、输入不超过 8 MB；没有音轨或重排，时间表须可精确表达。实际系统压缩样本通过逐字节校验，源容器头/metadata 恢复后完整回读并解码，再由 Core 原子发布；也是 `Experimental`，不支持 MOV、B 帧或未知 metadata。系统裁剪/transcode 与其它 OS 适配器仍未实现；先用 `media-capabilities` 查看当前机器实际能力。
 - 使用 shared 版 FFmpeg 时，要保留它旁边的 DLL；不要只移动 EXE。CLI 使用 `--ffmpeg` 或 PATH；测试另支持 `LIVEPHOTO_FFMPEG`，`FFMPEG_HOME` 本身不是 CLI 的查找入口。
 - 推荐先 `inspect` / `analyze`，再执行修改；重要原片另行备份。输入保持不可变，输出使用**尚不存在的新目录**，不会覆盖输入或已有输出。
 - 默认禁止转码。`--allow-transcode` 只是显式授权，仍受操作、输入及目标的能力和安全条件限制。不要用它绕过未知 metadata、HDR、GainMap、MakerNote 或资源依赖风险。
@@ -458,6 +458,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 
 后续同容器保留实验：新全量 **782 tests，0 failures / errors / skips**，120 份报告均属本轮。单轨、无重排 MP4 的源 metadata 先严格分类；真实 Windows 后端样本逐字节和时间线验证后，与原容器头重组，完整 decoder configuration、普通 metadata、轨道和样本再次独立核对。后端新增的 UUID 不替代源 metadata；未知源字段、附加轨道、样本变化、预算不足和取消均保持门禁。**仍为内部实验，不是跨容器转换，也没有开放公开系统 remux。**
 
+有限公开系统 remux：后续新全量 **784 tests，0 failures / errors / skips**，121 份报告均属本轮；已将上述同 MP4 保留路径接入统一 Core API，实际 strict 保真、系统执行记录和原子发布通过。仅 Baseline 单轨、无重排 MP4 → MP4；不把原始系统输出直接当 metadata 保真证据，不转码。MOV、音轨、B 帧、预算不足和取消均拒绝且不发布。状态为 `Experimental`；前两批的 `Unsupported` 仅描述当时的内部阶段，不能据本批推断其它 remux profile 已实现。对应便携验收与 CI/产物按本提交检查。
+
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
 - 完整验收 **706 tests，0 failures / errors / skips**；结果对应上述提交，不借用旧报告。
@@ -481,7 +483,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入，默认 Create 限 JPEG＋MOV；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | 复杂 Generic/HEIC 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
-| MediaBackend | 部分完成；有限 Probe 与 SDR 抽帧已实际测试 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe 与 SPS/VUI 门禁下的 SDR JPEG；全量和便携验收 | 扩展抽帧 profile、系统裁剪/remux/transcode、其它 OS 官方 API |
+| MediaBackend | 部分完成；有限 Probe、SDR 抽帧和同 MP4 remux 已实际测试 | 可选 FFmpeg 有限操作；Windows 系统有限 MP4/MOV Probe、SDR JPEG、Baseline 单轨 MP4 → MP4；全量和便携验收 | 更多 remux/抽帧 profile、系统裁剪/transcode、其它 OS 官方 API |
 | CLI / Windows-Linux 便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、两平台打包与 smoke/artifacts | macOS ARM64 打包暂缓；新 Core 能力仍需逐项接入 CLI |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
@@ -544,7 +546,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] Baseline 实际八帧像素和全 profile PPS 验收：774 项全量及无 FFmpeg 四 profile 完整便携验收通过；Baseline 不借用 CABAC/加权预测或 High transform 授权。
 - [x] Windows 系统 remux 内部前置：有限压缩样本/VFR 精确时钟、附加音轨拒绝、源不变与禁止覆盖；776 项全量和新完整便携验收通过。不是公开 remux 或普通 metadata 保真证明。
 - [x] 内部单轨 MP4 容器头保留：实际系统样本重组与完整 Core metadata/configuration/时间线回读，782 项全量通过；不是公开系统 remux 或跨容器 muxer。
-- [ ] 接入公开系统 remux 前，补齐普通 metadata、decoder configuration、轨道集合/顺序和逐 sample 全部 Core 后置验证；不能靠丢字段或放宽时间线检查开放能力。B 帧/复杂 edits/更多容器仍需独立证据。
+- [x] 有限公开 Windows MP4 → MP4 remux：实际系统压缩样本、源容器头恢复、完整 metadata/configuration/逐 sample Core 后置验证与原子发布；784 项全量通过，仅 Experimental Baseline 单轨、无重排范围。
+- [ ] 扩展系统 remux 的 B 帧、音轨、复杂 edits、MOV 和更多 profile；各自补独立证据，不能靠丢字段或放宽时间线检查开放能力。
 - [ ] 扩展 Windows 抽帧 profile、系统裁剪/remux/transcode；macOS/其它平台官方 API 后端。未知 HDR/布局及没有合格后端的操作继续禁用，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。
