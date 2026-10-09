@@ -362,14 +362,18 @@ try {
         } finally { $env:Path = $savedSearchPath }
         Write-Host 'PORTABLE_WINDOWS_API_ENCODED_FIXTURES=SUCCESS scope=avc-bframes-vfr-audio-rejection-no-ffmpeg-no-system-java-not-device'
         Write-Host 'PORTABLE_WINDOWS_API_MOV_FIXTURES=SUCCESS scope=synthetic-qt-brand-real-avc-bframes-vfr-audio-rejection-not-camera-or-general-remux'
-        $frameInput = Join-Path $verify 'finite system frame.mp4'
-        $rawFrame = Join-Path $verify 'selected.nv12'
+        foreach ($frameProfile in @('main', 'high')) {
+        $frameDirectory = Join-Path $verify "finite system frame $frameProfile"
+        New-Item -ItemType Directory -Path $frameDirectory | Out-Null
+        $frameInput = Join-Path $frameDirectory 'frame.mp4'
+        $rawFrame = Join-Path $frameDirectory 'selected.nv12'
         $fixtureDirectory = Join-Path $repository 'core/src/jvmTest/resources/windows-media'
-        $fixtureBytes = [Convert]::FromBase64String((Get-Content (Join-Path $fixtureDirectory 'frame-main.mp4.base64') -Raw).Trim())
-        $goldenBytes = [Convert]::FromBase64String((Get-Content (Join-Path $fixtureDirectory 'frame-main.nv12.base64') -Raw).Trim())
-        $frameHash = '3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd'
+        $fixtureBytes = [Convert]::FromBase64String((Get-Content (Join-Path $fixtureDirectory "frame-$frameProfile.mp4.base64") -Raw).Trim())
+        $goldenBytes = [Convert]::FromBase64String((Get-Content (Join-Path $fixtureDirectory "frame-$frameProfile.nv12.base64") -Raw).Trim())
+        $frameHash = if ($frameProfile -eq 'high') { '1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39' } else { '3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd' }
+        $goldenHash = if ($frameProfile -eq 'high') { '0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14' } else { '42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562' }
         if ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($fixtureBytes)).ToLowerInvariant() -ne $frameHash -or
-            [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($goldenBytes)).ToLowerInvariant() -ne '42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562') { throw 'Frame golden fixture hash differs.' }
+            [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($goldenBytes)).ToLowerInvariant() -ne $goldenHash) { throw 'Frame golden fixture hash differs.' }
         [IO.File]::WriteAllBytes($frameInput, $fixtureBytes)
         $timelineBytes = [Collections.Generic.List[byte]]::new()
         foreach ($pts in @([long]0, [long]400000, [long]800000, [long]1200000, [long]1600000, [long]2400000, [long]3200000, [long]4000000)) {
@@ -396,7 +400,7 @@ try {
                 $expected = "WINDOWS_MEDIA_API_FRAME=SUCCESS frames=8 width=64 height=64 ptsSha256=$timelineHash index=3 time100ns=1200000 bytes=6144 sha256=$selectedHash layout=packed-nv12"
                 if ($process.ExitCode -ne 0 -or $trace.Trim() -ne $expected -or (Get-FileHash $rawFrame).Hash.ToLowerInvariant() -ne $selectedHash) { throw "Portable selected frame differs from independent timeline/pixels: $trace" }
             } finally { $process.Dispose() }
-            $frameJson = & $launcher extract-frame --input $frameInput --frame-index 3 --format Jpeg --output-dir (Join-Path $verify 'system frame result')
+            $frameJson = & $launcher extract-frame --input $frameInput --frame-index 3 --format Jpeg --output-dir (Join-Path $verify "system $frameProfile frame result")
             if ($LASTEXITCODE -ne 0) { throw "Portable system-only frame extraction failed: $frameJson" }
             $frame = ($frameJson | ConvertFrom-Json).result
             if ($frame.actualFrameIndex -ne '3' -or [long]$frame.actualTime.value * 25 -ne 3 * [long]$frame.actualTime.timescale -or
@@ -406,7 +410,8 @@ try {
                 ($imageProbe | ConvertFrom-Json).result.width -ne 64 -or ($imageProbe | ConvertFrom-Json).result.height -ne 64) { throw 'Portable system frame JPEG dimensions differ.' }
         } finally { $env:Path = $savedSearchPath }
         if ((Get-FileHash $frameInput).Hash.ToLowerInvariant() -ne $frameHash) { throw 'Portable frame source changed.' }
-        Write-Host 'PORTABLE_WINDOWS_API_FRAME=SUCCESS scope=finite-main-avc-vfr-bframe-packed-pixels-sdr-jpeg-no-ffmpeg-no-system-java-not-device'
+        Write-Host "PORTABLE_WINDOWS_API_FRAME=SUCCESS profile=$frameProfile scope=finite-eight-bit-avc-vfr-bframe-packed-pixels-sdr-jpeg-no-ffmpeg-no-system-java-not-device"
+        }
     }
     $probeJson = & $launcher probe --input $referenceVideo --decode-check
     if ($media.ffmpegPath) {

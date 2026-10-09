@@ -10,6 +10,11 @@ frames (6144 bytes each). WindowsFrameTest verifies every selected frame against
 these bytes, plus actual Core/JPEG output. Hashes are checked before use.
 MP4 SHA256: 3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd
 NV12 SHA256: 42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562
+frame-high.mp4 / frame-high.nv12: same explicit synthetic VFR/B-frame/color
+setup with High-profile eight-bit 4:2:0 AVC. Each selected frame is independently
+compared; High10/422/444 and custom scaling matrices are not authorized.
+MP4 SHA256: 1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39
+NV12 SHA256: 0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14
 frame-unknown.mp4: container says BT.709, but SPS primaries/transfer are
 unspecified (2). Must be rejected before output; container labels alone are
 not an SDR authorization. SHA256:

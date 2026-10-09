@@ -16,7 +16,7 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
             Condition(ConditionOperator.Equals, "decodeScope", Value.Text("one-mp4-or-mov-avc-video-no-audio-48x48-to-4096x2304-at-most-64-visible-unique-exact-100ns-frames")),
             Condition(ConditionOperator.Equals, "runtime", Value.Text("registered-software-avc-nv12-decoder-512MiB-isolated-process-per-input-format-verification-not-HDR-or-metadata-conformance"))))) +
         listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
-            Condition(ConditionOperator.Equals, "frameProfile", Value.Text("single-avc-baseline-main-no-audio-even-48-to-1024-at-most-64-exact-100ns-frames-bt709-limited-progressive-square-left-default-jpeg"))))) +
+            Condition(ConditionOperator.Equals, "frameProfile", Value.Text("single-avc-baseline-main-high-proven-8bit-420-no-custom-scaling-no-audio-even-48-to-1024-at-most-64-exact-100ns-frames-bt709-limited-progressive-square-left-default-jpeg"))))) +
         listOf(Operation.Trim, Operation.Remux, Operation.Transcode).map {
             CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
         })

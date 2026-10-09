@@ -39,10 +39,11 @@ internal object WindowsFrame {
             track.width % 2u != 0u || track.height % 2u != 0u || track.samples.size !in 1..64 ||
             track.samples.any { it.presentationTime < 0 } || track.samples.map { it.presentationTime }.distinct().size != track.samples.size)
             fail("CAPABILITY_UNSUPPORTED", "Input is outside the finite system frame profile", Stage.Plan)
-        // Baseline/Main SPS only: eight-bit 4:2:0. Do not downgrade a High/10-bit stream to NV12.
+        // High is admitted only with explicit eight-bit 4:2:0 SPS proof. Never
+        // downgrade High10/422/444, unknown bit depth or custom scaling syntax.
         val config = track.codecConfiguration
         val profile = config[1].toInt() and 255
-        if (profile !in setOf(66, 77)) fail("HDR_PRESERVATION_UNAVAILABLE", "System frame profile requires Baseline/Main AVC", Stage.Plan)
+        if (profile !in setOf(66, 77, 100)) fail("HDR_PRESERVATION_UNAVAILABLE", "System frame profile requires proven eight-bit Baseline/Main/High AVC", Stage.Plan)
         var offset = 6
         repeat(config[5].toInt() and 31) {
             val count = ((config[offset].toInt() and 255) shl 8) or (config[offset + 1].toInt() and 255)
@@ -50,6 +51,14 @@ internal object WindowsFrame {
                 fail("HDR_PRESERVATION_UNAVAILABLE", "SPS profile differs from the finite eight-bit profile", Stage.Plan)
             AvcSdrFrameProfile.verify(config.slice(offset + 2, offset + count + 2), track.width, track.height).orThrow()
             offset += count + 2
+        }
+        if (profile == 100) {
+            val count = config[offset++].toInt() and 255
+            repeat(count) {
+                val length = ((config[offset].toInt() and 255) shl 8) or (config[offset + 1].toInt() and 255)
+                AvcSdrFrameProfile.verifyHighPps(config.slice(offset + 2, offset + length + 2)).orThrow()
+                offset += length + 2
+            }
         }
         val nalWidth = (config[4].toInt() and 3) + 1
         val nalBudget = ParseBudget(job.context)

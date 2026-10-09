@@ -42,6 +42,12 @@ class WindowsFrameTest {
         assertFailsWith<IllegalStateException> { WindowsFramePixels.image(bytes, 64, 64) { error("cancelled") } }
     }
     @Test fun actualSystemFrameMatchesIndependentPackedPixelsAndExactVfrBFrameSelection(): Unit = runImmediate {
+        checkProfile("main")
+    }
+    @Test fun actualHighEightBitFramesMatchIndependentPixelsWithoutHdrDowngrade(): Unit = runImmediate {
+        checkProfile("high")
+    }
+    private suspend fun checkProfile(profile: String) {
         val backends = WindowsMediaFoundationBackend.available()
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(1, backends.size)
         assumeTrue("Windows decoder is unavailable; no OS extraction was run", backends.isNotEmpty())
@@ -57,14 +63,14 @@ class WindowsFrameTest {
         try {
             if (ffmpeg != null) {
             process(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "8", "-vf", "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
-                "-fps_mode", "vfr", "-c:v", "libx264", "-profile:v", "main", "-bf", "2", "-g", "8", "-pix_fmt", "yuv420p",
+                "-fps_mode", "vfr", "-c:v", "libx264", "-profile:v", profile, "-bf", "2", "-g", "8", "-pix_fmt", "yuv420p",
                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-chroma_sample_location", "left",
                 "-bsf:v", "filter_units=remove_types=6",
                 "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", input.toString()))
             process(listOf("-i", input.toString(), "-an", "-fps_mode", "passthrough", "-pix_fmt", "nv12", "-f", "rawvideo", independent.toString()))
             } else {
-                Files.write(input, golden("main.mp4", "3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd"))
-                Files.write(independent, golden("main.nv12", "42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562"))
+                Files.write(input, golden("$profile.mp4", if (profile == "high") "1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39" else "3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd"))
+                Files.write(independent, golden("$profile.nv12", if (profile == "high") "0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14" else "42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562"))
             }
             val expected = Files.readAllBytes(independent); assertEquals(6144 * 8, expected.size)
             val java = Path.of(System.getProperty("java.home"), "bin", "java.exe")

@@ -7,24 +7,18 @@ import livephoto.core.binary.*
  * H.264 sections 7.3.2.1.1 and E.1/E.2: https://www.itu.int/rec/T-REC-H.264 */
 internal object AvcSdrFrameProfile {
     fun verify(nal: Bytes, width: UInt, height: UInt): CoreResult<Unit> = attemptNow {
-        if (nal.size !in 5..4096 || nal[0].toInt() and 255 != 0x67) unsupported()
-        val rbsp = ByteArray(nal.size - 1)
-        var count = 0; var zeros = 0; var index = 1
-        while (index < nal.size) {
-            var value = nal[index++].toInt() and 255
-            if (zeros == 2) {
-                if (value == 3) {
-                    if (index >= nal.size || nal[index].toInt() and 255 > 3) corrupt()
-                    zeros = 0; value = nal[index++].toInt() and 255
-                } else if (value < 3) corrupt()
-            }
-            rbsp[count++] = value.toByte()
-            zeros = if (value == 0) zeros + 1 else 0
-        }
-        val bits = Bits(rbsp.copyOf(count))
-        if (bits.read(8) !in setOf(66L, 77L) || bits.read(8) and 3L != 0L) unsupported()
+        if (nal.size < 5) unsupported()
+        val bits = bits(nal, 0x67)
+        val profile = bits.read(8)
+        if (profile !in setOf(66L, 77L, 100L) || bits.read(8) and 3L != 0L) unsupported()
         bits.read(8) // level is additionally constrained by dimensions, references and the bounded decoder.
-        bits.ue(31); bits.ue(12)
+        bits.ue(31)
+        if (profile == 100L) {
+            // High syntax explicitly proves 4:2:0 and eight-bit luma/chroma.
+            // No separate planes, transform bypass or custom scaling matrices.
+            if (bits.ue(3) != 1 || bits.ue(6) != 0 || bits.ue(6) != 0 || bits.bit() || bits.bit()) unsupported()
+        }
+        bits.ue(12)
         when (bits.ue(2)) { 0 -> bits.ue(12); 2 -> Unit; else -> unsupported() }
         bits.ue(16)
         if (bits.bit()) unsupported() // frame_num gaps
@@ -57,8 +51,45 @@ internal object AvcSdrFrameProfile {
             bits.bit()
             repeat(6) { bits.ue(16) }
         }
-        if (!bits.bit()) corrupt() // rbsp_stop_one_bit
-        while (bits.remaining > 0) if (bits.bit()) corrupt()
+        bits.finish()
+    }
+
+    /** High PPS extension can declare scaling matrices independently of the SPS. */
+    fun verifyHighPps(nal: Bytes): CoreResult<Unit> = attemptNow {
+        val bits = bits(nal, 0x68)
+        bits.ue(255); bits.ue(31)
+        bits.bit() // CABAC/CAVLC: both are handled by the selected software decoder.
+        if (bits.bit() || bits.ue(7) != 0) unsupported() // bottom-field ordering/FMO
+        bits.ue(31); bits.ue(31)
+        bits.bit()
+        if (bits.read(2) == 3L) corrupt()
+        bits.se(-26, 25); bits.se(-26, 25); bits.se(-12, 12)
+        bits.bit(); bits.bit()
+        if (bits.bit()) unsupported() // redundant pictures
+        if (bits.moreData()) {
+            bits.bit() // transform_8x8_mode_flag
+            if (bits.bit()) unsupported() // pic_scaling_matrix_present_flag
+            bits.se(-12, 12)
+        }
+        bits.finish()
+    }
+
+    private fun bits(nal: Bytes, header: Int): Bits {
+        if (nal.size !in 2..4096 || nal[0].toInt() and 255 != header) unsupported()
+        val rbsp = ByteArray(nal.size - 1)
+        var count = 0; var zeros = 0; var index = 1
+        while (index < nal.size) {
+            var value = nal[index++].toInt() and 255
+            if (zeros == 2) {
+                if (value == 3) {
+                    if (index >= nal.size || nal[index].toInt() and 255 > 3) corrupt()
+                    zeros = 0; value = nal[index++].toInt() and 255
+                } else if (value < 3) corrupt()
+            }
+            rbsp[count++] = value.toByte()
+            zeros = if (value == 0) zeros + 1 else 0
+        }
+        return Bits(rbsp.copyOf(count))
     }
     private class Bits(private val bytes: ByteArray) {
         private var at = 0
@@ -76,6 +107,23 @@ internal object AvcSdrFrameProfile {
             val value = (1L shl zeros) - 1 + if (zeros == 0) 0L else read(zeros)
             if (value > maximum) unsupported()
             return value.toInt()
+        }
+        fun se(minimum: Int, maximum: Int): Int {
+            val raw = ue(2 * maxOf(-minimum, maximum))
+            val value = if (raw and 1 == 0) -raw / 2 else (raw + 1) / 2
+            if (value !in minimum..maximum) unsupported()
+            return value
+        }
+        fun moreData(): Boolean {
+            val saved = at
+            var stopOnly = bit()
+            while (remaining > 0) if (bit()) stopOnly = false
+            at = saved
+            return !stopOnly
+        }
+        fun finish() {
+            if (!bit()) corrupt()
+            while (remaining > 0) if (bit()) corrupt()
         }
     }
     private fun unsupported(): Nothing = fail("HDR_PRESERVATION_UNAVAILABLE", "SPS/VUI is outside the explicit progressive square-pixel eight-bit BT.709 limited-range left-chroma frame profile", Stage.Plan)
