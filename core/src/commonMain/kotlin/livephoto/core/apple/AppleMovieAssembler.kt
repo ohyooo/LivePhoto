@@ -82,7 +82,7 @@ internal object AppleMovieAssembler {
         val media = BmffVideoProbe(reader, budget).probe(ByteRange(0uL, size)).orThrow()
         if (media.tracks.count { it.handler == "vide" } != 1 || media.tracks.any { it.handler !in setOf("vide", "soun") })
             fail("CAPABILITY_UNSUPPORTED", "Apple assembly requires a classified video/audio-only movie", Stage.Plan)
-        RemuxVerification.metadata(reader, media) // No unknown boxes, external references or hidden media.
+        RemuxVerification.metadata(reader, media, retainedMovieText = true) // Classified text is copied raw; no unknown references/hidden media.
         if (key < Time.Zero || key >= media.tracks.single { it.handler == "vide" }.presentationDuration)
             fail("INVALID_PRESENTATION_TIMESTAMP", "Apple key must lie inside the presented video", Stage.Plan)
         val multiplied = checkedMultiply(key.value.toULong(), media.movieTimescale.toULong())

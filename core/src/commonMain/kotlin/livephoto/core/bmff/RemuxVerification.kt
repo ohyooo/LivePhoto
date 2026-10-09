@@ -14,7 +14,8 @@ internal object RemuxVerification {
         }
     }
 
-    suspend fun metadata(reader: BinaryReader, video: VideoStructure, trimDurationsVerifiedSeparately: Boolean = false, transcodeAvcConfiguration: Boolean = false): Metadata {
+    suspend fun metadata(reader: BinaryReader, video: VideoStructure, trimDurationsVerifiedSeparately: Boolean = false, transcodeAvcConfiguration: Boolean = false,
+        retainedMovieText: Boolean = false): Metadata {
         val budget = ParseBudget(reader.context)
         val boxes = BmffReader(reader, budget)
         val records = mutableListOf<Pair<String, Digest>>()
@@ -25,6 +26,8 @@ internal object RemuxVerification {
             "stbl" to setOf("stsd", "stts", "ctts", "stsc", "stsz", "stco", "co64", "stss", "sdtp", "sgpd", "sbgp"))
         suspend fun visit(parent: ByteRange, type: String, path: String, depth: UInt) {
             val children = boxes.readBoxes(parent, depth).orThrow()
+            if (retainedMovieText && type == "moov" && children.count { it.type == "udta" } > 1)
+                fail("UNSAFE_METADATA_REWRITE", "Apple append assembly requires one unshadowed user metadata directory", Stage.Plan)
             if (type == "stbl") RemuxRollGroups.validate(reader, boxes, children, depth)
             val counts = mutableMapOf<String, Int>()
             for (box in children) {
@@ -36,8 +39,11 @@ internal object RemuxVerification {
                 when {
                     box.type == "udta" -> {
                         // FFmpeg writes a canonical empty iTunes metadata directory even in bitexact mode.
-                        // Accept only this proven-empty envelope, never arbitrary ordinary metadata.
-                        if (!EmptyMovieMetadata.matches(reader, boxes, box, depth))
+                        // Only offset-preserving Apple append assembly opts into classified text.
+                        // Backend remux/trim/transcode retain their original empty-only gate.
+                        if (retainedMovieText && type == "moov" && OrdinaryMovieText.matches(reader, boxes, box, depth, budget))
+                            records += key to sha256Range(reader, box.range).orThrow()
+                        else if (!EmptyMovieMetadata.matches(reader, boxes, box, depth))
                             fail("UNSAFE_METADATA_REWRITE", "User metadata envelope is not provably empty", Stage.Plan)
                     }
                     box.type in containers -> visit(box.payload, box.type, key, depth + 1u)

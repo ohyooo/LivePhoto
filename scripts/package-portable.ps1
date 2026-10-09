@@ -217,7 +217,7 @@ try {
         $parts = $line.Split('=', 2); if ($parts.Count -eq 2) { $ordinaryExifManifest[$parts[0]] = $parts[1] }
     }
     if ($ordinaryExifManifest['scope'] -ne 'synthetic-ordinary-exif-pair-not-device-proof' -or -not $ordinaryExifManifest['runId']) { throw 'Ordinary EXIF fixture scope is missing.' }
-    foreach ($name in @('ordinary-big.jpg', 'ordinary-little.jpg', 'private-note.jpg', 'motion.mp4', 'motion.mov')) {
+    foreach ($name in @('ordinary-big.jpg', 'ordinary-little.jpg', 'private-note.jpg', 'motion.mp4', 'motion.mov', 'ordinary-text.mp4')) {
         if ((Get-FileHash (Join-Path $ordinaryExifFixtures $name)).Hash.ToLowerInvariant() -ne $ordinaryExifManifest[$name]) { throw 'Ordinary EXIF fixture hash differs.' }
     }
     foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) {
@@ -231,10 +231,18 @@ try {
         $validationJson = & $launcher validate --input $created.output.assets[0].path --pair-video $created.output.assets[1].path --layers Structure,Protocol
         if ($LASTEXITCODE -ne 0 -or ($validationJson | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Ordinary EXIF output pair validation failed.' }
     } }
+    $ordinaryTextJson = & $launcher create --image (Join-Path $ordinaryExifFixtures 'ordinary-big.jpg') --video (Join-Path $ordinaryExifFixtures 'ordinary-text.mp4') --target apple.livephoto --profile jpeg-mp4 --strict --output-dir (Join-Path $verify 'Apple ordinary movie text')
+    if ($LASTEXITCODE -ne 0) { throw 'Ordinary movie text strict Create failed.' }
+    $ordinaryText = ($ordinaryTextJson | ConvertFrom-Json).result
+    if (@($ordinaryText.output.assets).Count -ne 2 -or ($ordinaryText.execution | Where-Object { $_.remuxed -or $_.transcoded }) -or
+        ($ordinaryText.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) { throw 'Ordinary movie text preservation failed.' }
+    $ordinaryTextValidation = & $launcher validate --input $ordinaryText.output.assets[0].path --pair-video $ordinaryText.output.assets[1].path --layers Structure,Protocol
+    if ($LASTEXITCODE -ne 0 -or ($ordinaryTextValidation | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Ordinary movie text pair readback failed.' }
+    Write-Host 'PORTABLE_APPLE_ORDINARY_MOVIE_TEXT=SUCCESS scope=bounded-itunes-raw-retention-not-device-proof'
     $ordinaryExifRejected = Join-Path $verify 'Apple ordinary EXIF reject private note'
     $rejectedJson = & $launcher create --image (Join-Path $ordinaryExifFixtures 'private-note.jpg') --video (Join-Path $ordinaryExifFixtures 'motion.mp4') --target apple.livephoto --profile jpeg-mp4 --strict --output-dir $ordinaryExifRejected
     if ($LASTEXITCODE -ne 3 -or ($rejectedJson | ConvertFrom-Json).error.code.value -ne 'UNSAFE_METADATA_REWRITE' -or (Test-Path (Join-Path $ordinaryExifRejected 'assets'))) { throw 'Private MakerNote must remain blocked without published assets.' }
-    foreach ($name in @('ordinary-big.jpg', 'ordinary-little.jpg', 'private-note.jpg', 'motion.mp4', 'motion.mov')) {
+    foreach ($name in @('ordinary-big.jpg', 'ordinary-little.jpg', 'private-note.jpg', 'motion.mp4', 'motion.mov', 'ordinary-text.mp4')) {
         if ((Get-FileHash (Join-Path $ordinaryExifFixtures $name)).Hash.ToLowerInvariant() -ne $ordinaryExifManifest[$name]) { throw 'Ordinary EXIF Create modified an input.' }
     }
     Write-Host 'PORTABLE_APPLE_ORDINARY_EXIF_CREATE=SUCCESS scope=bounded-standard-exif-preserved-not-device-proof'

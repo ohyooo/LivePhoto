@@ -22,6 +22,7 @@ class AppleOrdinaryExifPortableFixtureTest {
             "ordinary-little.jpg" to AppleOrdinaryExifTest().image(Endian.Little),
             "private-note.jpg" to AppleFixtures.image(tag = 1),
             "motion.mp4" to WindowsEncodedFixtures.bytes("remux-main"),
+            "ordinary-text.mp4" to OrdinaryMovieTextFixtures.movie(WindowsEncodedFixtures.bytes("remux-main")),
             "motion.mov" to mov)
         for (endian in listOf("big", "little")) for (container in listOf("mp4", "mov")) {
             val image = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-$endian.jpg")), SourceId("ordinary-$endian"))
@@ -34,6 +35,15 @@ class AppleOrdinaryExifPortableFixtureTest {
             assertTrue(result.execution.none { it.remuxed || it.transcoded })
             result.output.assets.forEach { it.readableSource?.close() }; image.close(); video.close()
         }
+        val ordinary = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-text.mp4")), SourceId("ordinary-text"))
+        val ordinaryResult = DefaultLivePhotoCore().create(CreateRequest(
+            MemoryBinarySource(Bytes(fixtures.getValue("ordinary-big.jpg")), SourceId("ordinary-text-image")), ordinary,
+            ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+            output = MemoryOutputTransaction(context, "ordinary-text"), context = context)).orThrow()
+        assertEquals(Verdict.Valid, ordinaryResult.validation.verdict)
+        assertEquals(AppleOrdinaryMovieTextTest().envelope(ordinary),
+            AppleOrdinaryMovieTextTest().envelope(ordinaryResult.output.assets[1].readableSource!!))
+        ordinaryResult.output.assets.forEach { it.readableSource?.close() }; ordinary.close()
         val directory = Path.of("build", "portable-apple-ordinary-exif-fixtures")
         Files.createDirectories(directory)
         val manifest = StringBuilder("scope=synthetic-ordinary-exif-pair-not-device-proof\nrunId=${UUID.randomUUID()}\n")

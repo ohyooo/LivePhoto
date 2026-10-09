@@ -79,6 +79,11 @@ internal object AppleVideoReader {
                 budget.item(depth)
                 if (box.range == meta.range) continue
                 if (box.type == "udta" && EmptyMovieMetadata.matches(reader, parser, box, depth)) continue
+                if (box.type == "udta" && depth == 1u && OrdinaryMovieText.matches(reader, parser, box, depth, budget)) {
+                    if (boxes.count { it.type == "udta" } != 1)
+                        fail("CONFLICTING_METADATA", "Ordinary movie text has a second user metadata directory")
+                    continue
+                }
                 if (box.type in setOf("meta", "keys", "ilst")) fail("CONFLICTING_METADATA", "A second parsed metadata hierarchy shadows movie-level authority")
                 if (box.type in setOf("moov", "trak", "udta", "mdia", "minf", "stbl", "edts", "gmhd")) shadows(parser.readBoxes(box.payload, depth + 1u).orThrow(), depth + 1u)
             }
