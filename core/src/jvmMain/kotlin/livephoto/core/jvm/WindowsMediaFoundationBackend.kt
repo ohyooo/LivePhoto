@@ -21,7 +21,10 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
         listOf(CapabilityEntry(Operation.Remux, Implementation.Experimental, conditions = listOf(
             Condition(ConditionOperator.Equals, "remuxProfile", Value.Text("same-mp4-single-baseline-main-high-proven-8bit-420-avc-no-custom-scaling-no-audio-no-reorder-48-to-1024-at-most-64-exact-contiguous-100ns-frames-8MB-classified-source-envelope")),
             Condition(ConditionOperator.Equals, "verification", Value.Text("actual-os-compressed-packets-source-envelope-restored-all-samples-config-metadata-and-full-finite-os-decode-no-transcode"))))) +
-        listOf(Operation.Trim, Operation.Transcode).map {
+        listOf(CapabilityEntry(Operation.Trim, Implementation.Experimental, conditions = listOf(
+            Condition(ConditionOperator.Equals, "trimProfile", Value.Text("same-finite-system-remux-mp4-profile-closed-idr-no-audio-no-reorder-zero-or-identity-edit-no-sample-groups-selected-samples-and-duration-tables-rebuilt")),
+            Condition(ConditionOperator.Equals, "trimPrecision", Value.Text("lossless-only-or-preferred-covering-exact-only-when-lossless-no-encoder-no-hidden-preroll-independent-selected-samples-metadata-and-full-os-decode"))))) +
+        listOf(Operation.Transcode).map {
             CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))
         })
 
@@ -113,7 +116,7 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
             is CoreResult.Success -> CoreResult.Failure(CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This system media operation is not implemented"))
         }
     }
-    override suspend fun trim(job: BackendJob) = unsupported(job, Operation.Trim)
+    override suspend fun trim(job: BackendJob) = WindowsTrim.run(command, job)
     override suspend fun remux(job: BackendJob) = WindowsRemux.run(command, job)
     override suspend fun transcode(job: BackendJob) = unsupported(job, Operation.Transcode)
     override suspend fun extractFrame(job: BackendJob) = WindowsFrame.run(command, job)

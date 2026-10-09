@@ -11,6 +11,7 @@ import livephoto.core.memory.MemoryBinarySource
  * Checked-in encoded bytes allow actual OS decoding without an optional fixture encoder on CI. */
 internal object WindowsEncodedFixtures {
     val hashes = mapOf(
+        "trim-high" to "92b30a35966d77d584f773299ad14fbddc92312eeb06cb5b9605b676ff5b7f1c",
         "b0" to "cf4959d6e5e6a9a67ce19fddc2ce2f806136b8b193a0131e6060e0d05c811165",
         "b2" to "694034d7f2d596db0d78357a09cab978f3b378d987acbbf030f191fb2a62df04",
         "vfr" to "5794679eb6e8a821f69e91ca1f783dac0a6c025bce7df6494754fc6fd5ffa72c",

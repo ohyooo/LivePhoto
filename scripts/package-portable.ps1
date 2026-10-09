@@ -526,6 +526,53 @@ try {
                 if ($LASTEXITCODE -ne 0 -or -not (($profileDecode | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'System profile remux output did not completely decode.' }
                 Write-Host "PORTABLE_WINDOWS_API_REMUX_PROFILE=SUCCESS profile=$profile scope=finite-no-b-same-mp4-byte-exact-complete-system-decode-not-device"
             }
+            $trimInput = Join-Path $windowsFixtures 'trim-high.mp4'
+            $trimSourceHash = (Get-FileHash $trimInput).Hash.ToLowerInvariant()
+            if ($trimSourceHash -ne $fixtureManifest['trim-high.mp4']) { throw 'Trim fixture differs from independent manifest.' }
+            foreach ($mode in @('LosslessOnly', 'Exact', 'LosslessPreferred')) {
+                $start = if ($mode -eq 'LosslessPreferred') { 140000 } else { 120000 }
+                $end = if ($mode -eq 'LosslessPreferred') { 300000 } else { 320000 }
+                $trimJson = & $launcher trim --input $trimInput --start-us $start --end-us $end --mode $mode --strict --output-dir (Join-Path $verify "system trim $mode")
+                if ($LASTEXITCODE -ne 0) { throw "Portable finite system trim failed: $trimJson" }
+                $trim = ($trimJson | ConvertFrom-Json).result
+                if ($trim.wasTranscoded -or $trim.retainedHiddenContent -or -not $trim.wasBitstreamPreserved -or
+                    ([decimal]$trim.actualStart.value * 1000000 / $trim.actualStart.timescale) -ne 120000 -or
+                    ([decimal]$trim.actualEnd.value * 1000000 / $trim.actualEnd.timescale) -ne 320000 -or
+                    ([decimal]$trim.requestedStart.value * 1000000 / $trim.requestedStart.timescale) -ne $start -or
+                    ([decimal]$trim.requestedEnd.value * 1000000 / $trim.requestedEnd.timescale) -ne $end -or
+                    $trim.tracks.Count -ne 1 -or $trim.timelineMap.Count -ne 1 -or
+                    -not ($trim.operation.execution | Where-Object { $_.stage -eq 'Trim' -and $_.backendId -eq 'windows-media-foundation' -and $_.remuxed -and -not $_.transcoded })) { throw 'System trim did not disclose genuine selected range and nonencoding execution.' }
+                $trimOutput = $trim.operation.output.assets[0].path
+                $decoded = & $launcher probe --input $trimOutput --decode-check
+                if ($LASTEXITCODE -ne 0) { throw 'System trimmed output did not fully decode.' }
+                $decodedFacts = ($decoded | ConvertFrom-Json).result
+                if (([decimal]$decodedFacts.duration.value * 1000000 / $decodedFacts.duration.timescale) -ne 200000 -or
+                    -not ($decodedFacts.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' }) -or
+                    (Get-FileHash $trimOutput).Hash.ToLowerInvariant() -eq $trimSourceHash) { throw 'Trim cannot be a whole-file no-op.' }
+                Write-Host "PORTABLE_WINDOWS_API_TRIM=SUCCESS mode=$mode scope=nonzero-closed-idr-selected-vfr-120000-to-320000-full-os-decode-no-ffmpeg-not-device"
+            }
+            $trimHash = (Get-FileHash $trimOutput).Hash
+            $trimCreateJson = & $launcher create --image $referenceImage --video $trimInput --target google.microvideo.v1 --frame-index 4 --start-us 120000 --end-us 320000 --mode LosslessOnly --output-dir (Join-Path $verify 'system trim create')
+            if ($LASTEXITCODE -ne 0) { throw "System trimmed Create failed: $trimCreateJson" }
+            $trimCreate = ($trimCreateJson | ConvertFrom-Json).result
+            if (([decimal]$trimCreate.keyPhoto.position.value * 1000000 / $trimCreate.keyPhoto.position.timescale) -ne 40000) { throw 'System Create key was not mapped from source domain.' }
+            $fullCarrierJson = & $launcher create --image $referenceImage --video $trimInput --target google.microvideo.v1 --frame-index 4 --output-dir (Join-Path $verify 'system trim full carrier')
+            if ($LASTEXITCODE -ne 0) { throw 'System trim carrier creation failed.' }
+            $trimConvertJson = & $launcher convert --input ($fullCarrierJson | ConvertFrom-Json).result.output.assets[0].path --target google.motionphoto.v2 --start-us 120000 --end-us 320000 --mode LosslessOnly --output-dir (Join-Path $verify 'system trim convert')
+            if ($LASTEXITCODE -ne 0) { throw "System trimmed Convert failed: $trimConvertJson" }
+            $trimConvert = ($trimConvertJson | ConvertFrom-Json).result
+            if (([decimal]$trimConvert.keyPhoto.position.value * 1000000 / $trimConvert.keyPhoto.position.timescale) -ne 40000) { throw 'System Convert inherited key was not rebased.' }
+            foreach ($operation in @(@{name='create';result=$trimCreate}, @{name='convert';result=$trimConvert})) {
+                $extracted = & $launcher extract --input $operation.result.output.assets[0].path --output-dir (Join-Path $verify "system trim extracted $($operation.name)")
+                if ($LASTEXITCODE -ne 0 -or (Get-FileHash ($extracted | ConvertFrom-Json).result.output.assets[0].path).Hash -ne $trimHash) { throw 'Combined trim did not preserve the same selected video.' }
+            }
+            $refusedDirectory = Join-Path $verify 'system exact encoder unavailable'
+            # Already shortened output has no identity edit, so Core reaches the backend's
+            # no-encoder refusal rather than the separate encoded-profile edit-list gate.
+            $refused = & $launcher trim --input $trimOutput --start-us 40000 --end-us 120000 --mode Exact --allow-transcode --output-dir $refusedDirectory
+            if ($LASTEXITCODE -ne 3 -or ($refused | ConvertFrom-Json).error.code.value -ne 'EXACT_TRIM_UNAVAILABLE' -or (Test-Path (Join-Path $refusedDirectory 'assets'))) { throw 'System trim must not encode even with explicit authorization.' }
+            if ((Get-FileHash $trimInput).Hash.ToLowerInvariant() -ne $trimSourceHash) { throw 'System trim changed its input.' }
+            Write-Host 'PORTABLE_WINDOWS_API_TRIM_COMBINED=SUCCESS create-convert-key-rebase-selected-video-exact-encoder-refusal'
         } finally { $env:Path = $savedSearchPath }
         if ((Get-FileHash $packetInput).Hash.ToLowerInvariant() -ne '0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6') { throw 'Private remux experiment changed its input.' }
         Write-Host 'PORTABLE_WINDOWS_API_PRIVATE_REMUX=SUCCESS scope=finite-compressed-packets-exact-vfr-clock-complete-decode-not-public-remux-or-metadata-preservation'
@@ -1011,13 +1058,15 @@ try {
         if ($LASTEXITCODE -ne 3 -or ($replaceJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend replace gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_REPLACE=UNAVAILABLE'
         $trimJson = & $launcher trim --input $referenceVideo --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim')
-        if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trim gate failed.' }
+        $expectedTrimError = if ($IsWindows -and $decoderExit -eq 0) { 'LOSSLESS_TRIM_UNAVAILABLE' } else { 'CAPABILITY_UNSUPPORTED' }
+        # Reference includes audio: a finite system trim must refuse, never drop its track.
+        if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -ne $expectedTrimError -or (Test-Path (Join-Path $verify 'disabled trim/assets'))) { throw 'Portable missing-backend/finite-system trim gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_TRIM=UNAVAILABLE'
         $transcodeJson = & $launcher transcode --input $referenceVideo --codec Avc --container Mp4 --allow-transcode --output-dir (Join-Path $verify 'disabled transcode')
         if ($LASTEXITCODE -ne 3 -or ($transcodeJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend transcode gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_TRANSCODE=UNAVAILABLE'
         $trimCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.microvideo.v1 --start-us 0 --end-us 80000 --output-dir (Join-Path $verify 'disabled trim create')
-        if ($LASTEXITCODE -ne 3 -or ($trimCreateJson | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable missing-backend trimmed Create gate failed.' }
+        if ($LASTEXITCODE -ne 3 -or ($trimCreateJson | ConvertFrom-Json).error.code.value -ne $expectedTrimError -or (Test-Path (Join-Path $verify 'disabled trim create/assets'))) { throw 'Portable missing-backend/finite-system trimmed Create gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_CREATE_TRIM=UNAVAILABLE'
         $replacementDirectory = Join-Path $verify 'disabled replacement create'
         $replacementCreateJson = & $launcher create --image $referenceImage --video $referenceVideo --target google.motionphoto.v2 --replacement-frame-index 0 --output-dir $replacementDirectory
