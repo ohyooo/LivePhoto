@@ -419,7 +419,7 @@ try {
         }
         $packetInput = Join-Path $verify 'finite system frame baseline/frame.mp4'
         $packetOutput = Join-Path $verify 'finite system frame baseline/remux.mp4'
-        $packetTimes = '0:400000,400000:400000,800000:400000,1200000:400000,1600000:800000,2400000:800000,3200000:800000,4000000:800000'
+        $packetTimes = '0:400000,400000:400000,800000:400000,1200000:400000,1600000:800000,2400000:800000,3200000:800000,4000000:400000'
         $packetTimeline = [Collections.Generic.List[byte]]::new()
         foreach ($pair in $packetTimes.Split(',')) {
             foreach ($field in $pair.Split(':')) {
@@ -444,6 +444,12 @@ try {
             } finally { $process.Dispose() }
             $packetProbe = & $launcher probe --input $packetOutput --decode-check
             if ($LASTEXITCODE -ne 0 -or -not (($packetProbe | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Portable private packet output did not completely decode.' }
+            $packetSourceProbe = & $launcher probe --input $packetInput
+            if ($LASTEXITCODE -ne 0) { throw 'Portable private packet source probe failed.' }
+            $originalDuration = ($packetSourceProbe | ConvertFrom-Json).result.duration
+            $producedDuration = ($packetProbe | ConvertFrom-Json).result.duration
+            if (-not $originalDuration -or -not $producedDuration -or
+                [long]$originalDuration.value * [long]$producedDuration.timescale -ne [long]$producedDuration.value * [long]$originalDuration.timescale) { throw 'Portable private packet output changed the exact source presentation duration.' }
             $packetCaps = & $launcher media-capabilities
             if ($LASTEXITCODE -ne 0 -or (($packetCaps | ConvertFrom-Json).result.capabilities.operations | Where-Object { $_.operation -eq 'Remux' }).implementation -ne 'Unsupported') { throw 'Private experiment must not advertise public remux.' }
         } finally { $env:Path = $savedSearchPath }
