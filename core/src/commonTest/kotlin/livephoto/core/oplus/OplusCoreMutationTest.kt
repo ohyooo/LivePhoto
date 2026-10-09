@@ -36,7 +36,8 @@ class OplusCoreMutationTest {
         val tiff = tiff(reader)
         val comment = tiff.ifds.flatMap { it.entries }.single { it.tag == 0x9286u.toUShort() }
         assertEquals(7u.toUShort(), comment.type)
-        assertEquals(Bytes("ASCII\u0000\u0000\u0000${OplusFixtures.marker}\u0000".encodeToByteArray()), comment.value)
+        assertEquals(Bytes("ASCII\u0000\u0000\u0000${OplusFixtures.marker}".encodeToByteArray()), comment.value)
+        assertEquals(22u, comment.count)
         val packet = value(XmpReader.readJpeg(reader, jpeg))
         assertEquals("oplus", value(packet.scalar(OplusFixtures.uri, "MotionPhotoOwner")))
         assertEquals("2", value(packet.scalar(OplusFixtures.uri, "OLivePhotoVersion")))

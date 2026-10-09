@@ -38,13 +38,31 @@ internal object OplusJpegWriter {
             ExpandedName(OPLUS_URI, "OLivePhotoVersion") to "2",
             ExpandedName(OPLUS_URI, "VideoLength") to videoLength.toString(),
         )
-        val xml = XmpWriter.merge(packet, updates, context).orThrow()
+        val merged = XmpWriter.merge(packet, updates, context).orThrow()
+        // For a fresh packet, match the reachable upstream JPEG+MP4 wire profile rather than
+        // treating namespace-equivalent RDF and omitted zero fields as gallery-compatible.
+        val xml = if (session.xmp!!.packets.isEmpty()) upstreamCompatiblePacket(videoLength, timestamp) else merged
         val readback = XmpReader.parse(xml, context).orThrow()
         for ((name, expected) in updates) if (readback.scalar(name.uri, name.local).orThrow() != expected) fail("POSTCONDITION_FAILED", "Oplus XMP scalar failed final readback")
         if (readback.scalar(CAMERA_URI, "MotionPhotoPresentationTimestampUs").orThrow() != timestamp.toString()) fail("POSTCONDITION_FAILED", "Oplus and Google timestamps disagree after writing")
         session.recheck()
-        GoogleJpegWriter.patch(jpeg, xml, additional)
+        if (session.xmp.packets.isEmpty()) {
+            val app = JpegRewrite.appSegment(0xe1, Bytes(XMP_HEADER.encodeToByteArray() + xml.toByteArray())).orThrow()
+            // Upstream WriteNativeAsync writes SOI, XMP APP1, then the prepared JPEG body.
+            // Equal-offset insertions are deliberately ordered XMP before the new EXIF marker.
+            JpegRewrite.plan(jpeg, listOf(JpegPatch(ByteRange(2uL, 0uL), app)) + additional).orThrow()
+        } else GoogleJpegWriter.patch(jpeg, xml, additional)
     }
+
+    private fun upstreamCompatiblePacket(length: ULong, timestamp: Long): Bytes = Bytes((
+        "<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
+        "<rdf:Description rdf:about=\"\" xmlns:GCamera=\"$CAMERA_URI\" xmlns:Container=\"$CONTAINER_URI\" xmlns:Item=\"$ITEM_URI\" xmlns:OpCamera=\"$OPLUS_URI\"" +
+        " GCamera:MotionPhoto=\"1\" GCamera:MotionPhotoVersion=\"1\" GCamera:MotionPhotoPresentationTimestampUs=\"$timestamp\"" +
+        " OpCamera:MotionPhotoPrimaryPresentationTimestampUs=\"$timestamp\" OpCamera:MotionPhotoOwner=\"oplus\" OpCamera:OLivePhotoVersion=\"2\" OpCamera:VideoLength=\"$length\">" +
+        "<Container:Directory><rdf:Seq><rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"image/jpeg\" Item:Semantic=\"Primary\" Item:Length=\"0\" Item:Padding=\"0\"/></rdf:li>" +
+        "<rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"video/mp4\" Item:Semantic=\"MotionPhoto\" Item:Length=\"$length\" Item:Padding=\"0\"/></rdf:li>" +
+        "</rdf:Seq></Container:Directory></rdf:Description></rdf:RDF></x:xmpmeta>\n<?xpacket end=\"w\"?>").encodeToByteArray())
 
     suspend fun cleanPlan(session: SourceSession, context: Context, budget: ParseBudget): CoreResult<JpegRewritePlan> = attempt {
         checkCancelled(context)
@@ -64,7 +82,7 @@ internal object OplusJpegWriter {
         val existing = segments.singleOrNull()
         if (existing == null && action == ExifMarkerAction.RemoveOwned) return emptyList()
         val writer = ExifMarkerWriter(session.reader, budget)
-        val proof = if (existing == null) writer.createMarkerAppPayload().orThrow() else {
+        val proof = if (existing == null) writer.createMarkerAppPayload(upstreamWire = true).orThrow() else {
             val payload = existing.payload ?: fail("CORRUPTED_CONTAINER", "EXIF APP1 payload is missing")
             if (payload.length < 6uL) fail("CORRUPTED_CONTAINER", "EXIF APP1 identifier is truncated")
             writer.rewriteMarker(ByteRange(checkedAdd(payload.offset, 6uL), payload.length - 6uL), action).orThrow()

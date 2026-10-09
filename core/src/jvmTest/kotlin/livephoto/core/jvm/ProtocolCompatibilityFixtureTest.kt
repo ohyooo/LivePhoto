@@ -10,6 +10,9 @@ import livephoto.core.*
 import livephoto.core.binary.orThrow
 import livephoto.core.binary.BinaryReader
 import livephoto.core.bmff.BmffVideoProbe
+import livephoto.core.binary.ParseBudget
+import livephoto.core.implementation.SourceSession
+import livephoto.core.jpeg.AppPayloadKind
 import livephoto.core.memory.*
 import org.junit.Assume.assumeTrue
 import kotlin.test.*
@@ -30,7 +33,87 @@ class ProtocolCompatibilityFixtureTest {
     @Test fun googleV2MovReportsPaddingAndParserLimitWithoutChangingCapturedBytes() = check("video_MotionPhoto_JPEG+MOV.jpg", ProtocolIds.GoogleV2, Verdict.Invalid, setOf("CORRUPTED_CONTAINER", "MALFORMED_XMP"), 294932, 8121451, movHash)
     @Test fun googleHeicMovReportsPartialScopeAndKeepsExactMovieExtraction() = check("video_MotionPhoto_HEIC+MOV.heic", ProtocolIds.GoogleV2, Verdict.Invalid, setOf("CORRUPTED_CONTAINER", "MALFORMED_XMP"), 1065746, 8121451, movHash)
     @Test fun oplusReadsVendorAndCompatibleBaseWithExactVideo() = check("video_OPPO_OLive_JPEG+MP4.jpg", ProtocolIds.Oplus, Verdict.Warning, emptySet(), 295309, 8121397, originalHash)
+    @Test fun oplusCreationMatchesFixedReferenceProtocolPacketAndMarkerWithoutChangingMedia(): Unit = runImmediate {
+        // The fixed file is byte-identical to reference/photos/oppo_jpg+h.264.jpg.
+        // Its label is not a codec assertion: the untouched input is HEVC + AAC.
+        val expectedBytes = captured("video_OPPO_OLive_JPEG+MP4.jpg")
+        assertEquals("3308749b84e583bd4b4f008b20e1dd475939d6a758b45d3981c456404ed4ec5b", sha(expectedBytes))
+        val reference = generateSequence(Path.of(System.getProperty("user.dir"))) { it.parent }
+            .map { it.resolve("reference/video.jpg") }.firstOrNull(Files::isRegularFile)
+        if (System.getenv("LIVEPHOTO_REQUIRE_REFERENCE") == "true") assertNotNull(reference)
+        else assumeTrue("Required input cover missing; not device certification", reference != null)
+        val imageBytes = Files.readAllBytes(requireNotNull(reference))
+        assertEquals("18d7fe28bff459d41fb75fe8358bb6df0f7c5164c04158e8b120789af7da76a9", sha(imageBytes))
+        val movieBytes = referenceVideo()
+        val image = MemoryBinarySource(Bytes(imageBytes), SourceId("reference-oplus-image"))
+        val video = MemoryBinarySource(Bytes(movieBytes), SourceId("reference-oplus-video"))
+        val created = DefaultLivePhotoCore().create(CreateRequest(image, video,
+            ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")),
+            edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
+            output = MemoryOutputTransaction(context, "reference-oplus-create"), context = context)).orThrow()
+        val actualSource = created.output.assets.single().readableSource!!
+        val expectedSource = MemoryBinarySource(Bytes(expectedBytes), SourceId("reference-oplus-oracle"))
+        suspend fun open(source: BinarySource) = SourceSession.open(SourceSet.Single(source), context, ParseBudget(context)).orThrow()
+        val expected = open(expectedSource)
+        val actual = open(actualSource)
+        suspend fun packet(session: SourceSession): String {
+            val firstApp = session.jpeg!!.segments.first { it.marker in 0xe0..0xef }
+            assertEquals(AppPayloadKind.Xmp, firstApp.payloadKind)
+            assertEquals(2uL, firstApp.range.offset)
+            return session.reader.readExactly(firstApp.payload!!.offset, firstApp.payload.length.toUInt()).orThrow().toByteArray().decodeToString()
+        }
+        fun protocolDescription(packet: String): String {
+            val start = packet.indexOf("<rdf:Description rdf:about=\"\" xmlns:GCamera=")
+            assertTrue(start >= 0)
+            val end = packet.indexOf("</rdf:Description>", start)
+            assertTrue(end > start)
+            return packet.substring(start, end + "</rdf:Description>".length)
+        }
+        val attribution = " xmlns:LivePhotoBox=\"https://github.com/LengxiQwQ/live-photo-box\" LivePhotoBox:Action=\"Merge\" LivePhotoBox:Protocol=\"OppoLivePhoto\" LivePhotoBox:Version=\"2.2.1.0\""
+        val expectedDescription = protocolDescription(packet(expected))
+        assertTrue(expectedDescription.contains(attribution), "Only the independently observed creator attributes may be excluded")
+        assertEquals(expectedDescription.replace(attribution, ""), protocolDescription(packet(actual)), "Fixed protocol RDF, not a self-generated oracle")
+        val expectedMarker = expected.exifComments.single().document.ifds.flatMap { it.entries }.single { it.tag == 0x9286u.toUShort() }
+        val actualMarker = actual.exifComments.single().document.ifds.flatMap { it.entries }.single { it.tag == 0x9286u.toUShort() }
+        assertEquals(expectedMarker.type, actualMarker.type)
+        assertEquals(expectedMarker.count, actualMarker.count)
+        assertEquals(expectedMarker.value, actualMarker.value)
+        assertEquals(expected.exifComments.single().document.endian, actual.exifComments.single().document.endian)
+        val body = actual.jpeg!!.segments.first { it.marker != 0xd8 && it.payloadKind !in setOf(AppPayloadKind.Xmp, AppPayloadKind.Exif) }.range.offset
+        assertContentEquals(imageBytes.copyOfRange(2, imageBytes.size), actual.reader.readExactly(body, (imageBytes.size - 2).toUInt()).orThrow().toByteArray())
+        var offset = 0
+        while (offset < movieBytes.size) {
+            val length = minOf(64 * 1024, movieBytes.size - offset)
+            assertContentEquals(movieBytes.copyOfRange(offset, offset + length),
+                actual.reader.readBuffer(actual.jpeg.primary.endExclusive + offset.toULong(), length.toUInt()).orThrow().toByteArray())
+            offset += length
+        }
+        assertTrue(created.execution.none { it.remuxed || it.transcoded })
+        assertEquals(Bytes(imageBytes), image.readAt(0uL, imageBytes.size.toUInt()).orThrow())
+        assertEquals(Bytes(movieBytes), video.readAt(0uL, movieBytes.size.toUInt()).orThrow())
+        // Ordinary tool defaults and creator attribution are intentionally not forged.
+        assertFalse(packet(actual).contains("LivePhotoBox:Action"))
+    }
     @Test fun vivoReadsVendorAndCompatibleBaseWithExactVideo() = check("video_vivo_LivePhoto_JPEG+MP4.jpg", ProtocolIds.VivoModern, Verdict.Warning, emptySet(), 295793, 8121397, originalHash)
+    @Test fun updatedUserVivoReadsAndExtractsExactVideo() = check("user-vivo-20261009.jpg", ProtocolIds.VivoModern, Verdict.Warning, emptySet(), 295793, 8121397, originalHash)
+    @Test fun allElevenUserPhotoOutputsHaveWholeFileOracles() {
+        val entries = javaClass.getResourceAsStream(resourceRoot + "user-photos.tsv").use {
+            requireNotNull(it).reader().readText().lineSequence().filter(String::isNotBlank).map { line -> line.split('\t') }.toList()
+        }
+        assertEquals(11, entries.size)
+        assertEquals(11, entries.map { it[0] }.toSet().size)
+        val directory = generateSequence(Path.of(System.getProperty("user.dir"))) { it.parent }
+            .map { it.resolve("reference/photos") }.firstOrNull(Files::isDirectory)
+        for (entry in entries) {
+            assertEquals(3, entry.size)
+            assertEquals(entry[2], sha(captured(entry[1])), "Fixed oracle for ${entry[0]}")
+            if (directory != null) assertEquals(entry[2], sha(Files.readAllBytes(directory.resolve(entry[0]))), "Supplied file changed: ${entry[0]}")
+        }
+        if (directory != null) {
+            assertEquals(originalHash, sha(Files.readAllBytes(directory.resolve("video.mp4"))))
+            assertEquals("18d7fe28bff459d41fb75fe8358bb6df0f7c5164c04158e8b120789af7da76a9", sha(Files.readAllBytes(directory.resolve("video.jpg"))))
+        }
+    }
     @Test fun samsungJpegReportsLegacyFooterAndUsesPureVideoNotSefSuffix() = check("video_Samsung_MotionPhoto_JPEG+MP4.jpg", ProtocolIds.Samsung, Verdict.Invalid, setOf("MALFORMED_XMP", "MOTION_VIDEO_LENGTH_MISMATCH", "SEF_DIRECTORY_INVALID"), 294956, 8121397, originalHash)
     @Test fun samsungHeicReportsLegacyFooterAndKeepsDistinctVideoExtents() = check("video_Samsung_MotionPhoto_HEIC+MP4.heic", ProtocolIds.Samsung, Verdict.Invalid, setOf("CORRUPTED_CONTAINER", "MOTION_VIDEO_LENGTH_MISMATCH", "SEF_DIRECTORY_INVALID"), 1065745, 8121397, originalHash)
     @Test fun huaweiJpegKeepsUnknownTimestampSemanticsAndExactTransformedVideo() = check("video_HUAWEI_MovingPhoto_JPEG+MP4.jpg", ProtocolIds.Huawei, Verdict.Warning, setOf("TIMESTAMP_SEMANTICS_UNKNOWN"), 293848, 8121397, huaweiHash)
@@ -75,11 +158,11 @@ class ProtocolCompatibilityFixtureTest {
         assertEquals(Bytes(movie), input.video.readAt(0uL, movie.size.toUInt()).orThrow())
     }
 
-    @Test fun allEighteenAssetsRestoreExactlyAndExportVerifiedManifest() {
+    @Test fun allNineteenAssetsRestoreExactlyAndExportVerifiedManifest() {
         val manifestBytes = javaClass.getResourceAsStream(resourceRoot + "captures.tsv").use { requireNotNull(it).readBytes() }
         val names = manifestBytes.toString(Charsets.UTF_8).lineSequence().filter(String::isNotBlank).map { it.substringBefore('\t') }.toList()
-        assertEquals(18, names.size)
-        assertEquals(18, names.toSet().size)
+        assertEquals(19, names.size)
+        assertEquals(19, names.toSet().size)
         names.forEach { captured(it) }
         val directory = Path.of("build", "reports", "protocol-compatibility")
         Files.createDirectories(directory)

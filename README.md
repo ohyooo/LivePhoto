@@ -424,7 +424,13 @@ $env:LIVEPHOTO_REQUIRE_REFERENCE = 'true'
 
 reference 测试使用仓库中的 `reference/video.jpg`、`reference/video.mp4` 和 `reference/livephoto.jpg`，检查封装、提取及保留结果；不会要求参考成品中的 embedded MOV 必须与独立原 MP4 相同。用户报告可识别不等于本项目已完成所有设备验收。
 
-协议兼容回归包含 **12 个单文件组合及 3 组配对，共 18 个资产**。`core/src/jvmTest/resources/protocol-compatibility/v1/` 保存无损字节差分、完整 SHA-256 和资产清单；测试还原并校验整文件，再检查多重匹配、非规范字段与原样视频提取。差分只引用参考视频或其它已校验资产中完全相同的字节，不重写协议字段。包含 **16 个回归测试**，无需网络或额外工具运行，不增加产品运行时依赖。
+协议兼容回归包含 **12 个单文件组合、1 个更新的 vivo 单文件样本及 3 组配对，共 19 个资产**。`core/src/jvmTest/resources/protocol-compatibility/v1/` 保存无损字节差分、完整 SHA-256 和资产清单；测试还原并校验整文件，再检查多重匹配、非规范字段与原样视频提取。差分只引用参考视频或其它已校验资产中完全相同的字节，不重写协议字段。包含 **19 个回归测试**，无需网络或额外工具运行，不增加产品运行时依赖。
+
+`user-photos.tsv` 对应用户补充的 11 个导出成品：10 个与原固定资产字节一致，更新的 vivo 文件独立保存，旧样本不删除。OPPO Create 额外使用原封面＋原视频，与固定成品对照协议 RDF、EXIF UserComment 的类型/长度/字节、XMP 第一 APP 段位置，并逐块检查视频和原图保留；不复制生成工具署名或伪造相机参数。输入没有 XMP 时使用已核对的 OPPO 模板；已有普通 XMP/EXIF 仍走保留门禁，不宣称所有 metadata 布局均与对照工具相同。
+
+设备反馈：此前 4 张本项目输出经 SMB 传至 **OnePlus 11 / ColorOS 16，均未识别**；用户原有 `livephoto.jpg` 可以识别，但它实际是 Google V2＋MOV，不是 OPPO 专属模板。新的协议布局修正必须重新做设备验收，不能由 Core 自身校验通过推定问题已解决。文件名中的 `h.264` 也不是编码证明：本批原视频实际为 HEVC＋AAC，两个 Huawei HEIC 配置文件字节完全相同。
+
+本轮 OPPO 布局修正与用户素材回归已完成新全量验证：**845 tests，824 项执行成功，0 failures / errors，21 项历史系统 API 专项跳过**。只调整已确认 JPEG＋MP4 profile 的新 XMP/EXIF 序列化，不新增格式、转码或 OnePlus 尾挂支持；真机复测仍待用户反馈。
 
 这些样本也用于暴露差异，不强行期待全为 Valid：Google V2 的 secondary `Padding=0`、Samsung 旧式 SEF footer 必须明确报告。Huawei HEIC + 固定尾标现可有界读取并原样提取视频，图像 item graph 与视频范围分别验证，仍为 Partial/Candidate，不授权 HEIC 写入；部分 MOV 仍有解析范围缺口。部分 Apple 样本将 MakerNote 放在 IFD0，本 Core 当前只授权正式 ExifIFD；vivo 旧式配对存在 sample/header duration 边界，需要继续核查。文件名中的 `H.265` 不是实际 codec 证明。样本不代表真实设备相册兼容。
 
@@ -589,7 +595,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 
 ### 剩余范围清单
 
-- [x] 接入 12 个单文件组合及 3 组配对的兼容回归测试，校验 18 个资产的整文件 SHA-256；不算 L4 设备认证。
+- [x] 接入 12 个单文件组合、更新 vivo 样本及 3 组配对的兼容回归测试，校验 19 个资产的整文件 SHA-256，并登记用户 11 个导出成品的字节对应关系；不算 L4 设备认证。
 - [x] Huawei HEIC + 固定 60 字节尾标的有界读取与精确视频提取；保护图像 item extent 边界，未知 Honor/扩展不取得纯视频权威，HEIC 写入继续拒绝。
 - [x] 有限 Samsung ExplicitRemux：全量/真实媒体测试、新便携包验收通过；其它协议/未知媒体恢复不在此范围，各提交 CI 见 Actions。
 - [x] 最小版本一 vivo ExplicitRemux：全量/双协议真实媒体与新便携验收通过；保持原 vendor 字段、未知 key 和既有 Google 基础层诊断。

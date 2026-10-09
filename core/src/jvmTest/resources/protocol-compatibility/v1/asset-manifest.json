@@ -4,6 +4,13 @@
   "storage": "gzip; unsigned big-endian total length; records 0: literal length + bytes, 1: declared base offset + length, 255: end. Reconstructed length and SHA-256 must match the manifest. No protocol fields are synthesized.",
   "assets": [
     {
+      "name": "user-vivo-20261009.jpg",
+      "size": 8417190,
+      "sha256": "fdabd8848ebcbf3f8ff65dfd0374e8f9b05c51b981b6f7a1fb765c2268bfaeda",
+      "base": "reference/video.mp4",
+      "fixture": "user-vivo-20261009.jpg.fixture.gz"
+    },
+    {
       "name": "video_HUAWEI_MovingPhoto_HEIC+MP4 (H.265).heic",
       "size": 9186059,
       "sha256": "981020c898088513457b7c1b084137b46af31a7306edeab86ae7ee220efcb1e9",

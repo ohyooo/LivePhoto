@@ -17,9 +17,9 @@ internal class ExifMarkerPatch private constructor(
     val isNoOp: Boolean,
 ) {
     companion object {
-        internal suspend fun create(reader: BinaryReader, budget: ParseBudget): CoreResult<ExifMarkerPatch> = attempt {
+        internal suspend fun create(reader: BinaryReader, budget: ParseBudget, upstreamWire: Boolean = false): CoreResult<ExifMarkerPatch> = attempt {
             val identity = reader.identity().orThrow()
-            val payload = ExifPatchBuilder(reader, budget).create()
+            val payload = ExifPatchBuilder(reader, budget).create(upstreamWire)
             verify(payload, OplusCommentMarker.Modern, reader.context, budget)
             reader.validateIdentity().orThrow()
             ExifMarkerPatch(identity, null, null, payload, ExifMarkerAction.AddCanonical, ExifCommentChange(null, OplusCommentMarker.Modern), false)
@@ -74,7 +74,7 @@ internal class ExifMarkerPatch private constructor(
 }
 
 internal class ExifMarkerWriter(private val reader: BinaryReader, private val budget: ParseBudget = ParseBudget(reader.context)) {
-    suspend fun createMarkerAppPayload(): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.create(reader, budget)
+    suspend fun createMarkerAppPayload(upstreamWire: Boolean = false): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.create(reader, budget, upstreamWire)
     suspend fun rewriteMarker(tiffRange: ByteRange, action: ExifMarkerAction): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.rewrite(reader, budget, tiffRange, action)
 }
 
@@ -173,17 +173,20 @@ private class ExifPatchBuilder(private val reader: BinaryReader, private val bud
         zeroGap(cursor, range.endExclusive)
     }
 
-    fun create(): Bytes {
-        val marker = markerBytes()
+    fun create(upstreamWire: Boolean = false): Bytes {
+        // Fresh Oplus fixtures use big-endian TIFF and an unterminated UNDEFINED
+        // ASCII UserComment. Do not synthesize the tool's ordinary EXIF defaults.
+        val marker = markerBytes(terminated = !upstreamWire)
+        val endian = if (upstreamWire) Endian.Big else Endian.Little
         val length = 44 + marker.size
         budget.retain(checkedMultiply((length + 6).toULong(), 4uL))
         val tiff = ByteArray(length)
-        tiff[0] = 0x49; tiff[1] = 0x49
-        put(tiff, 2, 42uL, 2, Endian.Little); put(tiff, 4, 8uL, 4, Endian.Little)
-        put(tiff, 8, 1uL, 2, Endian.Little)
-        field(tiff, 10, 0x8769u, 4u, 1u, 26uL, Endian.Little)
-        put(tiff, 26, 1uL, 2, Endian.Little)
-        field(tiff, 28, 0x9286u, 7u, marker.size.toUInt(), 44uL, Endian.Little)
+        tiff[0] = if (upstreamWire) 0x4d else 0x49; tiff[1] = tiff[0]
+        put(tiff, 2, 42uL, 2, endian); put(tiff, 4, 8uL, 4, endian)
+        put(tiff, 8, 1uL, 2, endian)
+        field(tiff, 10, 0x8769u, 4u, 1u, 26uL, endian)
+        put(tiff, 26, 1uL, 2, endian)
+        field(tiff, 28, 0x9286u, 7u, marker.size.toUInt(), 44uL, endian)
         marker.copyInto(tiff, 44)
         return payload(tiff)
     }
@@ -301,9 +304,9 @@ private class ExifPatchBuilder(private val reader: BinaryReader, private val bud
         val start = checkedInt(entry.entryRange.offset - range.offset)
         original.slice(start, start + 12).copyInto(output, position)
     }
-    private fun markerBytes(): Bytes {
+    private fun markerBytes(terminated: Boolean = true): Bytes {
         budget.retain(checkedMultiply((8 + OplusCommentMarker.Modern.text.length + 1).toULong(), 4uL))
-        return Bytes(("ASCII\u0000\u0000\u0000" + OplusCommentMarker.Modern.text + "\u0000").encodeToByteArray())
+        return Bytes(("ASCII\u0000\u0000\u0000" + OplusCommentMarker.Modern.text + if (terminated) "\u0000" else "").encodeToByteArray())
     }
     private fun payload(tiff: ByteArray): Bytes { val output = ByteArray(tiff.size + 6); exifHeader.copyInto(output, 0); tiff.copyInto(output, 6); return Bytes(output) }
     private fun field(output: ByteArray, position: Int, tag: UInt, type: UInt, count: UInt, value: ULong, endian: Endian) {
