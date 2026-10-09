@@ -29,20 +29,22 @@ internal object WindowsRemux {
             track.samples.size !in 1..64 || track.samples.any { it.presentationTime < 0 || it.decodeTime != it.presentationTime.toULong() })
             fail("CAPABILITY_UNSUPPORTED", "Input is outside the finite single-track non-reordered MP4 profile", Stage.Plan)
         val config = track.codecConfiguration
-        if (config.size < 7 || config[1].toInt() and 255 != 66)
-            fail("CAPABILITY_UNSUPPORTED", "System remux currently verifies Baseline AVC only", Stage.Plan)
+        if (config.size < 7) fail("CAPABILITY_UNSUPPORTED", "System remux requires AVC configuration", Stage.Plan)
+        val profile = config[1].toInt() and 255
+        if (profile !in setOf(66, 77, 100))
+            fail("CAPABILITY_UNSUPPORTED", "System remux verifies finite eight-bit Baseline/Main/High AVC only", Stage.Plan)
         var offset = 6
         repeat(config[5].toInt() and 31) {
             val length = ((config[offset].toInt() and 255) shl 8) or (config[offset + 1].toInt() and 255)
-            if (length < 4 || config[offset + 3].toInt() and 255 != 66)
-                fail("CAPABILITY_UNSUPPORTED", "System remux SPS is outside Baseline", Stage.Plan)
+            if (length < 4 || config[offset + 3].toInt() and 255 != profile)
+                fail("CAPABILITY_UNSUPPORTED", "System remux SPS profile differs from its configuration", Stage.Plan)
             AvcSdrFrameProfile.verify(config.slice(offset + 2, offset + 2 + length), track.width, track.height).orThrow()
             offset += 2 + length
         }
         val ppsCount = config[offset++].toInt() and 255
         repeat(ppsCount) {
             val length = ((config[offset].toInt() and 255) shl 8) or (config[offset + 1].toInt() and 255)
-            AvcSdrFrameProfile.verifyPps(config.slice(offset + 2, offset + 2 + length), 66).orThrow()
+            AvcSdrFrameProfile.verifyPps(config.slice(offset + 2, offset + 2 + length), profile).orThrow()
             offset += 2 + length
         }
         val metadata = RemuxVerification.metadata(reader, before)

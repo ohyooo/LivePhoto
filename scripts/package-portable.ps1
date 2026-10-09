@@ -511,6 +511,21 @@ try {
             $refusedRemux = & $launcher remux --input $packetInput --container Mov --output-dir $movRefusalDirectory
             if ($LASTEXITCODE -ne 3 -or ($refusedRemux | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED' -or (Test-Path (Join-Path $movRefusalDirectory 'assets'))) { throw 'Unsupported system MOV remux must not publish.' }
             Write-Host 'PORTABLE_WINDOWS_API_REMUX=SUCCESS scope=finite-baseline-same-mp4-all-samples-config-metadata-full-decode-no-ffmpeg-not-device'
+            foreach ($profile in @('main', 'high')) {
+                $profileInput = Join-Path $windowsFixtures "remux-$profile.mp4"
+                $profileHash = (Get-FileHash $profileInput).Hash.ToLowerInvariant()
+                if ($profileHash -ne $fixtureManifest["remux-$profile.mp4"]) { throw 'Remux profile fixture differs from independent manifest.' }
+                $profileResultJson = & $launcher remux --input $profileInput --container Mp4 --strict --output-dir (Join-Path $verify "system remux $profile no B frames")
+                if ($LASTEXITCODE -ne 0) { throw "System $profile remux failed: $profileResultJson" }
+                $profileResult = ($profileResultJson | ConvertFrom-Json).result
+                if ($profileResult.output.assets.Count -ne 1 -or (Get-FileHash $profileResult.output.assets[0].path).Hash.ToLowerInvariant() -ne $profileHash -or
+                    -not ($profileResult.execution | Where-Object { $_.backendId -eq 'windows-media-foundation' -and $_.remuxed -and -not $_.transcoded }) -or
+                    ($profileResult.execution | Where-Object { $_.transcoded }) -or
+                    (Get-FileHash $profileInput).Hash.ToLowerInvariant() -ne $profileHash) { throw 'System profile remux did not preserve complete source bytes.' }
+                $profileDecode = & $launcher probe --input $profileResult.output.assets[0].path --decode-check
+                if ($LASTEXITCODE -ne 0 -or -not (($profileDecode | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'System profile remux output did not completely decode.' }
+                Write-Host "PORTABLE_WINDOWS_API_REMUX_PROFILE=SUCCESS profile=$profile scope=finite-no-b-same-mp4-byte-exact-complete-system-decode-not-device"
+            }
         } finally { $env:Path = $savedSearchPath }
         if ((Get-FileHash $packetInput).Hash.ToLowerInvariant() -ne '0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6') { throw 'Private remux experiment changed its input.' }
         Write-Host 'PORTABLE_WINDOWS_API_PRIVATE_REMUX=SUCCESS scope=finite-compressed-packets-exact-vfr-clock-complete-decode-not-public-remux-or-metadata-preservation'

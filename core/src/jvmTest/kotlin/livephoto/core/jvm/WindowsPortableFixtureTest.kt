@@ -27,6 +27,11 @@ class WindowsPortableFixtureTest {
             assertEquals(if (name in setOf("b0", "b2")) 4 else 8, track.samples.size)
             assertEquals(if (name == "audio") 2 else 1, structure.tracks.size)
             if (name == "audio") assertEquals(AudioCodec.Aac, structure.tracks.single { it.handler == "soun" }.audioCodec)
+            if (name.startsWith("remux-")) {
+                assertEquals(if (name == "remux-main") 77 else 100, track.codecConfiguration[1].toInt() and 255)
+                assertTrue(track.samples.all { it.decodeTime == it.presentationTime.toULong() })
+                assertTrue(track.samples.map { it.duration }.distinct().size > 1)
+            }
             val pts = MessageDigest.getInstance("SHA-256")
             track.samples.sortedBy { it.presentationTime }.forEach {
                 val product = Math.multiplyExact(it.presentationTime, 10_000_000L)

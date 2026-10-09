@@ -19,7 +19,16 @@ class WindowsRemuxTest {
         java.util.Base64.getDecoder().decode(it.readNBytes(100_000).toString(Charsets.US_ASCII).trim())
     }
     @Test fun actualCoreRemuxPublishesOnlyFullyVerifiedSameMp4(): Unit = runImmediate {
-        val backend = backend(); val bytes = bytes()
+        checkCoreRemux("baseline")
+    }
+    @Test fun actualMainProfileNoBRemuxPreservesAllPacketsAndMetadata(): Unit = runImmediate {
+        checkCoreRemux("main")
+    }
+    @Test fun actualHighEightBitNoBRemuxPreservesAllPacketsAndMetadata(): Unit = runImmediate {
+        checkCoreRemux("high")
+    }
+    private suspend fun checkCoreRemux(profile: String) {
+        val backend = backend(); val bytes = if (profile == "baseline") bytes() else WindowsEncodedFixtures.bytes("remux-$profile")
         val source = MemoryBinarySource(Bytes(bytes), SourceId("system-remux-baseline"))
         val tx = MemoryOutputTransaction(context, "system-remux-positive")
         val policy = MutationPolicy(preservation = PreservationPolicy.Strict, requiredGuarantees = listOf(Guarantee.BitstreamPreserving, Guarantee.MetadataPreserving))
@@ -34,6 +43,8 @@ class WindowsRemuxTest {
                 assertEquals(GuaranteeOutcome.Verified, result.preservation.records.single { it.guarantee == guarantee }.outcome)
             val input = BinaryReader(source, context); val output = BinaryReader(result.output.assets.single().readableSource!!, context)
             val before = BmffVideoProbe(input).probe(ByteRange(0uL, bytes.size.toULong())).orThrow()
+            assertEquals(when (profile) { "baseline" -> 66; "main" -> 77; else -> 100 }, before.tracks.single().codecConfiguration[1].toInt() and 255)
+            assertTrue(before.tracks.single().samples.all { it.decodeTime == it.presentationTime.toULong() })
             val after = BmffVideoProbe(output).probe(ByteRange(0uL, output.identity().orThrow().size)).orThrow()
             RemuxVerification.verify(input, before, output, after)
             RemuxVerification.verifyMetadata(RemuxVerification.metadata(input, before), RemuxVerification.metadata(output, after))
@@ -46,8 +57,11 @@ class WindowsRemuxTest {
         val main = javaClass.getResourceAsStream("/windows-media/frame-main.mp4.base64")!!.use {
             java.util.Base64.getDecoder().decode(it.readNBytes(100_000).toString(Charsets.US_ASCII).trim())
         }
+        val high = javaClass.getResourceAsStream("/windows-media/frame-high.mp4.base64")!!.use {
+            java.util.Base64.getDecoder().decode(it.readNBytes(100_000).toString(Charsets.US_ASCII).trim())
+        }
         for ((data, target, jobContext) in listOf(
-            Triple(baseline, VideoContainer.Mov, context), Triple(main, VideoContainer.Mp4, context),
+            Triple(baseline, VideoContainer.Mov, context), Triple(main, VideoContainer.Mp4, context), Triple(high, VideoContainer.Mp4, context),
             Triple(WindowsEncodedFixtures.bytes("audio"), VideoContainer.Mp4, context),
             Triple(baseline, VideoContainer.Mp4, context.copy(limits = context.limits.copy(maxSpoolBytes = 1uL))),
             Triple(baseline, VideoContainer.Mp4, context.copy(cancellation = Cancellation { true })))) {

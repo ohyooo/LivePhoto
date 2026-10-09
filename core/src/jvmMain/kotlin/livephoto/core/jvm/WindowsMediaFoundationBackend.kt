@@ -19,7 +19,7 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
             Condition(ConditionOperator.Equals, "frameProfile", Value.Text("single-avc-baseline-main-high-proven-8bit-420-no-custom-scaling-no-audio-even-48-to-1024-at-most-64-exact-100ns-frames-bt709-limited-progressive-square-left-jpeg")),
             Condition(ConditionOperator.Equals, "imageQuality", Value.Text("default-or-0-to-100-mapped-to-JDK-JPEG-compressionQuality-divided-by-100-not-lossless-or-backend-equivalent"))))) +
         listOf(CapabilityEntry(Operation.Remux, Implementation.Experimental, conditions = listOf(
-            Condition(ConditionOperator.Equals, "remuxProfile", Value.Text("same-mp4-single-baseline-avc-no-audio-no-reorder-48-to-1024-at-most-64-exact-contiguous-100ns-frames-8MB-classified-source-envelope")),
+            Condition(ConditionOperator.Equals, "remuxProfile", Value.Text("same-mp4-single-baseline-main-high-proven-8bit-420-avc-no-custom-scaling-no-audio-no-reorder-48-to-1024-at-most-64-exact-contiguous-100ns-frames-8MB-classified-source-envelope")),
             Condition(ConditionOperator.Equals, "verification", Value.Text("actual-os-compressed-packets-source-envelope-restored-all-samples-config-metadata-and-full-finite-os-decode-no-transcode"))))) +
         listOf(Operation.Trim, Operation.Transcode).map {
             CapabilityEntry(it, Implementation.Unsupported, reasons = listOf(IssueCode("CAPABILITY_UNSUPPORTED")))

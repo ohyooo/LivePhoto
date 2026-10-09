@@ -1,4 +1,11 @@
 Synthetic 64x64 AVC fixtures generated with an existing FFmpeg installation.
+remux-main.mp4 / remux-high.mp4: eight synthetic VFR frames with explicit
+BT.709 limited-range/progressive/square-pixel AVC, no B frames or auxiliary SEI.
+Each fixture was completely decoded independently; system sample-copy has
+separate Core tests checking all packets/configuration/timeline/metadata and
+complete OS decode. These are not camera originals or cross-container proof.
+Main SHA256: be48fea2d56bb357d2f7370f3efc9462171d4d47d61451d35b3a8c9d78cc56e6
+High SHA256: 8329be87e2c14118940765fcc24790b780e578d66379ce8f6d913a9c27b9c782
 These are not vendor/device originals; no private host or installation path is required.
 Base64 text is decoded and SHA-256 checked by WindowsEncodedFixtures.
 Actual OS decoding has separate WindowsNativeVideoDecodeTest coverage.

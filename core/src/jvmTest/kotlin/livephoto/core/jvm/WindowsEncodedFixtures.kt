@@ -15,6 +15,8 @@ internal object WindowsEncodedFixtures {
         "b2" to "694034d7f2d596db0d78357a09cab978f3b378d987acbbf030f191fb2a62df04",
         "vfr" to "5794679eb6e8a821f69e91ca1f783dac0a6c025bce7df6494754fc6fd5ffa72c",
         "audio" to "534546446072e5fbbbd48dc83d8ccd1497e5a465ed76b795552c823cf74a76d5",
+        "remux-main" to "be48fea2d56bb357d2f7370f3efc9462171d4d47d61451d35b3a8c9d78cc56e6",
+        "remux-high" to "8329be87e2c14118940765fcc24790b780e578d66379ce8f6d913a9c27b9c782",
     )
     fun bytes(name: String): ByteArray {
         val expected = hashes.getValue(name)
