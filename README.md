@@ -456,6 +456,8 @@ Baseline 实际像素与全 profile PPS 验收：新全量 **774 tests，0 failu
 
 Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / errors / skips**，119 份报告均属本轮；新完整 Windows 便携验收与内置 helper 的无 FFmpeg 完整解码通过。有限 Baseline/VFR 压缩样本逐字节、PTS/duration/sync 及源不变已验证，附加音轨和既有输出被拒绝。曾发现系统默认时钟把 40 ms 量化，现使用独立源时间表和可精确表达的有限整数 Hz 网格，不推算或固定 VFR 的呈现位置。**这只是内部前置，不提供公开系统 remux；普通 metadata、配置、轨道集合和完整 Core 保真门禁仍待实现。** 公开 `Remux` 继续 `Unsupported`，不能将私有实验成功当作该能力完成；CI/产物按对应提交检查。
 
+后续同容器保留实验：新全量 **782 tests，0 failures / errors / skips**，120 份报告均属本轮。单轨、无重排 MP4 的源 metadata 先严格分类；真实 Windows 后端样本逐字节和时间线验证后，与原容器头重组，完整 decoder configuration、普通 metadata、轨道和样本再次独立核对。后端新增的 UUID 不替代源 metadata；未知源字段、附加轨道、样本变化、预算不足和取消均保持门禁。**仍为内部实验，不是跨容器转换，也没有开放公开系统 remux。**
+
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
 - 完整验收 **706 tests，0 failures / errors / skips**；结果对应上述提交，不借用旧报告。
@@ -541,6 +543,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] 有限 MOV `nclc` 抽帧扩展：独立 SPS range 与容器色彩一致性检查，实际 High MOV 八帧逐字节及 JPEG 回读；771 项全量和无 FFmpeg 三 profile 完整便携验收通过。不开放未知色彩或通用 MOV 支持。
 - [x] Baseline 实际八帧像素和全 profile PPS 验收：774 项全量及无 FFmpeg 四 profile 完整便携验收通过；Baseline 不借用 CABAC/加权预测或 High transform 授权。
 - [x] Windows 系统 remux 内部前置：有限压缩样本/VFR 精确时钟、附加音轨拒绝、源不变与禁止覆盖；776 项全量和新完整便携验收通过。不是公开 remux 或普通 metadata 保真证明。
+- [x] 内部单轨 MP4 容器头保留：实际系统样本重组与完整 Core metadata/configuration/时间线回读，782 项全量通过；不是公开系统 remux 或跨容器 muxer。
 - [ ] 接入公开系统 remux 前，补齐普通 metadata、decoder configuration、轨道集合/顺序和逐 sample 全部 Core 后置验证；不能靠丢字段或放宽时间线检查开放能力。B 帧/复杂 edits/更多容器仍需独立证据。
 - [ ] 扩展 Windows 抽帧 profile、系统裁剪/remux/transcode；macOS/其它平台官方 API 后端。未知 HDR/布局及没有合格后端的操作继续禁用，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。

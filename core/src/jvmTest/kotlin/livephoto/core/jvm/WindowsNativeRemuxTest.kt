@@ -71,8 +71,16 @@ class WindowsNativeRemuxTest {
                     assertEquals(0, Time(a.duration.toLong(), left.timescale).compareTo(Time(b.duration.toLong(), right.timescale)), "Duration ${a.decodeTime}: ${a.duration}/${left.timescale} -> ${b.duration}/${right.timescale}")
                     assertEquals(a.isSync, b.isSync, "Sync flags")
                 }
-                // These checks do not assert that ordinary container metadata survived.
-                // Public remux stays disabled until its stronger Core postconditions are met.
+                // Native metadata is not accepted as preservation evidence. Restore the
+                // classified source envelope using verified native packets, then independently
+                // verify the complete result. This remains a same-MP4 internal experiment.
+                val restored = TestSink()
+                RemuxEnvelopeRestoration.write(beforeReader, afterReader, restored).orThrow()
+                assertContentEquals(bytes, restored.written.toByteArray(), "Classified source envelope plus actual native packets")
+                val restoredReader = BinaryReader(livephoto.core.memory.MemoryBinarySource(Bytes(restored.written.toByteArray()), SourceId("restored-native-packets")), context)
+                val restoredFacts = BmffVideoProbe(restoredReader).probe(ByteRange(0uL, bytes.size.toULong())).orThrow()
+                RemuxVerification.verify(beforeReader, before, restoredReader, restoredFacts)
+                RemuxVerification.verifyMetadata(RemuxVerification.metadata(beforeReader, before), RemuxVerification.metadata(restoredReader, restoredFacts))
             } finally { target.close(); source.close() }
             val produced = Files.readAllBytes(output)
             val refused = ExternalProcess.run(command, 30_000, context)
