@@ -258,6 +258,25 @@ try {
         if ($LASTEXITCODE -ne 3 -or ($textStrictJson | ConvertFrom-Json).error.code.value -ne 'PRESERVATION_REQUIREMENT_FAILED' -or (Test-Path (Join-Path $textStrictDir 'assets'))) { throw 'First text Clean must not borrow repeated-copy Strict evidence.' }
         Write-Host "PORTABLE_APPLE_ORDINARY_TEXT_CLEAN=SUCCESS container=$textContainer profile=$textLabel scope=raw-directory-preserved-neutral-copy-exact-first-clean-unknown"
     }
+    foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) { foreach ($googleProtocol in @('google.microvideo.v1', 'google.motionphoto.v2')) {
+        $label = "$endian-$container-$googleProtocol"
+        $sourceJson = & $launcher create --image (Join-Path $ordinaryExifFixtures "ordinary-$endian.jpg") --video (Join-Path $ordinaryExifFixtures "motion.$container") --target $googleProtocol --output-dir (Join-Path $verify "ordinary EXIF Google source $label")
+        if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF Google source creation failed.' }
+        $source = ($sourceJson | ConvertFrom-Json).result.output.assets[0].path
+        $sourceHash = (Get-FileHash $source).Hash
+        $convertedJson = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" --output-dir (Join-Path $verify "ordinary EXIF Apple conversion $label")
+        if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF Apple conversion failed.' }
+        $converted = ($convertedJson | ConvertFrom-Json).result
+        if (@($converted.output.assets).Count -ne 2 -or ($converted.execution | Where-Object { $_.remuxed -or $_.transcoded }) -or
+            -not ($converted.preservation.records | Where-Object { $_.guarantee -eq 'MetadataPreserving' -and $_.outcome -eq 'Unknown' })) { throw 'EXIF conversion scope was misreported.' }
+        $validated = & $launcher validate --input $converted.output.assets[0].path --pair-video $converted.output.assets[1].path --layers Structure,Protocol
+        if ($LASTEXITCODE -ne 0 -or ($validated | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Converted EXIF pair validation failed.' }
+        $strictDir = Join-Path $verify "ordinary EXIF strict conversion $label"
+        $blocked = & $launcher convert --input $source --target apple.livephoto --profile "jpeg-$container" --strict --output-dir $strictDir
+        if ($LASTEXITCODE -ne 3 -or ($blocked | ConvertFrom-Json).error.code.value -ne 'PRESERVATION_REQUIREMENT_FAILED' -or (Test-Path (Join-Path $strictDir 'assets'))) { throw 'Unknown conversion associations must refuse Strict without assets.' }
+        if ((Get-FileHash $source).Hash -ne $sourceHash) { throw 'EXIF conversion changed its source.' }
+        Write-Host "PORTABLE_APPLE_ORDINARY_EXIF_CONVERT=SUCCESS profile=$label scope=unchanged-standard-source-exif-first-conversion-unknown-not-device-proof"
+    } } }
     $ordinaryExifRejected = Join-Path $verify 'Apple ordinary EXIF reject private note'
     $rejectedJson = & $launcher create --image (Join-Path $ordinaryExifFixtures 'private-note.jpg') --video (Join-Path $ordinaryExifFixtures 'motion.mp4') --target apple.livephoto --profile jpeg-mp4 --strict --output-dir $ordinaryExifRejected
     if ($LASTEXITCODE -ne 3 -or ($rejectedJson | ConvertFrom-Json).error.code.value -ne 'UNSAFE_METADATA_REWRITE' -or (Test-Path (Join-Path $ordinaryExifRejected 'assets'))) { throw 'Private MakerNote must remain blocked without published assets.' }

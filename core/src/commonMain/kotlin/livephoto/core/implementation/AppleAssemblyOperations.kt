@@ -4,6 +4,7 @@ import livephoto.core.*
 import livephoto.core.apple.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
+import livephoto.core.exif.ExifPositionIndependenceProof
 import livephoto.core.jpeg.*
 import kotlin.uuid.Uuid
 
@@ -48,8 +49,7 @@ internal object AppleAssemblyOperations {
             if (request.sourceBindings == SourceBindingPolicy.RejectAlreadyLive) "SOURCE_ALREADY_LIVE" else "CAPABILITY_UNSUPPORTED",
             "Ordinary-media Apple Create cannot silently strip an existing live binding", Stage.Plan)
         val jpeg = image.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion currently requires JPEG", Stage.Plan)
-        if (!request.creating && jpeg.hasExif)
-            fail("UNSAFE_METADATA_REWRITE", "Converted source EXIF still needs an independent source-cleanup preservation proof", Stage.Plan)
+        if (!request.creating && jpeg.hasExif) verifySourceExif(original, image, budget)
         val jfif = ReplaceOperations.canonicalJfif(image)
         if (image.bindings.isNotEmpty() || jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown && it != jfif })
             fail("UNSAFE_METADATA_REWRITE", "Apple assembly cannot relocate unclassified APP or retain a source image binding", Stage.Plan)
@@ -85,6 +85,26 @@ internal object AppleAssemblyOperations {
             val bytes = Bytes(field.encodeToByteArray()); hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes)
         }
         return Prepared(image, rewrite, movie, unknown, Snapshot(identities, GenerationToken(hash.finish().value)))
+    }
+
+    /** Source cleanup and new CID append are separate proofs. Only unchanged standard Google JPEG EXIF is admitted. */
+    private suspend fun verifySourceExif(original: SourceSession?, clean: SourceSession, budget: ParseBudget) {
+        val source = original ?: fail("UNSAFE_METADATA_REWRITE", "Conversion EXIF requires its original source snapshot", Stage.Plan)
+        if (source.applePair != null || source.legacyPair != null ||
+            source.inspection.detection.primaryProtocol?.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) ||
+            source.bindings.size != 1)
+            fail("UNSAFE_METADATA_REWRITE", "This source protocol has no unchanged-EXIF conversion proof", Stage.Plan)
+        val before = source.jpeg?.segments?.singleOrNull { it.payloadKind == AppPayloadKind.Exif }?.payload
+            ?: fail("UNSAFE_METADATA_REWRITE", "Conversion needs one original EXIF payload", Stage.Plan)
+        val after = clean.jpeg?.segments?.singleOrNull { it.payloadKind == AppPayloadKind.Exif }?.payload
+            ?: fail("UNSAFE_METADATA_REWRITE", "Conversion needs one cleaned EXIF payload", Stage.Plan)
+        if (before.length != after.length || sha256Range(source.reader, before).orThrow() != sha256Range(clean.reader, after).orThrow())
+            fail("POSTCONDITION_FAILED", "Source-binding cleanup changed EXIF bytes before Apple assembly", Stage.Verify)
+        // No private MakerNote, unknown tags/types, aliases, thumbnail offsets or nonzero unclassified slack.
+        ExifPositionIndependenceProof.prove(source.reader, ByteRange(before.offset + 6uL, before.length - 6uL), budget).orThrow()
+        ExifPositionIndependenceProof.prove(clean.reader, ByteRange(after.offset + 6uL, after.length - 6uL), budget).orThrow()
+        source.recheck(); clean.recheck()
+        // This does not upgrade the original source's Unknown metadata-association outcome to Verified.
     }
 
     suspend fun plan(request: ConvertRequest, original: SourceSession, inputs: Pair<BinarySource, BinarySource>): CoreResult<ExecutionPlan> = attempt {

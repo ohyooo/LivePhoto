@@ -91,9 +91,10 @@ class AppleConvertTest {
     }
 
     @Test fun unknownSourceExifAndNonatomicOrUnimplementedTargetsAreRefusedBeforeStaging(): Unit = runImmediate {
-        val ordinaryExif = GoogleFixtures.segment(0xe1, "Exif\u0000\u0000".encodeToByteArray() +
-            byteArrayOf(77, 77, 0, 42) + GoogleFixtures.u32(8u) + byteArrayOf(0, 0) + GoogleFixtures.u32(0u))
-        val bytes = GoogleFixtures.v2Photo().let { it.copyOfRange(0, 2) + ordinaryExif + it.copyOfRange(2, it.size) }
+        val unknownExif = GoogleFixtures.segment(0xe1, "Exif\u0000\u0000".encodeToByteArray() +
+            byteArrayOf(77, 77, 0, 42) + GoogleFixtures.u32(8u) + byteArrayOf(0, 1, 0xc7.toByte(), 0xa1.toByte(), 0, 4) +
+            GoogleFixtures.u32(1u) + GoogleFixtures.u32(7u) + GoogleFixtures.u32(0u))
+        val bytes = GoogleFixtures.v2Photo().let { it.copyOfRange(0, 2) + unknownExif + it.copyOfRange(2, it.size) }
         val output = MemoryOutputTransaction(context, "apple-unknown-exif")
         assertEquals("UNSAFE_METADATA_REWRITE", assertIs<CoreResult.Failure>(core.convert(ConvertRequest(SourceSet.Single(source(bytes)), target, output = output, context = context))).error.code.value)
         assertTrue(output.query().orThrow().assetIds.isEmpty())

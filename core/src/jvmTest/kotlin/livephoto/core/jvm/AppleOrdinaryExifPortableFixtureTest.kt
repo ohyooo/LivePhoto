@@ -65,6 +65,33 @@ class AppleOrdinaryExifPortableFixtureTest {
             clean.output.assets.forEach { it.readableSource?.close() }; repeated.output.assets.forEach { it.readableSource?.close() }
             ordinaryResult.output.assets.forEach { it.readableSource?.close() }; ordinary.close()
         }
+        for (endian in listOf("big", "little")) for (container in listOf("mp4", "mov")) for (protocol in listOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2)) {
+            val image = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-$endian.jpg")), SourceId("conversion-image"))
+            val movie = MemoryBinarySource(Bytes(fixtures.getValue("motion.$container")), SourceId("conversion-video"))
+            val core = DefaultLivePhotoCore()
+            val google = core.create(CreateRequest(image, movie, ProtocolSelector(protocol),
+                output = MemoryOutputTransaction(context, "ordinary-google"), context = context)).orThrow()
+            val live = google.output.assets.single().readableSource!!
+            val converted = core.convert(ConvertRequest(SourceSet.Single(live), ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-$container")),
+                output = MemoryOutputTransaction(context, "ordinary-apple-convert"), context = context)).orThrow()
+            assertEquals(Verdict.Valid, converted.validation.verdict)
+            assertTrue(converted.execution.none { it.remuxed || it.transcoded })
+            assertTrue(converted.preservation.records.any { it.guarantee == Guarantee.MetadataPreserving && it.outcome == GuaranteeOutcome.Unknown })
+            val afterReader = BinaryReader(converted.output.assets[0].readableSource!!, context)
+            val payload = livephoto.core.jpeg.JpegParser.parse(afterReader).orThrow().segments.single { it.payloadKind == livephoto.core.jpeg.AppPayloadKind.Exif }.payload!!
+            val after = livephoto.core.exif.TiffReader(afterReader).read(ByteRange(payload.offset + 6uL, payload.length - 6uL)).orThrow()
+            val beforeReader = BinaryReader(image, context)
+            val beforePayload = livephoto.core.jpeg.JpegParser.parse(beforeReader).orThrow().segments.single { it.payloadKind == livephoto.core.jpeg.AppPayloadKind.Exif }.payload!!
+            val before = livephoto.core.exif.TiffReader(beforeReader).read(ByteRange(beforePayload.offset + 6uL, beforePayload.length - 6uL)).orThrow()
+            for (field in before.ifds.flatMap { it.entries }.filter { it.tag != 0x8769u.toUShort() })
+                assertEquals(field.value, after.ifds.flatMap { it.entries }.single { it.tag == field.tag }.value)
+            val blocked = MemoryOutputTransaction(context, "ordinary-strict-convert")
+            assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.convert(ConvertRequest(SourceSet.Single(live),
+                ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-$container")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                output = blocked, context = context))).error.code)
+            assertTrue(blocked.query().orThrow().assetIds.isEmpty())
+            converted.output.assets.forEach { it.readableSource?.close() }; google.output.assets.forEach { it.readableSource?.close() }; image.close(); movie.close()
+        }
         val directory = Path.of("build", "portable-apple-ordinary-exif-fixtures")
         Files.createDirectories(directory)
         val manifest = StringBuilder("scope=synthetic-ordinary-exif-pair-not-device-proof\nrunId=${UUID.randomUUID()}\n")

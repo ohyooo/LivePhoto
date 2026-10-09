@@ -163,7 +163,7 @@ Linux（Bash/Zsh）：
 
 `set-key` 修改协议意义的 key/presentation 位置，**不会重新生成封面图**。Apple 修改入口只接受已确认的有限结构，不能将任意相机原片视为可写。
 
-普通媒体创建 Apple 默认使用有限 `jpeg-mov` profile，并满足 JPEG metadata 与原视频容器的分类门禁。输入必须是已分类的普通 JPEG＋MOV；允许一份经安全模型验证的标准 EXIF，保留 GPS、方向和普通 UserComment。不接受已有 Live Photo、已有 MakerNote、缩略图/未知引用、不明非零 metadata 空隙或无法安全合并的字段。该扩展仅用于普通媒体 Create，Convert 的来源清理门禁不变：
+普通媒体创建 Apple 默认使用有限 `jpeg-mov` profile，并满足 JPEG metadata 与原视频容器的分类门禁。输入必须是已分类的普通 JPEG＋MOV；允许一份经安全模型验证的标准 EXIF，保留 GPS、方向和普通 UserComment。不接受已有 Live Photo、已有 MakerNote、缩略图/未知引用、不明非零 metadata 空隙或无法安全合并的字段。Create 的标准 EXIF 证明不能单独授权 Convert 的来源清理：
 
 Windows（PowerShell）：
 
@@ -186,6 +186,20 @@ Linux（Bash/Zsh）：
 还支持 FFmpeg `use_metadata_tags` 的有限 `moov/udta/meta` 普通文本：仅 `title/artist/comment/encoder/copyright`，唯一 `mdta` 键、完整一对一的 1-based 值索引，UTF-8 类型 1、locale=0，非空且不超过 64 KiB。目录整体原样保留，不能混入 CID、still-image-time 或私有字段；不开放电影级 Apple metadata 合并、混合 timed metadata 或通用键表改写。
 
 **已知 FFprobe 展示差异：** 本轮索引式文本素材在追加 Apple CID 后，FFprobe 将普通标题显示成“原标题 + CID”，但 Core 独立校验确认原目录字节未变；Clean 后四个普通标签回读准确。FFmpeg 的 [MOV 读取器](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/mov.c)只加载首个 metadata keys 表，这与观察一致，不能据此声称所有工具或相册正确处理多个 metadata 作用域。该兼容项仍待后续验收，不通过删除普通字段规避。
+
+Google V1/V2 JPEG 的标准 EXIF 现可用于有限 Apple 转换：要求一个明确源绑定，清除源绑定前后的 EXIF payload 完整字节一致，且两侧都通过标准字段/位置独立性检查。保留字节序、GPS、方向、普通 UserComment、外置值的 TIFF 相对位置、图像编码、视频样本及已知 key；目标须显式 `jpeg-mov` 或 `jpeg-mp4` 并匹配原视频容器，不转码或重封装。来源的未知 metadata 关联仍报告 `MetadataPreserving=Unknown`，因此此路径不能加 `--strict`。已有 MakerNote、私有字段、缩略图、未知引用和其它含 EXIF 的来源协议仍拒绝。
+
+Windows：
+
+```powershell
+.\LivePhoto\LivePhoto.exe convert --input '.\google-motion.jpg' --target apple.livephoto --profile jpeg-mp4 --output-dir '.\out-apple-convert'
+```
+
+Linux：
+
+```sh
+./LivePhoto/bin/LivePhoto convert --input './google-motion.jpg' --target apple.livephoto --profile jpeg-mp4 --output-dir './out-apple-convert'
+```
 
 ### 修复：先预览，再明确写入
 
@@ -434,6 +448,8 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 ## 进度、已完成与 TODO
 
+Google 标准 EXIF → Apple：新全量 **831 tests，810 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。独立验证来源清理未改 EXIF、普通字段/偏移/编码/样本/key 保留、私有数据拒绝和视图/staging 篡改回滚。新完整 Windows 无 FFmpeg 便携包通过两协议×两字节序×两容器的 8 组转换/配对验证/严格拒绝；另用已有 FFmpeg 完整解码 8 个生成视频。来源未知关联继续报告，不代表其它来源、HEIC/MakerNote 写入或设备认证；对应发布结果见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)。
+
 Apple 有限索引式普通文本：新全量 **826 tests，805 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。真实编码 MP4 与合成正反例验证严格 Create、目录/样本原样保留、Clean/转换、严格重复复制及整对篡改回滚；未知键/namespace、重复键、缺失/重复/越界索引和非法编码仍拒绝。新完整 Windows 无 FFmpeg 便携包对三种文本格式逐项验收通过，另用已有 FFmpeg 完整解码其 9 个生成视频，Clean/repeat 普通标签回读准确；发布结果按对应提交检查。不等同于通用 mdta 写入或设备认证，FFprobe 的成对标题展示差异见上文。
 
 ### 最新可核验检查点
@@ -514,7 +530,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 纯协议能力及统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；运行时查询实际能力 | 更多 FFmpeg 媒体 profile 与三平台真实验收；最后移动端系统媒体 API |
@@ -574,6 +590,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] 扩展其它有明确规范证据的媒体时间线变体及 Apple MakerNote 兼容读取。当前 Apple 固定素材的 IFD0 MakerNote 不取得正式 ExifIFD 权威；保持读写边界，不自动授权旧结构改写。
 - [x] Apple JPEG/HEIC CID 的 EXIF 已知范围归属检查：大小端、普通独立字段、整块/部分共享范围及 Repair 零输出回归；808 项本轮全量与完整 Windows 便携验收通过。未知字段类型/私有内部引用仍不获得写入权限。
 - [x] Apple 普通标准 EXIF Create：813 项本轮全量和完整 Windows 便携验收通过，大小端/GPS/方向/UserComment/原值位置保持、无 ExifIFD 追加、私有数据拒绝与整对回滚；仅有限 JPEG＋原 MOV/MP4，不开放已有 MakerNote 合并或 Convert 来源清理。
+- [x] Google V1/V2 标准 EXIF→Apple：831 项新全量及新完整 Windows 8 组合便携验收、8 视频完整解码通过；来源清理与追加独立证明，未知关联/严格拒绝边界保留。
+- [ ] 其它含 EXIF 来源的 Apple 转换与 Normalize：按各协议分别证明清理 ownership 和普通字段保留，不能直接借用 Google 路径；已有 MakerNote 合并仍未实现。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。raw 保留的追加装配与读取不授权 remux/trim/transcode 改写。
 - [x] Apple 有限普通文本 Clean/Split 与 Apple→Google：821 项新全量，800 项执行成功、21 项历史系统专项跳过；选择性清除 CID/专用轨、原目录/样本保留、再次 Split 整文件复制；首次 Unknown 与严格拒绝、篡改回滚及转换后原样提取回归通过。
