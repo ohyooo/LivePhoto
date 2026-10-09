@@ -33,7 +33,10 @@ $destinationPath = [IO.Path]::GetFullPath($Destination)
 $imageParent = Join-Path $destinationPath "image-$Platform"
 if (Test-Path $imageParent) { throw 'Package image destination already exists; use a fresh destination.' }
 New-Item -ItemType Directory -Path $imageParent -Force | Out-Null
-$packageArgs = @('--type', 'app-image', '--name', 'LivePhoto', '--app-version', '0.1.0',
+# macOS jpackage requires a positive first version component. This is the bundle's
+# packaging version, not the CLI/API version (which remains 0.1.0).
+$bundleVersion = if ($IsMacOS) { '1.0.0' } else { '0.1.0' }
+$packageArgs = @('--type', 'app-image', '--name', 'LivePhoto', '--app-version', $bundleVersion,
     '--input', $inputLib, '--main-jar', 'livephoto-cli.jar', '--main-class', 'livephoto.cli.MainKt',
     '--add-modules', 'java.base,java.desktop', '--java-options', '-Djava.awt.headless=true', '--dest', $imageParent)
 if ($IsWindows) {
