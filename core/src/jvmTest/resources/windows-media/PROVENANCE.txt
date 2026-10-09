@@ -15,6 +15,11 @@ setup with High-profile eight-bit 4:2:0 AVC. Each selected frame is independentl
 compared; High10/422/444 and custom scaling matrices are not authorized.
 MP4 SHA256: 1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39
 NV12 SHA256: 0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14
+frame-high.mov: finite QuickTime nclc carrier produced by explicit sample-copy
+remux of frame-high.mp4, no video encoding. Range remains independently proven
+by SPS/VUI, not inferred from the absent nclc range field. Same independent
+NV12 baseline; no camera or general MOV compatibility claim.
+MOV SHA256: 5929ddf215c236013abb1dff65c2c3537a878fe4c2ad40fa0af7e46ada2efe19
 frame-unknown.mp4: container says BT.709, but SPS primaries/transfer are
 unspecified (2). Must be rejected before output; container labels alone are
 not an SDR authorization. SHA256:

@@ -450,6 +450,8 @@ Windows 有限系统 SDR 抽帧：新远程全量 **764 tests，0 failures / err
 
 后续 High 8-bit 扩展：新远程全量 **769 tests，0 failures / errors / skips**，118 份报告均属本轮。独立证明 High SPS 的 8-bit/4:2:0 和有限 PPS；不以 profile 名称推定 SDR。Main/High 两组各 8 个实际 B/VFR 帧逐字节核对独立 NV12 解码基准，Core JPEG/源不变/预算与取消门禁保持。新完整便携验收在无 FFmpeg、空 PATH 的媒体处理段通过两组像素/PTS/JPEG，并准确拒绝不允许丢弃普通 metadata 的替换请求；仅有限 Experimental，发布状态按对应提交 Actions 检查。
 
+有限 MOV 抽帧色彩扩展：新全量 **771 tests，0 failures / errors / skips**，118 份报告均属本轮；完整 Windows 便携验收通过 Main/High/High-MOV 三组实际像素、PTS 与 JPEG。只接受 MOV 中精确长度、三个 BT.709 索引的 `nclc`，范围仍由独立 SPS/VUI 证明；不从缺失 range 位推定 limited。MP4 中的 `nclc`、未知索引、ICC、错误长度和范围冲突继续拒绝。合成 MOV 的完整媒体解码已验证，不算相机或真机认证；该提交 CI/产物另按 Actions 检查。
+
 截至 **2026-10-08**，代码检查点 [`30454b9`](https://github.com/ohyooo/LivePhoto/commit/30454b9b32678999bae284a812875e2cef3f5e12)：
 
 - 完整验收 **706 tests，0 failures / errors / skips**；结果对应上述提交，不借用旧报告。
@@ -532,6 +534,7 @@ Windows 有限系统 SDR 抽帧：新远程全量 **764 tests，0 failures / err
 - [x] Windows 真实解码缓冲区读取前置：758 项全量测试、新完整 Windows 便携包、对应两平台 CI 与 6 个 artifacts 已验收；不是已完成抽帧。
 - [x] Windows 有限 SDR 系统抽帧实现及 NAS/便携验收：紧密 NV12、独立 SPS/VUI/容器色彩门禁、完整呈现时间线与实际帧像素、JPEG 回读、源不变与原子发布；764 项全量通过，空 PATH 便携入口通过。CI 发布状态按上述对应提交 Actions 检查；不是通用 AVC/HDR/真机支持。
 - [x] 有限 High 8-bit/4:2:0 抽帧扩展：SPS/PPS 独立门禁、实际八帧像素和 JPEG 回读；新 769 项全量及无 FFmpeg 双 profile 便携验收通过。不开放 High10/422/444、自定义 scaling matrix 或 HDR。
+- [x] 有限 MOV `nclc` 抽帧扩展：独立 SPS range 与容器色彩一致性检查，实际 High MOV 八帧逐字节及 JPEG 回读；771 项全量和无 FFmpeg 三 profile 完整便携验收通过。不开放未知色彩或通用 MOV 支持。
 - [ ] 扩展 Windows 抽帧 profile、系统裁剪/remux/transcode；macOS/其它平台官方 API 后端。未知 HDR/布局及没有合格后端的操作继续禁用，不自动安装工具。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [ ] 恢复 macOS ARM64 runner 前置条件与真实打包验收；不以 Intel Mac 或 Windows/Linux ARM 替代。

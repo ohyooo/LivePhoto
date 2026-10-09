@@ -68,7 +68,7 @@ internal object WindowsFrame {
                 fail("HDR_PRESERVATION_UNAVAILABLE", "System frame cannot interpret auxiliary SEI or changing parameter sets", Stage.Plan)
         }
         RemuxVerification.metadata(reader, video)
-        verifyVisualMetadata(reader, range)
+        verifyVisualMetadata(reader, range, video.container)
         val matrix = Bytes(unsignedBytes(0x10000uL, 4, Endian.Big).toByteArray() + ByteArray(12) +
             unsignedBytes(0x10000uL, 4, Endian.Big).toByteArray() + ByteArray(12) + unsignedBytes(0x40000000uL, 4, Endian.Big).toByteArray())
         if (track.transform != matrix || track.displayWidthFixed.toULong() != track.width.toULong() * 65536uL ||
@@ -174,7 +174,7 @@ internal object WindowsFrame {
             if (failed) fail("IO_WRITE_FAILED", "System frame temporary cleanup failed", Stage.EncodeImage)
         }
     }
-    private suspend fun verifyVisualMetadata(reader: BinaryReader, range: ByteRange) {
+    private suspend fun verifyVisualMetadata(reader: BinaryReader, range: ByteRange, container: VideoContainer) {
         val boxes = BmffReader(reader)
         var children = boxes.readBoxes(range).orThrow()
         var depth = 0u
@@ -195,10 +195,7 @@ internal object WindowsFrame {
                 }
                 "colr" -> {
                     val bytes = reader.readExactly(box.payload.offset, checkedInt(box.payload.length).toUInt()).orThrow()
-                    if (bytes.size != 11 || bytes.slice(0, 4) != Bytes("nclx".encodeToByteArray()) ||
-                        readUnsigned(bytes.slice(4, 6), Endian.Big) != 1uL || readUnsigned(bytes.slice(6, 8), Endian.Big) != 1uL ||
-                        readUnsigned(bytes.slice(8, 10), Endian.Big) != 1uL || bytes[10] != 0.toByte())
-                        fail("HDR_PRESERVATION_UNAVAILABLE", "Container color properties contradict the finite SPS profile", Stage.Plan)
+                    AvcSdrFrameProfile.verifyContainerColour(bytes, container).orThrow()
                 }
                 else -> fail("HDR_PRESERVATION_UNAVAILABLE", "System frame cannot discard aperture, field, HDR or auxiliary interpretation", Stage.Plan)
             }

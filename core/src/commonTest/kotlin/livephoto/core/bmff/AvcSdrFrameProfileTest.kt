@@ -60,6 +60,20 @@ class AvcSdrFrameProfileTest {
         assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyHighPps(Bytes(byteArrayOf(0x68))))
         assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyHighPps(Bytes(pps().toByteArray() + byteArrayOf(1))))
     }
+    @Test fun quickTimeColourIndexesDoNotDefaultRangeOrAuthorizeIsoNclc() {
+        val indexes = byteArrayOf(0, 1, 0, 1, 0, 1)
+        val nclc = "nclc".encodeToByteArray() + indexes
+        val nclx = "nclx".encodeToByteArray() + indexes + byteArrayOf(0)
+        assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyContainerColour(Bytes(nclc), VideoContainer.Mov))
+        for (container in listOf(VideoContainer.Mp4, VideoContainer.Mov))
+            assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verifyContainerColour(Bytes(nclx), container))
+        val rejected = listOf(nclc to VideoContainer.Mp4, nclc.copyOf(9) to VideoContainer.Mov,
+            (nclc + byteArrayOf(0)) to VideoContainer.Mov, (nclx.copyOf().also { it[10] = 0x80.toByte() }) to VideoContainer.Mov,
+            "prof".encodeToByteArray() to VideoContainer.Mov, byteArrayOf() to VideoContainer.Mov) +
+            listOf(5, 7, 9).map { index -> nclc.copyOf().also { it[index] = 2 } to VideoContainer.Mov }
+        for ((bytes, container) in rejected)
+            assertEquals("HDR_PRESERVATION_UNAVAILABLE", assertIs<CoreResult.Failure>(AvcSdrFrameProfile.verifyContainerColour(Bytes(bytes), container)).error.code.value)
+    }
     @Test fun explicitEightBitProfilesAreAcceptedButNoBroadAvcClaim() {
         for (profile in listOf(66, 77, 100)) assertIs<CoreResult.Success<Unit>>(AvcSdrFrameProfile.verify(sps(profile), 64u, 64u))
     }

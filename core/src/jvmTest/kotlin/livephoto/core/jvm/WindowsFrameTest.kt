@@ -47,14 +47,19 @@ class WindowsFrameTest {
     @Test fun actualHighEightBitFramesMatchIndependentPixelsWithoutHdrDowngrade(): Unit = runImmediate {
         checkProfile("high")
     }
-    private suspend fun checkProfile(profile: String) {
+    @Test fun actualQuickTimeNclcFramesMatchIndependentPixelsWithoutRangeGuessing(): Unit = runImmediate {
+        checkProfile("high", mov = true)
+    }
+    private suspend fun checkProfile(profile: String, mov: Boolean = false) {
         val backends = WindowsMediaFoundationBackend.available()
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(1, backends.size)
         assumeTrue("Windows decoder is unavailable; no OS extraction was run", backends.isNotEmpty())
         val ffmpeg = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of)).ffmpegPath
         if (System.getenv("LIVEPHOTO_REQUIRE_FFMPEG") == "true") assertNotNull(ffmpeg)
         val dir = Files.createTempDirectory("livephoto-system-frame-test-")
-        val input = dir.resolve("main.mp4"); val raw = dir.resolve("selected.nv12"); val independent = dir.resolve("independent.nv12")
+        val extension = if (mov) "mov" else "mp4"
+        val input = dir.resolve("main.$extension"); val raw = dir.resolve("selected.nv12"); val independent = dir.resolve("independent.nv12")
+        val encoded = dir.resolve("encoded.mp4")
         val unknown = dir.resolve("unknown.mp4")
         fun process(args: List<String>) {
             val result = ExternalProcess.run(listOf(ffmpeg.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + args, 60_000)
@@ -66,10 +71,12 @@ class WindowsFrameTest {
                 "-fps_mode", "vfr", "-c:v", "libx264", "-profile:v", profile, "-bf", "2", "-g", "8", "-pix_fmt", "yuv420p",
                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-chroma_sample_location", "left",
                 "-bsf:v", "filter_units=remove_types=6",
-                "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", input.toString()))
+                "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", (if (mov) encoded else input).toString()))
+            if (mov) process(listOf("-i", encoded.toString(), "-map", "0:v:0", "-c", "copy", "-metadata:s:v", "encoder=",
+                "-fflags", "+bitexact", "-movflags", "+write_colr", "-write_btrt", "0", "-f", "mov", input.toString()))
             process(listOf("-i", input.toString(), "-an", "-fps_mode", "passthrough", "-pix_fmt", "nv12", "-f", "rawvideo", independent.toString()))
             } else {
-                Files.write(input, golden("$profile.mp4", if (profile == "high") "1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39" else "3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd"))
+                Files.write(input, golden("$profile.$extension", if (mov) "5929ddf215c236013abb1dff65c2c3537a878fe4c2ad40fa0af7e46ada2efe19" else if (profile == "high") "1ecefdc76527df166b6795bc9eb06e7fd1de8905fb5a9fa442cc54728d896d39" else "3a48a592b23e8409646eee8bc6d016dba119f42cb8322ec4cec0cecf7412e5dd"))
                 Files.write(independent, golden("$profile.nv12", if (profile == "high") "0da458ea1ac5c32d1a759c7ba0b126928c79f368432dbf259faef16b88678e14" else "42ae6dc2051cfb4d5e4170eb2c68cd88516ed578a889e24a89d6ea638f1c9562"))
             }
             val expected = Files.readAllBytes(independent); assertEquals(6144 * 8, expected.size)
@@ -91,6 +98,7 @@ class WindowsFrameTest {
             try {
                 val reader = BinaryReader(source, context); val range = ByteRange(0uL, source.size().orThrow())
                 val before = sha256Range(reader, range).orThrow(); val video = BmffVideoProbe(reader).probe(range).orThrow()
+                assertEquals(if (mov) VideoContainer.Mov else VideoContainer.Mp4, video.container)
                 assertTrue(video.tracks.single().samples.map { it.duration }.distinct().size > 1)
                 val selected = selectFrame(video, CoverPosition.FrameIndex(3uL)); assertFalse(selected.sample.isSync)
                 val output = MemoryOutputTransaction(context, "system-frame")
@@ -132,7 +140,7 @@ class WindowsFrameTest {
                 assertIs<CoreResult.Failure>(result); assertTrue(output.committedAssets().isEmpty())
             } finally { sourceUnknown.close() }
         } finally {
-            for (path in listOf(raw, independent, input, unknown)) Files.deleteIfExists(path)
+            for (path in listOf(raw, independent, input, unknown, encoded)) Files.deleteIfExists(path)
             Files.deleteIfExists(dir)
         }
     }

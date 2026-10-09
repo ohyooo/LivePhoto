@@ -74,6 +74,17 @@ internal object AvcSdrFrameProfile {
         bits.finish()
     }
 
+    /** Container agreement only; never a substitute for the independent SPS/VUI proof.
+     * QuickTime colr has nclc + three u16 indexes, no range bit:
+     * https://developer.apple.com/documentation/quicktime-file-format/color_parameter_atom */
+    fun verifyContainerColour(bytes: Bytes, container: VideoContainer): CoreResult<Unit> = attemptNow {
+        val nclx = bytes.size == 11 && bytes.slice(0, 4) == Bytes("nclx".encodeToByteArray()) && bytes[10] == 0.toByte()
+        val nclc = container == VideoContainer.Mov && bytes.size == 10 && bytes.slice(0, 4) == Bytes("nclc".encodeToByteArray())
+        if ((!nclx && !nclc) || readUnsigned(bytes.slice(4, 6), Endian.Big) != 1uL ||
+            readUnsigned(bytes.slice(6, 8), Endian.Big) != 1uL || readUnsigned(bytes.slice(8, 10), Endian.Big) != 1uL)
+            fail("HDR_PRESERVATION_UNAVAILABLE", "Container color properties contradict the finite SPS profile", Stage.Plan)
+    }
+
     private fun bits(nal: Bytes, header: Int): Bits {
         if (nal.size !in 2..4096 || nal[0].toInt() and 255 != header) unsupported()
         val rbsp = ByteArray(nal.size - 1)
