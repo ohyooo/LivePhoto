@@ -430,6 +430,8 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 当前方向：桌面媒体后端仅使用用户已有 FFmpeg；以下 Windows 系统 API 检查点是保留代码的历史证据，不代表当前默认桌面入口仍调用这些 API。Android/iOS 构建、IO/事务和系统媒体适配尚未实施，列在最后一项移动端 TODO。
 
+Apple CID/EXIF 归属回归：本轮全量 **808 tests：787 项执行通过，0 failures / errors；21 项历史系统 API 专项跳过**。JPEG、HEIC 的大小端 TIFF 正负样本验证：独立普通 EXIF 字段仍可读取；MakerNote 与其它已知字段整块或部分共享字节时返回 `CONFLICTING_METADATA`，Repair 不产生输出。新完整 Windows 便携验收通过。未知类型保持 opaque，不猜范围、不增加写入授权；这不是复杂 MakerNote 写入或真机认证。对应三平台发布结果见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)。
+
 桌面 FFmpeg-only 回归：本轮全量 **804 tests：783 项执行通过，0 failures / errors；21 项历史系统 API 专项按当前方向跳过**。新 Windows 便携包分别完成无 FFmpeg 与已有 FFmpeg 的完整验收：前者保留协议能力并拒绝不可用的媒体操作；后者通过实际解码、remux、抽帧、裁剪、显式转码、封面替换与 Create/Convert 组合编辑。两轮均未调用系统媒体 worker。三平台 CI/产物结果见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)；Windows 实际媒体验收不代替 macOS/Linux 的 FFmpeg 媒体验收。
 
 Windows 有限系统无转码裁剪：新全量 **803 tests，0 failures / errors / skips**，包括真正非零闭合 IDR 的 3 个 VFR 样本选择、精确重置时间线/时长、逐样本与配置字节保留、普通 metadata 独立比较，以及预算、取消、音轨、B 帧和 MOV 拒绝。新完整无 FFmpeg 便携验收通过 LosslessOnly / Exact / LosslessPreferred、完整系统解码、Create/Convert 源域 key 重置与提取视频一致，需要编码的 Exact 即使授权也拒绝且零输出。commonMain 负责有界表重建，系统后端实际完成压缩封装和解码；不是整文件 no-op，也不代表通用裁剪或系统转码。对应三平台 CI/产物见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)。
@@ -552,6 +554,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] Huawei basic60 JPEG 有限 ExplicitRemux：全量/三协议真实媒体与新便携验收通过，完整原图与前 40 字节尾标保持；未知时间单位仍报告，HEIC/Honor/扩展不授权修复。
 - [x] 核清当前固定 MOV/vivo 素材的时间线差异并补回归：`mdhd` 恰等最后一帧 PTS，而非解码时长或完整呈现结束时间；保持严格拒绝，不猜一/两帧容差。另测合法正 CTS/edit 映射，防止混淆解码与呈现时间。新增远程全量 **766 tests，0 failures / errors / skips**；这不是新增设备兼容声明。
 - [ ] 扩展其它有明确规范证据的媒体时间线变体及 Apple MakerNote 兼容读取。当前 Apple 固定素材的 IFD0 MakerNote 不取得正式 ExifIFD 权威；保持读写边界，不自动授权旧结构改写。
+- [x] Apple JPEG/HEIC CID 的 EXIF 已知范围归属检查：大小端、普通独立字段、整块/部分共享范围及 Repair 零输出回归；808 项本轮全量与完整 Windows 便携验收通过。未知字段类型/私有内部引用仍不获得写入权限。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。

@@ -55,12 +55,35 @@ internal object AppleImageReader {
                     if (!appleUuid(value)) fail("INVALID_PAIR_IDENTIFIER", "Apple identifier is outside the confirmed UUID profile")
                     identifier = AppleImageIdentifier(value, ByteRange(note.offset + offset, length), note)
                 }
-                identifier?.let { found += it }
+                identifier?.let {
+                    verifyExifOwnership(tiff, entry, note, budget)
+                    found += it
+                }
             }
         }
         if (found.size > 1 || found.isNotEmpty() && totalNotes != 1) fail("CONFLICTING_METADATA", "Multiple MakerNote authorities shadow the Apple identifier")
         reader.validateIdentity().orThrow()
         found.singleOrNull()
+    }
+
+    /** An ExifIFD pointer alone cannot authorize bytes also owned by an ordinary TIFF field. */
+    private fun verifyExifOwnership(tiff: TiffDocument, owner: TiffEntry, note: ByteRange, budget: ParseBudget) {
+        fun overlaps(other: ByteRange): Boolean = note.offset < other.endExclusive && other.offset < note.endExclusive
+        if (overlaps(ByteRange(tiff.range.offset, 8uL)))
+            fail("CONFLICTING_METADATA", "Apple MakerNote aliases its TIFF header")
+        for (ifd in tiff.ifds) {
+            budget.item()
+            val table = ByteRange(checkedAdd(tiff.range.offset, ifd.relativeOffset.toULong()),
+                checkedAdd(6uL, checkedMultiply(ifd.entries.size.toULong(), 12uL)))
+            if (overlaps(table)) fail("CONFLICTING_METADATA", "Apple MakerNote aliases an IFD directory")
+            for (other in ifd.entries) {
+                budget.item()
+                if (other.entryRange == owner.entryRange) continue
+                // Unknown field types stay opaque: do not invent their allocation or write authority.
+                if (other.valueRange?.let(::overlaps) == true)
+                    fail("CONFLICTING_METADATA", "Apple MakerNote shares bytes with another EXIF field")
+            }
+        }
     }
 }
 

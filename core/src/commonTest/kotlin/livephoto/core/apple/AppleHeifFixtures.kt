@@ -6,10 +6,11 @@ import livephoto.core.google.GoogleFixtures
 /** Independent finite HEIF + formal Apple Exif framing, not camera or decoder evidence. */
 internal object AppleHeifFixtures {
     fun image(identifier: String = AppleFixtures.ID, idat: Boolean = false, bias: Int = 6, linked: Boolean = true,
-              tag: Int = 0x11, multipleExif: Boolean = false, unknownProperty: Boolean = false, ordinaryNote: Boolean = false): ByteArray {
+              tag: Int = 0x11, multipleExif: Boolean = false, unknownProperty: Boolean = false, ordinaryNote: Boolean = false,
+              exifJpeg: ByteArray? = null): ByteArray {
         fun u(value: UInt, width: Int) = unsignedBytes(value.toULong(), width, Endian.Big).toByteArray()
         fun full(type: String, payload: ByteArray, version: Int = 0) = GoogleFixtures.box(type, byteArrayOf(version.toByte(), 0, 0, 0) + payload)
-        val jpeg = AppleFixtures.image(identifier, tag, ordinaryNote)
+        val jpeg = exifJpeg ?: AppleFixtures.image(identifier, tag, ordinaryNote)
         val appLength = ((jpeg[4].toInt() and 255) shl 8) or (jpeg[5].toInt() and 255)
         val exif = u(bias.toUInt(), 4) + ByteArray(bias) + jpeg.copyOfRange(12, 4 + appLength)
         val sample = GoogleFixtures.video(hevc = true).samples.first()
