@@ -16,7 +16,8 @@ internal object WindowsMediaApiWorker {
         val preflight = args.contentEquals(arrayOf("--preflight"))
         val decoderPreflight = args.contentEquals(arrayOf("--decoder-preflight"))
         val decode = if (!preflight && !decoderPreflight) WindowsNativeVideoDecode.request(args) else null
-        if (!preflight && !decoderPreflight && decode == null) {
+        val remux = if (!preflight && !decoderPreflight && decode == null) WindowsNativeRemux.request(args) else null
+        if (!preflight && !decoderPreflight && decode == null && remux == null) {
             println("WINDOWS_MEDIA_API_PREFLIGHT=INVALID_ARGUMENT")
             exitProcess(2)
         }
@@ -58,6 +59,10 @@ internal object WindowsMediaApiWorker {
                         enteredDecode = true
                         decodeResult = WindowsNativeVideoDecode.run(decode, arena, mf, read, library("kernel32.dll"))
                     }
+                    if (remux != null) {
+                        enteredDecode = true
+                        decodeResult = WindowsNativeRemux.run(remux, arena, mf, read, library("kernel32.dll"))
+                    }
                 } finally {
                     try { if (mfStarted) check((shutdown.invokeWithArguments() as Int) >= 0) }
                     finally { if (comStarted) uninitialize.invokeWithArguments() }
@@ -69,7 +74,8 @@ internal object WindowsMediaApiWorker {
         } catch (failure: Throwable) {
             // A bounded worker diagnostic, not an input path, user content or a simulated decoder result.
             val unavailable = !enteredDecode
-            val site = failure.stackTrace.firstOrNull { it.className.startsWith("livephoto.core.jvm.WindowsNativeVideoDecode") }
+            val site = failure.stackTrace.firstOrNull { it.className.startsWith("livephoto.core.jvm.WindowsNativeVideoDecode") ||
+                it.className.startsWith("livephoto.core.jvm.WindowsNativeRemux") }
                 ?.let { " line=${it.lineNumber}" } ?: ""
             val hresult = (failure as? WindowsNativeVideoDecode.Failure)?.let { " ${it.diagnostic}" } ?: ""
             println("${if (unavailable) "WINDOWS_MEDIA_API_PREFLIGHT=UNAVAILABLE" else "WINDOWS_MEDIA_API_DECODE=FAILED"} reason=${failure.javaClass.simpleName}$site$hresult")

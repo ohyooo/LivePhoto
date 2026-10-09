@@ -417,6 +417,38 @@ try {
         if ((Get-FileHash $frameInput).Hash.ToLowerInvariant() -ne $frameHash) { throw 'Portable frame source changed.' }
         Write-Host "PORTABLE_WINDOWS_API_FRAME=SUCCESS profile=$frameProfile scope=finite-eight-bit-avc-vfr-bframe-packed-pixels-sdr-jpeg-no-ffmpeg-no-system-java-not-device"
         }
+        $packetInput = Join-Path $verify 'finite system frame baseline/frame.mp4'
+        $packetOutput = Join-Path $verify 'finite system frame baseline/remux.mp4'
+        $packetTimes = '0:400000,400000:400000,800000:400000,1200000:400000,1600000:800000,2400000:800000,3200000:800000,4000000:800000'
+        $packetTimeline = [Collections.Generic.List[byte]]::new()
+        foreach ($pair in $packetTimes.Split(',')) {
+            foreach ($field in $pair.Split(':')) {
+                $bytes = [BitConverter]::GetBytes([long]$field)
+                if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($bytes) }
+                $packetTimeline.AddRange($bytes)
+            }
+        }
+        $packetDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($packetTimeline.ToArray())).ToLowerInvariant()
+        $savedSearchPath = $env:Path
+        try {
+            $env:Path = ''
+            $start = [Diagnostics.ProcessStartInfo]::new($mediaWorker)
+            $start.UseShellExecute = $false; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+            foreach ($argument in @('--remux-video-private', $packetInput, $packetOutput, '8', '8000000', '16065536', $packetTimes)) { $start.ArgumentList.Add($argument) }
+            $process = [Diagnostics.Process]::Start($start)
+            try {
+                $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+                if (-not $process.WaitForExit(30000)) { $process.Kill($true); throw 'Portable private packet worker timed out.' }
+                $trace = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
+                if ($process.ExitCode -ne 0 -or $trace.Trim() -notmatch "^WINDOWS_MEDIA_API_REMUX=SUCCESS scope=private-compressed-video-not-preservation samples=8 timelineSha256=$packetDigest payloadBytes=[0-9]+ payloadSha256=[0-9a-f]{64}$") { throw "Portable private packet worker failed: $trace" }
+            } finally { $process.Dispose() }
+            $packetProbe = & $launcher probe --input $packetOutput --decode-check
+            if ($LASTEXITCODE -ne 0 -or -not (($packetProbe | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Portable private packet output did not completely decode.' }
+            $packetCaps = & $launcher media-capabilities
+            if ($LASTEXITCODE -ne 0 -or (($packetCaps | ConvertFrom-Json).result.capabilities.operations | Where-Object { $_.operation -eq 'Remux' }).implementation -ne 'Unsupported') { throw 'Private experiment must not advertise public remux.' }
+        } finally { $env:Path = $savedSearchPath }
+        if ((Get-FileHash $packetInput).Hash.ToLowerInvariant() -ne '0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6') { throw 'Private remux experiment changed its input.' }
+        Write-Host 'PORTABLE_WINDOWS_API_PRIVATE_REMUX=SUCCESS scope=finite-compressed-packets-exact-vfr-clock-complete-decode-not-public-remux-or-metadata-preservation'
     }
     $probeJson = & $launcher probe --input $referenceVideo --decode-check
     if ($media.ffmpegPath) {

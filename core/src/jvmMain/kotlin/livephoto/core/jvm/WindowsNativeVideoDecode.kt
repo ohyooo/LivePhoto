@@ -80,6 +80,10 @@ internal object WindowsNativeVideoDecode {
         // No URLs or extension-based trust. A caller must provide an existing local file within bounds.
         val path = request.path.toRealPath()
         check(Files.isRegularFile(path) && Files.size(path) in 1..request.maxFile)
+        return bounded(arena, kernel) { api -> decode(request, path, api, mf, read) }
+    }
+
+    internal fun <T> bounded(arena: Arena, kernel: SymbolLookup, action: (Api) -> T): T {
         val api = Api(arena)
         // The worker's committed native + managed memory is bounded independently of its JVM heap.
         val job = api.export(kernel, "CreateJobObjectW", ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
@@ -94,7 +98,7 @@ internal object WindowsNativeVideoDecode {
                 .invokeWithArguments(job, 9, limits, 144) as Int) != 0)
             check((api.export(kernel, "AssignProcessToJobObject", ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
                 .invokeWithArguments(job, MemorySegment.ofAddress(-1L)) as Int) != 0)
-            return decode(request, path, api, mf, read)
+            return action(api)
         } finally {
             check((api.export(kernel, "CloseHandle", ValueLayout.JAVA_INT, ValueLayout.ADDRESS).invokeWithArguments(job) as Int) != 0)
         }
@@ -202,7 +206,7 @@ internal object WindowsNativeVideoDecode {
         } finally { api.release(attributes) }
     }
 
-    private class Api(val arena: Arena) {
+    internal class Api(val arena: Arena) {
         private val linker = Linker.nativeLinker()
         fun export(lib: SymbolLookup, name: String, result: MemoryLayout, vararg args: MemoryLayout) =
             linker.downcallHandle(lib.find(name).orElseThrow(), FunctionDescriptor.of(result, *args))
