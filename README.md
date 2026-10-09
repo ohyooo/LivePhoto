@@ -163,7 +163,7 @@ Linux（Bash/Zsh）：
 
 `set-key` 修改协议意义的 key/presentation 位置，**不会重新生成封面图**。Apple 修改入口只接受已确认的有限结构，不能将任意相机原片视为可写。
 
-普通媒体创建 Apple 默认使用有限 `jpeg-mov` profile，并满足 JPEG metadata 与原视频容器的分类门禁。输入必须是已分类的普通 JPEG＋MOV；不接受已有 Live Photo 或无法安全合并的 EXIF/MakerNote：
+普通媒体创建 Apple 默认使用有限 `jpeg-mov` profile，并满足 JPEG metadata 与原视频容器的分类门禁。输入必须是已分类的普通 JPEG＋MOV；允许一份经安全模型验证的标准 EXIF，保留 GPS、方向和普通 UserComment。不接受已有 Live Photo、已有 MakerNote、缩略图/未知引用、不明非零 metadata 空隙或无法安全合并的字段。该扩展仅用于普通媒体 Create，Convert 的来源清理门禁不变：
 
 Windows（PowerShell）：
 
@@ -430,6 +430,8 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 当前方向：桌面媒体后端仅使用用户已有 FFmpeg；以下 Windows 系统 API 检查点是保留代码的历史证据，不代表当前默认桌面入口仍调用这些 API。Android/iOS 构建、IO/事务和系统媒体适配尚未实施，列在最后一项移动端 TODO。
 
+Apple 标准 EXIF Create 扩展：本轮全量 **813 tests：792 项执行通过，0 failures / errors；21 项历史系统 API 专项跳过**。普通 JPEG 的安全标准 EXIF 可用于有限 `jpeg-mov` / `jpeg-mp4` Create：保留字节序、GPS、方向、普通 UserComment 和既有外置值的 TIFF 相对位置；新 CID 使用追加的正式 MakerNote/IFD。独立字段回读、完整补丁核对与篡改整对回滚通过；新完整 Windows 便携包通过大小端×两种容器的严格创建、配对验证及私有 MakerNote 拒绝。已有 MakerNote、缩略图/私有引用、未知非零空隙仍拒绝；Convert 来源 EXIF 清理门禁不变，不代表 HEIC/通用 Apple 写入或设备认证。对应三平台发布见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)。
+
 Apple CID/EXIF 归属回归：本轮全量 **808 tests：787 项执行通过，0 failures / errors；21 项历史系统 API 专项跳过**。JPEG、HEIC 的大小端 TIFF 正负样本验证：独立普通 EXIF 字段仍可读取；MakerNote 与其它已知字段整块或部分共享字节时返回 `CONFLICTING_METADATA`，Repair 不产生输出。新完整 Windows 便携验收通过。未知类型保持 opaque，不猜范围、不增加写入授权；这不是复杂 MakerNote 写入或真机认证。对应三平台发布结果见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)。
 
 桌面 FFmpeg-only 回归：本轮全量 **804 tests：783 项执行通过，0 failures / errors；21 项历史系统 API 专项按当前方向跳过**。新 Windows 便携包分别完成无 FFmpeg 与已有 FFmpeg 的完整验收：前者保留协议能力并拒绝不可用的媒体操作；后者通过实际解码、remux、抽帧、裁剪、显式转码、封面替换与 Create/Convert 组合编辑。两轮均未调用系统媒体 worker。三平台 CI/产物结果见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)；Windows 实际媒体验收不代替 macOS/Linux 的 FFmpeg 媒体验收。
@@ -496,7 +498,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入，默认 Create 限 JPEG＋MOV；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | 复杂 Generic/HEIC 写入、更多原片与跨协议路径 |
+| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入，Create 允许经证明安全的标准 EXIF，默认限 JPEG＋MOV；HEIC 读取、原样输出、SetKey/Clean；CID inspection evidence；有限显式重配对实现 | 已有 MakerNote 合并、复杂 Generic/HEIC 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 纯协议能力及统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；运行时查询实际能力 | 更多 FFmpeg 媒体 profile 与三平台真实验收；最后移动端系统媒体 API |
@@ -555,6 +557,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] 核清当前固定 MOV/vivo 素材的时间线差异并补回归：`mdhd` 恰等最后一帧 PTS，而非解码时长或完整呈现结束时间；保持严格拒绝，不猜一/两帧容差。另测合法正 CTS/edit 映射，防止混淆解码与呈现时间。新增远程全量 **766 tests，0 failures / errors / skips**；这不是新增设备兼容声明。
 - [ ] 扩展其它有明确规范证据的媒体时间线变体及 Apple MakerNote 兼容读取。当前 Apple 固定素材的 IFD0 MakerNote 不取得正式 ExifIFD 权威；保持读写边界，不自动授权旧结构改写。
 - [x] Apple JPEG/HEIC CID 的 EXIF 已知范围归属检查：大小端、普通独立字段、整块/部分共享范围及 Repair 零输出回归；808 项本轮全量与完整 Windows 便携验收通过。未知字段类型/私有内部引用仍不获得写入权限。
+- [x] Apple 普通标准 EXIF Create：813 项本轮全量和完整 Windows 便携验收通过，大小端/GPS/方向/UserComment/原值位置保持、无 ExifIFD 追加、私有数据拒绝与整对回滚；仅有限 JPEG＋原 MOV/MP4，不开放已有 MakerNote 合并或 Convert 来源清理。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。

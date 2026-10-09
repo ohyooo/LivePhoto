@@ -45,8 +45,19 @@ internal class ExifMarkerPatch private constructor(
             return facts
         }
 
+        internal suspend fun appendMakerNote(reader: BinaryReader, range: ByteRange, note: Bytes, budget: ParseBudget): CoreResult<Bytes> = attempt {
+            val document = TiffReader(reader, budget).read(range).orThrow()
+            val payload = ExifPatchBuilder(reader, budget).appendMakerNote(range, note)
+            val readback = TiffReader(BinaryReader(ExifPayloadSource(payload), reader.context), budget)
+                .read(ByteRange(6uL, (payload.size - 6).toULong())).orThrow()
+            if (ordinary(document, budget, 0x927cu.toUShort()) != ordinary(readback, budget, 0x927cu.toUShort()))
+                fail("POSTCONDITION_FAILED", "MakerNote append changed ordinary EXIF values", Stage.Verify)
+            reader.validateIdentity().orThrow()
+            payload
+        }
+
         private data class OrdinaryField(val role: String, val tag: UShort, val type: UShort, val count: UInt, val value: Bytes?, val rawUnknown: Bytes?)
-        private fun ordinary(document: TiffDocument, budget: ParseBudget): List<OrdinaryField> {
+        private fun ordinary(document: TiffDocument, budget: ParseBudget, ownedExifTag: UShort = 0x9286u.toUShort()): List<OrdinaryField> {
             var count = 0uL
             for (ifd in document.ifds) count = checkedAdd(count, ifd.entries.size.toULong())
             budget.retain(checkedMultiply(count, 128uL))
@@ -55,7 +66,7 @@ internal class ExifMarkerPatch private constructor(
             val exif = target(0x8769u.toUShort()); val gps = target(0x8825u.toUShort())
             return document.ifds.flatMap { ifd ->
                 val role = when (ifd.relativeOffset) { document.firstIfdOffset -> "primary"; exif -> "exif"; gps -> "gps"; else -> "opaque-${ifd.relativeOffset}" }
-                ifd.entries.filter { !(role == "primary" && it.tag == 0x8769u.toUShort()) && !(role == "exif" && it.tag == 0x9286u.toUShort()) }
+                ifd.entries.filter { !(role == "primary" && it.tag == 0x8769u.toUShort()) && !(role == "exif" && it.tag == ownedExifTag) }
                     .map { budget.item(1u); OrdinaryField(role, it.tag, it.type, it.count, it.value, if (it.value == null) it.rawValueField else null) }
             }.sortedWith(compareBy({ it.role }, { it.tag.toUInt() }))
         }
@@ -86,6 +97,48 @@ private data class BuiltPatch(val payload: Bytes, val change: ExifCommentChange,
 
 /** Append tables without moving any preexisting value or changing its TIFF offset base. */
 private class ExifPatchBuilder(private val reader: BinaryReader, private val budget: ParseBudget) {
+    /** Add only a new MakerNote; existing standardized values keep their TIFF base and offsets. */
+    suspend fun appendMakerNote(range: ByteRange, note: Bytes): Bytes {
+        provePositionIndependence(range) // Reject private fields, thumbnails, aliases and nonzero slack.
+        val document = TiffReader(reader, budget).read(range).orThrow()
+        val root = document.ifds.single { it.relativeOffset == document.firstIfdOffset }
+        val pointer = root.entries.singleOrNull { it.tag == 0x8769u.toUShort() }
+        if (pointer != null && (pointer.type != 4u.toUShort() || pointer.count != 1u)) unsafe("MakerNote requires a formal ExifIFD pointer")
+        val exif = pointer?.value?.let { value -> document.ifds.singleOrNull { it.relativeOffset == readUnsigned(value, document.endian).toUInt() } }
+        if (pointer != null && exif == null) unsafe("Unresolved ExifIFD cannot own a new MakerNote")
+        if (root.entries.size >= 65535 || (exif?.entries?.size ?: 0) >= 65535) unsafe("IFD cannot accept a new field")
+        val newRoot = checkedAdd(range.length, range.length and 1uL)
+        val rootLength = if (pointer == null) checkedAdd(6uL, checkedMultiply((root.entries.size + 1).toULong(), 12uL)) else 0uL
+        val newExif = checkedAdd(newRoot, rootLength)
+        val retained = exif?.entries.orEmpty()
+        val noteOffset = checkedAdd(newExif, checkedAdd(6uL, checkedMultiply((retained.size + 1).toULong(), 12uL)))
+        val length = checkedAdd(noteOffset, note.size.toULong())
+        if (note.size <= 4 || length > MAX_TIFF_LENGTH.toULong()) unsafe("MakerNote append exceeds the supported APP1 allocation")
+        budget.retain(checkedMultiply(checkedAdd(length, 6uL), 4uL))
+        val original = reader.readExactly(range.offset, checkedInt(range.length).toUInt()).orThrow()
+        val output = ByteArray(checkedInt(length))
+        original.copyInto(output, 0)
+        if (pointer == null) {
+            put(output, 4, newRoot, 4, document.endian)
+            put(output, checkedInt(newRoot), (root.entries.size + 1).toULong(), 2, document.endian)
+            val entries = (root.entries.map { it.tag.toUInt() to it } + (0x8769u to null)).sortedBy { it.first }
+            for ((index, entry) in entries.withIndex()) {
+                val position = checkedInt(newRoot) + 2 + index * 12
+                if (entry.second == null) field(output, position, 0x8769u, 4u, 1u, newExif, document.endian)
+                else copyEntry(original, output, position, entry.second!!, range)
+            }
+        } else put(output, checkedInt(pointer.entryRange.offset - range.offset) + 8, newExif, 4, document.endian)
+        put(output, checkedInt(newExif), (retained.size + 1).toULong(), 2, document.endian)
+        val entries = (retained.map { it.tag.toUInt() to it } + (0x927cu to null)).sortedBy { it.first }
+        for ((index, entry) in entries.withIndex()) {
+            val position = checkedInt(newExif) + 2 + index * 12
+            if (entry.second == null) field(output, position, 0x927cu, 7u, note.size.toUInt(), noteOffset, document.endian)
+            else copyEntry(original, output, position, entry.second!!, range)
+        }
+        note.copyInto(output, checkedInt(noteOffset))
+        return payload(output)
+    }
+
     suspend fun provePositionIndependence(range: ByteRange) {
         if (range.length > MAX_TIFF_LENGTH.toULong()) unsafe("EXIF exceeds one APP1 payload")
         val document = TiffReader(reader, budget).read(range).orThrow()

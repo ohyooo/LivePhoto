@@ -157,6 +157,7 @@ jobs:
             core/build/portable-heic-fixtures/
             core/build/portable-windows-fixtures/
             core/build/portable-apple-heif-fixtures/
+            core/build/portable-apple-ordinary-exif-fixtures/
             core/src/jvmTest/resources/protocol-compatibility/
             ci-output/gradle.log
             ci-output/portable.log

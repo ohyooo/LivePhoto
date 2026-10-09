@@ -210,6 +210,34 @@ try {
         }
     } finally { $env:Path = $neutralSearchPath }
     Write-Host 'PORTABLE_NEUTRAL_MOVIE_NO_FFMPEG=SUCCESS scope=synthetic-avc-aac-framing-file-exact-idempotence-not-decode-or-device'
+    # Ordinary EXIF Apple Create is protocol-only; no desktop system API or decoder is invoked.
+    $ordinaryExifFixtures = Join-Path $repository 'core/build/portable-apple-ordinary-exif-fixtures'
+    $ordinaryExifManifest = @{}
+    foreach ($line in Get-Content (Join-Path $ordinaryExifFixtures 'manifest.txt')) {
+        $parts = $line.Split('=', 2); if ($parts.Count -eq 2) { $ordinaryExifManifest[$parts[0]] = $parts[1] }
+    }
+    if ($ordinaryExifManifest['scope'] -ne 'synthetic-ordinary-exif-pair-not-device-proof' -or -not $ordinaryExifManifest['runId']) { throw 'Ordinary EXIF fixture scope is missing.' }
+    foreach ($name in @('ordinary-big.jpg', 'ordinary-little.jpg', 'private-note.jpg', 'motion.mp4', 'motion.mov')) {
+        if ((Get-FileHash (Join-Path $ordinaryExifFixtures $name)).Hash.ToLowerInvariant() -ne $ordinaryExifManifest[$name]) { throw 'Ordinary EXIF fixture hash differs.' }
+    }
+    foreach ($endian in @('big', 'little')) { foreach ($container in @('mp4', 'mov')) {
+        $image = Join-Path $ordinaryExifFixtures "ordinary-$endian.jpg"
+        $movie = Join-Path $ordinaryExifFixtures "motion.$container"
+        $createdJson = & $launcher create --image $image --video $movie --target apple.livephoto --profile "jpeg-$container" --strict --output-dir (Join-Path $verify "Apple ordinary EXIF $endian $container")
+        if ($LASTEXITCODE -ne 0) { throw 'Ordinary EXIF strict Create failed.' }
+        $created = ($createdJson | ConvertFrom-Json).result
+        if (@($created.output.assets).Count -ne 2 -or ($created.execution | Where-Object { $_.remuxed -or $_.transcoded }) -or
+            ($created.preservation.records | Where-Object { $_.outcome -notin @('Verified', 'NotApplicable') })) { throw 'Ordinary EXIF Create violated preservation scope.' }
+        $validationJson = & $launcher validate --input $created.output.assets[0].path --pair-video $created.output.assets[1].path --layers Structure,Protocol
+        if ($LASTEXITCODE -ne 0 -or ($validationJson | ConvertFrom-Json).result.verdict -ne 'Valid') { throw 'Ordinary EXIF output pair validation failed.' }
+    } }
+    $ordinaryExifRejected = Join-Path $verify 'Apple ordinary EXIF reject private note'
+    $rejectedJson = & $launcher create --image (Join-Path $ordinaryExifFixtures 'private-note.jpg') --video (Join-Path $ordinaryExifFixtures 'motion.mp4') --target apple.livephoto --profile jpeg-mp4 --strict --output-dir $ordinaryExifRejected
+    if ($LASTEXITCODE -ne 3 -or ($rejectedJson | ConvertFrom-Json).error.code.value -ne 'UNSAFE_METADATA_REWRITE' -or (Test-Path (Join-Path $ordinaryExifRejected 'assets'))) { throw 'Private MakerNote must remain blocked without published assets.' }
+    foreach ($name in @('ordinary-big.jpg', 'ordinary-little.jpg', 'private-note.jpg', 'motion.mp4', 'motion.mov')) {
+        if ((Get-FileHash (Join-Path $ordinaryExifFixtures $name)).Hash.ToLowerInvariant() -ne $ordinaryExifManifest[$name]) { throw 'Ordinary EXIF Create modified an input.' }
+    }
+    Write-Host 'PORTABLE_APPLE_ORDINARY_EXIF_CREATE=SUCCESS scope=bounded-standard-exif-preserved-not-device-proof'
     # Apple HEIC reads are a finite structural profile, independent of media tools or camera evidence.
     $appleHeifFixtures = Join-Path $repository 'core/build/portable-apple-heif-fixtures'
     $appleHeifManifest = @{}

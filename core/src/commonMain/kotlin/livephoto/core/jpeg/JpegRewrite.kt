@@ -37,9 +37,12 @@ internal object JpegRewrite {
             validateAppBytes(patch.replacement)
             val proof = patch.exifProof
             val apple = patch.appleProof
-            if (apple != null && (proof != null || !insertion || structure.hasExif || structure.hasMpf || structure.hasExtendedXmp ||
-                    patch.replacement != appSegment(0xe1, apple.payload).orThrow()))
-                fail("UNSAFE_METADATA_REWRITE", "Apple EXIF authorization only permits its exact new APP segment", Stage.Plan)
+            if (apple != null && (proof != null || structure.hasMpf || structure.hasExtendedXmp ||
+                    patch.replacement != appSegment(0xe1, apple.payload).orThrow() ||
+                    apple.originalTiffRange == null && (!insertion || structure.hasExif) ||
+                    apple.originalTiffRange != null && (segment?.payloadKind != AppPayloadKind.Exif || segment.payload == null ||
+                        apple.originalTiffRange != ByteRange(segment.payload.offset + 6uL, segment.payload.length - 6uL))))
+                fail("UNSAFE_METADATA_REWRITE", "Apple EXIF authorization does not match this exact APP segment", Stage.Plan)
             if (proof != null) {
                 val expected = appSegment(0xe1, proof.replacementPayload).orThrow()
                 if (patch.replacement != expected || proof.originalTiffRange == null && (!insertion || structure.hasExif) ||
@@ -77,7 +80,9 @@ internal object JpegRewrite {
         var position = 0uL
         for (patch in verifiedPlan.patches) {
             patch.appleProof?.let { proof ->
-                if (reader.identity().orThrow() != proof.sourceIdentity) fail("SOURCE_CHANGED", "Apple EXIF authorization no longer matches input", Stage.WriteProtocol)
+                if (reader.identity().orThrow() != proof.sourceIdentity || proof.originalTiffRange != null &&
+                    sha256Range(reader, proof.originalTiffRange).orThrow() != proof.originalTiffDigest)
+                    fail("SOURCE_CHANGED", "Apple EXIF authorization no longer matches input", Stage.WriteProtocol)
             }
             patch.exifProof?.let { proof ->
                 if (reader.identity().orThrow() != proof.sourceIdentity || proof.originalTiffRange != null &&

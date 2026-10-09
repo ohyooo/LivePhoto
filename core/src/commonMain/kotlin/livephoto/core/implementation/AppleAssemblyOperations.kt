@@ -48,6 +48,8 @@ internal object AppleAssemblyOperations {
             if (request.sourceBindings == SourceBindingPolicy.RejectAlreadyLive) "SOURCE_ALREADY_LIVE" else "CAPABILITY_UNSUPPORTED",
             "Ordinary-media Apple Create cannot silently strip an existing live binding", Stage.Plan)
         val jpeg = image.jpeg ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion currently requires JPEG", Stage.Plan)
+        if (!request.creating && jpeg.hasExif)
+            fail("UNSAFE_METADATA_REWRITE", "Converted source EXIF still needs an independent source-cleanup preservation proof", Stage.Plan)
         val jfif = ReplaceOperations.canonicalJfif(image)
         if (image.bindings.isNotEmpty() || jpeg.segments.any { it.marker in 0xe0..0xef && it.payloadKind == AppPayloadKind.Unknown && it != jfif })
             fail("UNSAFE_METADATA_REWRITE", "Apple assembly cannot relocate unclassified APP or retain a source image binding", Stage.Plan)
@@ -67,7 +69,9 @@ internal object AppleAssemblyOperations {
             else original?.inspection?.keyPhoto?.position ?: fail("CAPABILITY_UNSUPPORTED", "Apple conversion requires a known source key or an explicit selected frame", Stage.Plan)
         val proof = AppleImagePatch.create(image.reader, identifier, budget).orThrow()
         val app = JpegRewrite.appSegment(0xe1, proof.payload).orThrow()
-        val rewrite = JpegRewrite.plan(jpeg, listOf(JpegPatch(ByteRange(2uL, 0uL), app, appleProof = proof))).orThrow()
+        val patchRange = if (proof.originalTiffRange == null) ByteRange(2uL, 0uL)
+            else jpeg.segments.single { it.payloadKind == AppPayloadKind.Exif }.range
+        val rewrite = JpegRewrite.plan(jpeg, listOf(JpegPatch(patchRange, app, appleProof = proof))).orThrow()
         val movie = AppleMovieAssembler.prepare(videoReader, identifier, key, budget).orThrow()
         if (checkedAdd(rewrite.outputLength, movie.byteLength) > context.limits.maxOutputBytes)
             fail("RESOURCE_LIMIT_EXCEEDED", "Apple pair exceeds the shared output budget", Stage.Plan)
@@ -115,7 +119,8 @@ internal object AppleAssemblyOperations {
         val image = prepared.image
         val movie = prepared.movie
         val context = request.context
-        val app = prepared.rewrite.patches.single().replacement
+        val patch = prepared.rewrite.patches.single()
+        val app = patch.replacement
         val size = image.reader.identity().orThrow().size
         val originalReaders = original?.readers.orEmpty()
         var imageId: AssetId? = null
@@ -123,17 +128,18 @@ internal object AppleAssemblyOperations {
         var imageDigest: Digest? = null
         fun records(id: AssetId, imageAsset: Boolean): List<GuaranteeRecord> = listOf(
             GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "New target carrier; no file-exact promise"),
-            GuaranteeRecord(id, Guarantee.ImageDataPreserving, if (imageAsset) GuaranteeOutcome.Verified else GuaranteeOutcome.NotApplicable, proof = "All original JPEG bytes remain around the new owned APP"),
+            GuaranteeRecord(id, Guarantee.ImageDataPreserving, if (imageAsset) GuaranteeOutcome.Verified else GuaranteeOutcome.NotApplicable, proof = "All JPEG coding bytes and unrequested segments remain around the authorized EXIF patch"),
             GuaranteeRecord(id, Guarantee.BitstreamPreserving, if (imageAsset) GuaranteeOutcome.NotApplicable else GuaranteeOutcome.Verified, proof = "All retained track configuration, sample bytes, order, offsets and timeline remain unchanged"),
-            GuaranteeRecord(id, Guarantee.MetadataPreserving, if (prepared.unknownMetadata) GuaranteeOutcome.Unknown else GuaranteeOutcome.Verified, proof = "Exact new owned metadata, exact original ordinary image bytes and classified movie fields; source cleanup proof retained"))
+            GuaranteeRecord(id, Guarantee.MetadataPreserving, if (prepared.unknownMetadata) GuaranteeOutcome.Unknown else GuaranteeOutcome.Verified, proof = "Exact authorized EXIF patch with independent ordinary field readback and unchanged TIFF value offsets; unrequested segments and classified movie fields retained"))
         val imageAsset = StagedAsset(OutputAssetSpec(AssetRole.PrimaryImage, mime = "image/jpeg"), ImageFormat.Jpeg,
             write = { JpegRewrite.write(image.reader, it, image.jpeg!!, prepared.rewrite, context).orThrow() },
             verify = { id, reader ->
                 val jpeg = JpegParser.parse(reader, ParseBudget(context)).orThrow()
                 if (reader.identity().orThrow().size != prepared.rewrite.outputLength || jpeg.primary.length != prepared.rewrite.outputLength ||
-                    reader.readExactly(2uL, app.size.toUInt()).orThrow() != app ||
-                    sha256Range(image.reader, ByteRange(0uL, 2uL)).orThrow() != sha256Range(reader, ByteRange(0uL, 2uL)).orThrow() ||
-                    sha256Range(image.reader, ByteRange(2uL, size - 2uL)).orThrow() != sha256Range(reader, ByteRange(2uL + app.size.toULong(), size - 2uL)).orThrow() ||
+                    reader.readExactly(patch.range.offset, app.size.toUInt()).orThrow() != app ||
+                    sha256Range(image.reader, ByteRange(0uL, patch.range.offset)).orThrow() != sha256Range(reader, ByteRange(0uL, patch.range.offset)).orThrow() ||
+                    sha256Range(image.reader, ByteRange(patch.range.endExclusive, size - patch.range.endExclusive)).orThrow() !=
+                        sha256Range(reader, ByteRange(patch.range.offset + app.size.toULong(), size - patch.range.endExclusive)).orThrow() ||
                     AppleImageReader.read(reader, jpeg, ParseBudget(context)).orThrow()?.value != identifier)
                     fail("POSTCONDITION_FAILED", "Apple primary image failed exact unrequested-byte/CID verification", Stage.Verify)
                 imageId = id; imageIdentity = reader.identity().orThrow()
