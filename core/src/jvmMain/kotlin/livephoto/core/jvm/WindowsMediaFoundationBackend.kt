@@ -16,7 +16,8 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
             Condition(ConditionOperator.Equals, "decodeScope", Value.Text("one-mp4-or-mov-avc-video-no-audio-48x48-to-4096x2304-at-most-64-visible-unique-exact-100ns-frames")),
             Condition(ConditionOperator.Equals, "runtime", Value.Text("registered-software-avc-nv12-decoder-512MiB-isolated-process-per-input-format-verification-not-HDR-or-metadata-conformance"))))) +
         listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
-            Condition(ConditionOperator.Equals, "frameProfile", Value.Text("single-avc-baseline-main-high-proven-8bit-420-no-custom-scaling-no-audio-even-48-to-1024-at-most-64-exact-100ns-frames-bt709-limited-progressive-square-left-default-jpeg"))))) +
+            Condition(ConditionOperator.Equals, "frameProfile", Value.Text("single-avc-baseline-main-high-proven-8bit-420-no-custom-scaling-no-audio-even-48-to-1024-at-most-64-exact-100ns-frames-bt709-limited-progressive-square-left-jpeg")),
+            Condition(ConditionOperator.Equals, "imageQuality", Value.Text("default-or-0-to-100-mapped-to-JDK-JPEG-compressionQuality-divided-by-100-not-lossless-or-backend-equivalent"))))) +
         listOf(CapabilityEntry(Operation.Remux, Implementation.Experimental, conditions = listOf(
             Condition(ConditionOperator.Equals, "remuxProfile", Value.Text("same-mp4-single-baseline-avc-no-audio-no-reorder-48-to-1024-at-most-64-exact-contiguous-100ns-frames-8MB-classified-source-envelope")),
             Condition(ConditionOperator.Equals, "verification", Value.Text("actual-os-compressed-packets-source-envelope-restored-all-samples-config-metadata-and-full-finite-os-decode-no-transcode"))))) +

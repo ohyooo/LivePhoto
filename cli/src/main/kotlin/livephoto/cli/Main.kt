@@ -25,7 +25,7 @@ Extract: [--resources ID,ID] [--raw-carrier]
 Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
 Repair modes: [--mode SafeMetadataOnly|ExplicitRePair|ExplicitRemux]; re-pair needs --pair-video and --authority EVIDENCE_ID from inspect of a selected single asset
 Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for frame index]
-Extract-frame: [--resource ID] (select an embedded video in a live-photo carrier)
+Extract-frame: [--resource ID] (select an embedded video in a live-photo carrier); extract-frame/replace-cover [--quality 0..100] (backend-dependent)
 Validate: [--layers Structure,Protocol,Media]
 Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred|LosslessOnly|Exact] [--allow-transcode]
 Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
@@ -91,8 +91,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 "split" -> inputKeys + setOf("output-dir", "strict")
                 "repair" -> inputKeys + setOf("output-dir", "strict", "apply", "issues", "mode", "authority")
                 "set-key" -> inputKeys + positionKeys + setOf("output-dir", "strict")
-                "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource")
-                "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format", "update-key", "strict")
+                "extract-frame" -> inputKeys + positionKeys + setOf("output-dir", "format", "resource", "quality")
+                "replace-cover" -> inputKeys + positionKeys + setOf("output-dir", "format", "update-key", "strict", "quality")
                 "trim" -> inputKeys + setOf("output-dir", "strict", "start-us", "end-us", "mode", "resource", "allow-transcode")
                 "remux" -> inputKeys + setOf("output-dir", "strict", "container", "resource")
                 "transcode" -> inputKeys + setOf("output-dir", "strict", "container", "codec", "allow-transcode")
@@ -101,6 +101,7 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                 else -> inputKeys
             }
             require(options.keys.all { it in allowed }) { "Unknown or inapplicable option: ${options.keys.first { it !in allowed }}" }
+            val imageQuality = options["quality"]?.toUInt()?.also { require(it <= 100u) { "Image quality must be in 0..100" } }
             options["log-level"]?.let(log::configure)
             log.debug("operation=$command event=start")
             val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
@@ -156,8 +157,8 @@ internal class Cli(private val providedCore: LivePhotoCore? = null,
                         dryRun = !options.containsKey("apply"), policy = policy, output = if (options.containsKey("apply")) destination() else null, context = context))
                 }
                 "set-key" -> core.setKeyPhotoPosition(SetKeyRequest(source(), position(), policy, destination(), context))
-                "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), destination(), context))
-                "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format"))), updateKeyPosition = "update-key" in options, policy = policy, output = destination(), context = context))
+                "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format")), quality = imageQuality), destination(), context))
+                "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format")), quality = imageQuality), updateKeyPosition = "update-key" in options, policy = policy, output = destination(), context = context))
                 "trim" -> core.trim(TrimRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
                 "remux" -> core.remux(RemuxRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), VideoContainer.valueOf(required("container")), policy, destination(), context))
                 else -> core.transcode(TranscodeRequest(ResourceRef(source()), VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container"))), policy, destination(), context))

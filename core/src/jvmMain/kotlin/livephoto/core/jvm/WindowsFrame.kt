@@ -7,13 +7,11 @@ import livephoto.core.implementation.selectFrame
 import livephoto.core.implementation.videoFacts
 import livephoto.core.implementation.jpegFacts
 import livephoto.core.jpeg.JpegParser
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import javax.imageio.ImageIO
-import javax.imageio.stream.MemoryCacheImageOutputStream
 import javax.imageio.stream.MemoryCacheImageInputStream
 import livephoto.core.memory.MemoryBinarySource
 
@@ -24,8 +22,8 @@ internal object WindowsFrame {
         if (job.operation != Operation.ExtractFrame) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
         job.validate().orThrow()
         val encoding = job.imageEncoding ?: fail("INVALID_ARGUMENT", "Missing image encoding", Stage.Plan)
-        if (encoding.format != ImageFormat.Jpeg || encoding.quality != null || encoding.dynamicRange != DynamicRangePolicy.Preserve)
-            fail("CAPABILITY_UNSUPPORTED", "System frame profile supports default-quality SDR JPEG only", Stage.Plan)
+        if (encoding.format != ImageFormat.Jpeg || encoding.dynamicRange != DynamicRangePolicy.Preserve)
+            fail("CAPABILITY_UNSUPPORTED", "System frame profile supports SDR JPEG only", Stage.Plan)
         val ref = job.inputs.single()
         if (ref.resourceId != null || ref.snapshot != null) fail("INVALID_ARGUMENT", "Core must resolve the frame resource")
         val source = (ref.input as? SourceSet.Single)?.source ?: fail("INVALID_ARGUMENT", "Frame requires isolated video")
@@ -129,15 +127,7 @@ internal object WindowsFrame {
             val trace = "WINDOWS_MEDIA_API_FRAME=SUCCESS frames=${track.samples.size} width=${track.width} height=${track.height} ptsSha256=$timeline index=${selected.index} time100ns=$actualTime bytes=$rawSize sha256=${hex(MessageDigest.getInstance("SHA-256").digest(bytes))} layout=packed-nv12"
             if (process.output.trim() != trace) fail("POSTCONDITION_FAILED", "System frame selection or full timeline differs", Stage.Verify)
             val image = WindowsFramePixels.image(bytes, track.width.toInt(), track.height.toInt()) { checkCancelled(job.context) }
-            val encoded = object : ByteArrayOutputStream() {
-                override fun write(b: Int) { if (count >= outputLimit) fail("RESOURCE_LIMIT_EXCEEDED", "JPEG exceeds output budget", Stage.EncodeImage); super.write(b) }
-                override fun write(b: ByteArray, off: Int, len: Int) { if (len > outputLimit - count) fail("RESOURCE_LIMIT_EXCEEDED", "JPEG exceeds output budget", Stage.EncodeImage); super.write(b, off, len) }
-            }
-            MemoryCacheImageOutputStream(encoded).use { stream ->
-                if (!ImageIO.write(image, "jpeg", stream)) fail("ENCODE_FAILED", "Existing JDK JPEG encoder unavailable", Stage.EncodeImage)
-                stream.flush()
-            }
-            val jpegBytes = encoded.toByteArray()
+            val jpegBytes = WindowsJpegEncoder.encode(image, encoding.quality, outputLimit) { checkCancelled(job.context) }
             // ImageIO.read(ImageInputStream) itself closes on success. Make the memory
             // stream's close idempotent so use also handles unsupported/exceptional reads.
             val imageInput = object : MemoryCacheImageInputStream(jpegBytes.inputStream()) {
@@ -160,7 +150,7 @@ internal object WindowsFrame {
                 verifySources()
                 BackendResult(listOf(StagedAsset(handle.id, AssetRole.PrimaryImage, "image/jpeg", jpegBytes.size.toULong())), listOf(facts),
                     listOf(Stage.DecodeFrame, Stage.EncodeImage).map { stage -> ExecutionRecord(stage, "windows-media-foundation",
-                        if (stage == Stage.DecodeFrame) "Full presentation timeline and selected packed NV12 frame verified" else "Explicit BT.709 SDR to standard sRGB derived JPEG; source video unchanged",
+                        if (stage == Stage.DecodeFrame) "Full presentation timeline and selected packed NV12 frame verified" else "Explicit BT.709 SDR to standard sRGB derived JPEG; JPEG quality=${encoding.quality ?: "default"}; source video unchanged",
                         false, false, false, videoFacts(video), facts) }, actualFrameTime = selected.time, actualFrameIndex = selected.index, actualFrameTrack = TrackId(track.trackId.toString()))
             } finally { staged.close() }
         } catch (fault: CoreFault) { throw fault }

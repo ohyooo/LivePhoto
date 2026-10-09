@@ -17,6 +17,30 @@ function Get-PairingSemantics($pairing) {
     # Inspection evidence is source/generation-bound and must change when assets are published.
     $pairing | Select-Object imageIdentifier, videoIdentifier, matches | ConvertTo-Json -Compress
 }
+function Get-JpegQuantization([string]$path) {
+    $bytes = [IO.File]::ReadAllBytes($path)
+    if ($bytes.Length -lt 4 -or $bytes.Length -gt 8000000 -or $bytes[0] -ne 255 -or $bytes[1] -ne 216) { throw 'Invalid finite JPEG.' }
+    $values = [Collections.Generic.List[int]]::new()
+    $at = 2
+    while ($at -lt $bytes.Length) {
+        if ($bytes[$at++] -ne 255 -or $at -ge $bytes.Length) { throw 'Invalid JPEG marker.' }
+        $marker = $bytes[$at++]
+        if ($marker -eq 218) { break }
+        if ($at + 2 -gt $bytes.Length) { throw 'Truncated JPEG marker length.' }
+        $length = [int]$bytes[$at] * 256 + $bytes[$at + 1]
+        if ($length -lt 2 -or $at + $length -gt $bytes.Length) { throw 'Invalid JPEG marker length.' }
+        if ($marker -eq 219) {
+            $table = $at + 2
+            while ($table -lt $at + $length) {
+                if (($bytes[$table++] -shr 4) -ne 0 -or $table + 64 -gt $at + $length) { throw 'Unexpected JPEG quantization precision.' }
+                for ($i = 0; $i -lt 64; $i++) { $values.Add($bytes[$table++]) }
+            }
+        }
+        $at += $length
+    }
+    if ($values.Count -ne 128) { throw 'Expected two eight-bit JPEG quantization tables.' }
+    return ,$values.ToArray()
+}
 if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME/bin/jpackage$(if ($IsWindows) { '.exe' })")) {
     throw 'An existing JDK 25 with jpackage is required. This script never installs Java.'
 }
@@ -416,6 +440,26 @@ try {
             $imageProbe = & $launcher probe --input $frame.operation.output.assets[0].path
             if ($LASTEXITCODE -ne 0 -or ($imageProbe | ConvertFrom-Json).result.imageFormat -ne 'Jpeg' -or
                 ($imageProbe | ConvertFrom-Json).result.width -ne 64 -or ($imageProbe | ConvertFrom-Json).result.height -ne 64) { throw 'Portable system frame JPEG dimensions differ.' }
+            if ($frameProfile -eq 'baseline') {
+                $previousQuantizationSum = [int]::MaxValue
+                foreach ($quality in @(0, 35, 100)) {
+                    $qualityJson = & $launcher extract-frame --input $frameInput --frame-index 3 --format Jpeg --quality $quality --output-dir (Join-Path $verify "system JPEG quality $quality")
+                    if ($LASTEXITCODE -ne 0) { throw "Explicit JPEG quality $quality failed: $qualityJson" }
+                    $qualityFrame = ($qualityJson | ConvertFrom-Json).result
+                    if ($qualityFrame.actualFrameIndex -ne '3' -or [long]$qualityFrame.actualTime.value * 25 -ne 3 * [long]$qualityFrame.actualTime.timescale -or
+                        $qualityFrame.operation.output.assets.Count -ne 1 -or ($qualityFrame.operation.execution | Where-Object { $_.transcoded -or $_.remuxed }) -or
+                        -not ($qualityFrame.operation.execution | Where-Object { $_.backendId -eq 'windows-media-foundation' -and $_.reason -like "*JPEG quality=$quality;*" })) { throw 'Explicit JPEG quality selection/execution differs.' }
+                    $tables = Get-JpegQuantization $qualityFrame.operation.output.assets[0].path
+                    $sum = ($tables | Measure-Object -Sum).Sum
+                    if ($sum -ge $previousQuantizationSum -or ($quality -eq 0 -and ($tables | Where-Object { $_ -ne 255 })) -or
+                        ($quality -eq 100 -and ($tables | Where-Object { $_ -ne 1 }))) { throw 'Explicit JPEG quality was ignored or mis-scaled.' }
+                    $previousQuantizationSum = $sum
+                }
+                $invalidQualityDirectory = Join-Path $verify 'invalid JPEG quality must not publish'
+                $invalidQuality = & $launcher extract-frame --input $frameInput --frame-index 3 --format Jpeg --quality 101 --output-dir $invalidQualityDirectory
+                if ($LASTEXITCODE -ne 2 -or ($invalidQuality | ConvertFrom-Json).error.code -ne 'INVALID_ARGUMENT' -or (Test-Path $invalidQualityDirectory)) { throw 'Invalid JPEG quality was not rejected before output.' }
+                Write-Host 'PORTABLE_WINDOWS_JPEG_QUALITY=SUCCESS values=0,35,100 scope=actual-system-frame-independent-DQT-not-lossless-or-backend-equivalence'
+            }
         } finally { $env:Path = $savedSearchPath }
         if ((Get-FileHash $frameInput).Hash.ToLowerInvariant() -ne $frameHash) { throw 'Portable frame source changed.' }
         Write-Host "PORTABLE_WINDOWS_API_FRAME=SUCCESS profile=$frameProfile scope=finite-eight-bit-avc-vfr-bframe-packed-pixels-sdr-jpeg-no-ffmpeg-no-system-java-not-device"

@@ -154,6 +154,23 @@ class CliTest {
         assertEquals(CoverPosition.FrameIndex(0uL, TrackId("2")), request.position)
         assertEquals(ImageEncoding(ImageFormat.Jpeg), request.encoding)
     }
+    @Test fun explicitImageQualityIsForwardedWithoutCliEncodingLogic() = blocking {
+        var received: ImageEncoding? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun extractFrame(request: ExtractFrameRequest): CoreResult<FrameResult> { received = request.encoding; return failure }
+        }
+        for (quality in listOf("0", "35", "100")) {
+            assertEquals(3, Cli(core).run(listOf("extract-frame", "--input", "not-opened", "--frame-index", "0", "--format", "Jpeg", "--quality", quality, "--output-dir", "not-created")) {})
+            assertEquals(ImageEncoding(ImageFormat.Jpeg, quality.toUInt()), received)
+        }
+    }
+    @Test fun invalidImageQualityIsRejectedBeforeDiscoveryOrOutput() = blocking {
+        val cli = Cli(discover = { error("Invalid quality must not discover media tools") })
+        for (quality in listOf("-1", "101", "1.5", "4294967296")) {
+            assertEquals(2, cli.run(listOf("extract-frame", "--input", "not-opened", "--frame-index", "0", "--format", "Jpeg", "--quality", quality, "--output-dir", "not-created")) {})
+        }
+        assertEquals(2, cli.run(listOf("detect", "--input", "not-opened", "--quality", "75")) {})
+    }
     @Test fun int64AndUint64UseDecimalStringsForJavaScriptSafeJson() {
         assertEquals("\"9223372036854775807\"", Json.encode(Long.MAX_VALUE))
         assertEquals("\"18446744073709551615\"", Json.encode(ULong.MAX_VALUE))

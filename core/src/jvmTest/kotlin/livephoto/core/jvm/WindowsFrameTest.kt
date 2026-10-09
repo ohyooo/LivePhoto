@@ -53,6 +53,34 @@ class WindowsFrameTest {
     @Test fun actualQuickTimeNclcFramesMatchIndependentPixelsWithoutRangeGuessing(): Unit = runImmediate {
         checkProfile("high", mov = true)
     }
+    @Test fun explicitJpegQualityRunsThroughActualSystemFrameAndAtomicCorePublication(): Unit = runImmediate {
+        val backends = WindowsMediaFoundationBackend.available()
+        if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(1, backends.size)
+        assumeTrue("Windows decoder unavailable; no quality extraction was run", backends.isNotEmpty())
+        val source = livephoto.core.memory.MemoryBinarySource(Bytes(golden("baseline.mp4", "0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6")), SourceId("quality-baseline"))
+        try {
+            val reader = BinaryReader(source, context)
+            val range = ByteRange(0uL, source.size().orThrow())
+            val before = sha256Range(reader, range).orThrow()
+            val tables = mutableListOf<List<Int>>()
+            for (quality in listOf(0u, 35u, 100u)) {
+                val output = MemoryOutputTransaction(context, "quality-$quality")
+                val frame = DefaultLivePhotoCore(backends.single()).extractFrame(ExtractFrameRequest(ResourceRef(SourceSet.Single(source)),
+                    CoverPosition.FrameIndex(3uL), ImageEncoding(ImageFormat.Jpeg, quality), output, context)).orThrow()
+                assertEquals(3uL, frame.actualFrameIndex); assertEquals(0, frame.actualTime.compareTo(Time(3, 25u)))
+                assertTrue(frame.operation.execution.none { it.transcoded || it.remuxed })
+                assertTrue(frame.operation.execution.any { it.reason.contains("JPEG quality=$quality") })
+                val jpeg = frame.operation.output.assets.single().readableSource!!
+                try {
+                    val bytes = BinaryReader(jpeg, context).readBuffer(0uL, jpeg.size().orThrow().toUInt()).orThrow().toByteArray()
+                    tables += WindowsJpegEncoderTest().quantization(bytes)
+                } finally { jpeg.close() }
+                assertEquals(before, sha256Range(reader, range).orThrow())
+            }
+            assertTrue(tables.first().all { it == 255 }); assertTrue(tables.last().all { it == 1 })
+            assertTrue(tables[0].sum() > tables[1].sum() && tables[1].sum() > tables[2].sum())
+        } finally { source.close() }
+    }
     private suspend fun checkProfile(profile: String, mov: Boolean = false) {
         val backends = WindowsMediaFoundationBackend.available()
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(1, backends.size)
