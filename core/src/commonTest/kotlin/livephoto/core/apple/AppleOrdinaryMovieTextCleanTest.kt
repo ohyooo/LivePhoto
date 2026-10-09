@@ -9,10 +9,10 @@ import kotlin.test.*
 class AppleOrdinaryMovieTextCleanTest {
     private val context = Context(Limits(16_000_000uL, 16_000_000uL, maxMetadataBytes = 8_000_000uL))
     private val core = DefaultLivePhotoCore()
-    private suspend fun pair(): SourceSet.Pair {
+    private suspend fun pair(metadata: ByteArray = OrdinaryMovieTextFixtures.envelope()): SourceSet.Pair {
         val result = core.create(CreateRequest(
             MemoryBinarySource(Bytes(AppleOrdinaryExifTest().image(Endian.Little)), SourceId("text-clean-image")),
-            MemoryBinarySource(Bytes(OrdinaryMovieTextFixtures.movie()), SourceId("text-clean-movie")),
+            MemoryBinarySource(Bytes(OrdinaryMovieTextFixtures.movie(metadata = metadata)), SourceId("text-clean-movie")),
             ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
             output = MemoryOutputTransaction(context, "text-clean-create"), context = context)).orThrow()
         return SourceSet.Pair(result.output.assets[0].readableSource!!, result.output.assets[1].readableSource!!)
@@ -75,7 +75,8 @@ class AppleOrdinaryMovieTextCleanTest {
     }
 
     @Test fun corruptedStagedOrdinaryTextAbortsTheWholeCleanPair(): Unit = runImmediate {
-        val input = pair(); val tx = MemoryOutputTransaction(context, "text-clean-tamper")
+        for (metadata in listOf(OrdinaryMovieTextFixtures.envelope(), OrdinaryMovieTextFixtures.indexedEnvelope())) {
+        val input = pair(metadata); val tx = MemoryOutputTransaction(context, "text-clean-tamper")
         val output = object : OutputTransaction by tx {
             override suspend fun openStaged(id: AssetId): CoreResult<BinarySource> {
                 val view = tx.openStaged(id).orThrow()
@@ -97,5 +98,29 @@ class AppleOrdinaryMovieTextCleanTest {
         assertEquals(IssueCode("POSTCONDITION_FAILED"), assertIs<CoreResult.Failure>(core.split(SplitRequest(input,
             output = output, context = context))).error.code)
         assertEquals(TransactionState.Aborted, tx.query().orThrow().state); assertTrue(tx.committedAssets().isEmpty())
+        }
+    }
+
+    @Test fun indexedTextCleanAndConvertRetainOrdinaryKeysWithoutClaimingStrictFirstCleanup(): Unit = runImmediate {
+        val input = pair(OrdinaryMovieTextFixtures.indexedEnvelope())
+        val original = hash(input.video); val text = AppleOrdinaryMovieTextTest().envelope(input.video)
+        val split = core.split(SplitRequest(input, output = MemoryOutputTransaction(context, "mdta-clean"), context = context)).orThrow()
+        val movie = split.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!
+        assertEquals(text, AppleOrdinaryMovieTextTest().envelope(movie))
+        assertNull(AppleVideoReader.read(BinaryReader(movie, context), ParseBudget(context)).orThrow())
+        val repeated = core.split(SplitRequest(SourceSet.Single(movie), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+            output = MemoryOutputTransaction(context, "mdta-repeat"), context = context)).orThrow()
+        assertEquals(hash(movie), hash(repeated.output.assets.single().readableSource!!))
+        val converted = core.convert(ConvertRequest(input, ProtocolSelector(ProtocolIds.GoogleV2),
+            output = MemoryOutputTransaction(context, "mdta-convert"), context = context)).orThrow()
+        val extracted = core.extract(ExtractRequest(SourceSet.Single(converted.output.assets.single().readableSource!!), emptyList(),
+            output = MemoryOutputTransaction(context, "mdta-extract"), context = context)).orThrow()
+        assertEquals(text, AppleOrdinaryMovieTextTest().envelope(extracted.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!))
+        assertTrue(converted.execution.none { it.remuxed || it.transcoded })
+        assertTrue(split.preservation.records.any { it.guarantee == Guarantee.MetadataPreserving && it.outcome == GuaranteeOutcome.Unknown })
+        val blocked = MemoryOutputTransaction(context, "mdta-clean-strict")
+        assertEquals(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), assertIs<CoreResult.Failure>(core.split(SplitRequest(input,
+            policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = blocked, context = context))).error.code)
+        assertTrue(blocked.committedAssets().isEmpty()); assertEquals(original, hash(input.video))
     }
 }

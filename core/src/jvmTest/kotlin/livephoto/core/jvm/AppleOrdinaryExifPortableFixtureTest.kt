@@ -21,6 +21,10 @@ class AppleOrdinaryExifPortableFixtureTest {
             .use { it.readNBytes(40_000).toString(Charsets.US_ASCII).trim() })
         assertEquals("9d2be28350c0c807ac7164c80968ef75ce875fb8d6da04b2a3d89165c82aa6a4",
             Sha256().also { it.update(Bytes(ordinaryMov)) }.finish().value)
+        val ordinaryMdta = Base64.getDecoder().decode(javaClass.getResourceAsStream("/apple-media/ordinary-mdta.mp4.base64")!!
+            .use { it.readNBytes(40_000).toString(Charsets.US_ASCII).trim() })
+        assertEquals("0d32b1e5e477152a1b31e4e57ccd3ffc0bc1be725d0dc4a1f339b6b3d2956e2c",
+            Sha256().also { it.update(Bytes(ordinaryMdta)) }.finish().value)
         val fixtures = linkedMapOf<String, ByteArray>(
             "ordinary-big.jpg" to AppleOrdinaryExifTest().image(Endian.Big),
             "ordinary-little.jpg" to AppleOrdinaryExifTest().image(Endian.Little),
@@ -28,6 +32,7 @@ class AppleOrdinaryExifPortableFixtureTest {
             "motion.mp4" to WindowsEncodedFixtures.bytes("remux-main"),
             "ordinary-text.mp4" to OrdinaryMovieTextFixtures.movie(WindowsEncodedFixtures.bytes("remux-main")),
             "ordinary-text.mov" to ordinaryMov,
+            "ordinary-mdta.mp4" to ordinaryMdta,
             "motion.mov" to mov)
         for (endian in listOf("big", "little")) for (container in listOf("mp4", "mov")) {
             val image = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-$endian.jpg")), SourceId("ordinary-$endian"))
@@ -40,8 +45,8 @@ class AppleOrdinaryExifPortableFixtureTest {
             assertTrue(result.execution.none { it.remuxed || it.transcoded })
             result.output.assets.forEach { it.readableSource?.close() }; image.close(); video.close()
         }
-        for (container in listOf("mp4", "mov")) {
-            val ordinary = MemoryBinarySource(Bytes(fixtures.getValue("ordinary-text.$container")), SourceId("ordinary-text"))
+        for ((fixture, container) in listOf("ordinary-text.mp4" to "mp4", "ordinary-text.mov" to "mov", "ordinary-mdta.mp4" to "mp4")) {
+            val ordinary = MemoryBinarySource(Bytes(fixtures.getValue(fixture)), SourceId("ordinary-text"))
             val ordinaryResult = DefaultLivePhotoCore().create(CreateRequest(
                 MemoryBinarySource(Bytes(fixtures.getValue("ordinary-big.jpg")), SourceId("ordinary-text-image")), ordinary,
                 ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-$container")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),

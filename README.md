@@ -179,9 +179,13 @@ Linux（Bash/Zsh）：
 
 可显式指定 `--profile jpeg-mov`，效果相同。不需要媒体后端，也不会隐式把 MP4 改成 MOV；MP4 输入必须显式使用 `--profile jpeg-mp4`。默认 Create 为 `Experimental`，不代表任意相机 JPEG/MakerNote 的 Generic Create 已完成；默认 ConvertTo 仍为 `Planned`，转换须指定已实现的 profile，HEIC Create/ConvertTo 也未实现。
 
-视频允许一个经完整校验的 iTunes 普通文本目录：标题、作者、注释、编码工具与版权，每个字段必须唯一、UTF-8、locale=0，非空且不超过 64 KiB。目录原字节、媒体样本和时间线保留，不重封装、不转码；结构参考 [FFmpeg 的实际写入实现](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c)。freeform、其它 keys 表、未知字段/编码及多个目录仍拒绝。支持有限 Apple 追加写入、读取和 Clean/Split，以及有限 Apple→Google 转换；不放宽 remux/trim/transcode 的 metadata 门禁。首次清理/转换仍有未知关联，`MetadataPreserving=Unknown`，因此严格策略拒绝；清理后的普通视频再次 Split 才可证明整文件字节不变。
+视频允许一个经完整校验的 iTunes 普通文本目录：标题、作者、注释、编码工具与版权，每个字段必须唯一、UTF-8、locale=0，非空且不超过 64 KiB。目录原字节、媒体样本和时间线保留，不重封装、不转码；结构参考 [FFmpeg 的实际写入实现](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/movenc.c)。freeform、未声明的 keys 表、未知字段/编码及多个目录仍拒绝。支持有限 Apple 追加写入、读取和 Clean/Split，以及有限 Apple→Google 转换；不放宽 remux/trim/transcode 的 metadata 门禁。首次清理/转换仍有未知关联，`MetadataPreserving=Unknown`，因此严格策略拒绝；清理后的普通视频再次 Split 才可证明整文件字节不变。
 
 另支持经验证的旧式 QuickTime 普通文本目录：`©nam/©ART/©des/©cmt/©swr/©cpy`；每个 atom 唯一，使用精确 16-bit 字节长度、`und` 语言码和有效 UTF-8，非空且不超过 65,535 字节。不猜测 MacRoman、其它语言编码或混合目录；目录仍只原样保留，不重写普通字段。两种注释 atom 可并存，不将其当作 Live Photo CID。
+
+还支持 FFmpeg `use_metadata_tags` 的有限 `moov/udta/meta` 普通文本：仅 `title/artist/comment/encoder/copyright`，唯一 `mdta` 键、完整一对一的 1-based 值索引，UTF-8 类型 1、locale=0，非空且不超过 64 KiB。目录整体原样保留，不能混入 CID、still-image-time 或私有字段；不开放电影级 Apple metadata 合并、混合 timed metadata 或通用键表改写。
+
+**已知 FFprobe 展示差异：** 本轮索引式文本素材在追加 Apple CID 后，FFprobe 将普通标题显示成“原标题 + CID”，但 Core 独立校验确认原目录字节未变；Clean 后四个普通标签回读准确。FFmpeg 的 [MOV 读取器](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/mov.c)只加载首个 metadata keys 表，这与观察一致，不能据此声称所有工具或相册正确处理多个 metadata 作用域。该兼容项仍待后续验收，不通过删除普通字段规避。
 
 ### 修复：先预览，再明确写入
 
@@ -430,6 +434,8 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 ## 进度、已完成与 TODO
 
+Apple 有限索引式普通文本：新全量 **826 tests，805 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。真实编码 MP4 与合成正反例验证严格 Create、目录/样本原样保留、Clean/转换、严格重复复制及整对篡改回滚；未知键/namespace、重复键、缺失/重复/越界索引和非法编码仍拒绝。新完整 Windows 无 FFmpeg 便携包对三种文本格式逐项验收通过，另用已有 FFmpeg 完整解码其 9 个生成视频，Clean/repeat 普通标签回读准确；发布结果按对应提交检查。不等同于通用 mdta 写入或设备认证，FFprobe 的成对标题展示差异见上文。
+
 ### 最新可核验检查点
 
 Apple 普通 MOV 短文本扩展：新全量 **823 tests，802 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。合成结构正反例与真实编码 MOV 验证目录原字节保留、严格 Create、Clean 与再次严格复制；新完整 Windows 无 FFmpeg 便携包对 MP4/MOV 分别执行全部新验收。长度/语言/重复字段/未知类型/混合目录继续拒绝，不等同于通用 QuickTime metadata 或设备认证。
@@ -571,7 +577,9 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。raw 保留的追加装配与读取不授权 remux/trim/transcode 改写。
 - [x] Apple 有限普通文本 Clean/Split 与 Apple→Google：821 项新全量，800 项执行成功、21 项历史系统专项跳过；选择性清除 CID/专用轨、原目录/样本保留、再次 Split 整文件复制；首次 Unknown 与严格拒绝、篡改回滚及转换后原样提取回归通过。
-- [ ] 其它普通电影 metadata / mdta、混合 timed metadata 的选择性清理和转换：需要独立 ownership/引用关系证明，不能借有限文本的保留结果开放未知结构。
+- [ ] 其它普通电影 metadata、复杂 mdta 与混合 timed metadata 的选择性清理和转换：需要独立 ownership/引用关系证明，不能借有限文本的保留结果开放未知结构。
+- [x] 有限索引式 `udta/meta` 普通文本：826 项新全量，805 项执行成功、21 项历史系统专项跳过；唯一已知键、完整值索引、UTF-8/locale 门禁，原样保留 Create/Clean/转换及整对回滚。不是电影级 CID/普通键合并或媒体后端改写授权。
+- [ ] 索引式普通文本与 Apple CID 并存的跨工具兼容：已观察到 FFprobe 扁平化标题混入 CID；原目录原字节保留及 Clean 标签正常不代表此项完成，需更多独立读取器/相册证据。
 - [x] 有限旧式 QuickTime 普通文本：823 项新全量与完整 Windows 双容器便携验收通过；真实 MOV、精确长度/und/UTF-8/唯一 atom、目录原样保留，未知语言/编码/混合目录继续拒绝。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
 - [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。

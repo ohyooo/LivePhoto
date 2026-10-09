@@ -23,6 +23,14 @@ internal object OrdinaryMovieTextFixtures {
         atom(type, unsignedBytes(length.toULong(), 2, Endian.Big).toByteArray() + unsignedBytes(language.toULong(), 2, Endian.Big).toByteArray() + text)
     fun quickTimeEnvelope(): ByteArray = atom("udta", listOf("\u00a9nam", "\u00a9ART", "\u00a9des", "\u00a9cmt", "\u00a9swr", "\u00a9cpy")
         .fold(byteArrayOf()) { bytes, type -> bytes + quickTimeItem(type, "ordinary 文本 $type".encodeToByteArray()) })
+    fun indexedEnvelope(names: List<String> = listOf("title", "artist", "comment", "encoder", "copyright"),
+        indices: List<UInt> = names.indices.map { it.toUInt() + 1u }, namespace: String = "mdta", count: UInt = names.size.toUInt(),
+        value: ByteArray = "ordinary 文本".encodeToByteArray(), kind: UInt = 1u, locale: UInt = 0u,
+        extra: ByteArray = byteArrayOf()): ByteArray = atom("udta", GoogleFixtures.fullBox("meta",
+        atom("hdlr", ByteArray(8) + "mdta".encodeToByteArray() + ByteArray(13)) +
+        GoogleFixtures.fullBox("keys", GoogleFixtures.u32(count) + names.fold(byteArrayOf()) { bytes, name -> bytes + atom(namespace, name.encodeToByteArray()) }) +
+        atom("ilst", indices.fold(byteArrayOf()) { bytes, index -> bytes + item(
+            unsignedBytes(index.toULong(), 4, Endian.Big).toByteArray().map { (it.toInt() and 255).toChar() }.joinToString(""), value, kind, locale) }) + extra))
 
     /** Retire old moov without moving any sample, append its unchanged children plus the test envelope. */
     fun movie(base: ByteArray = GoogleFixtures.video().bytes, metadata: ByteArray = envelope()): ByteArray {
@@ -140,6 +148,7 @@ class AppleOrdinaryMovieTextTest {
     }
 
     @Test fun changedStagedOrdinaryTextAbortsBothAssets(): Unit = runImmediate {
+        for (metadata in listOf(OrdinaryMovieTextFixtures.envelope(), OrdinaryMovieTextFixtures.indexedEnvelope())) {
         val tx = MemoryOutputTransaction(context, "text-tamper")
         val output = object : OutputTransaction by tx {
             override suspend fun openStaged(id: AssetId): CoreResult<BinarySource> {
@@ -160,7 +169,54 @@ class AppleOrdinaryMovieTextTest {
                 })
             }
         }
-        assertIs<CoreResult.Failure>(core.create(request(OrdinaryMovieTextFixtures.movie(), output)))
+        assertIs<CoreResult.Failure>(core.create(request(OrdinaryMovieTextFixtures.movie(metadata = metadata), output)))
         assertEquals(TransactionState.Aborted, tx.query().orThrow().state); assertTrue(tx.committedAssets().isEmpty())
+        }
+    }
+
+    @Test fun indexedOrdinaryTextRetainsRawKeysValuesAndSamplesWithoutAuthorizingMediaRewrite(): Unit = runImmediate {
+        // Values need not be in key-table order; their numeric indices, not list position, own the association.
+        for (indices in listOf(listOf(1u, 2u, 3u, 4u, 5u), listOf(5u, 3u, 1u, 4u, 2u))) {
+            val metadata = OrdinaryMovieTextFixtures.indexedEnvelope(indices = indices)
+            val bytes = OrdinaryMovieTextFixtures.movie(metadata = metadata)
+            val req = request(bytes, MemoryOutputTransaction(context, "mdta-create"))
+            val result = core.create(req).orThrow()
+            assertEquals(Bytes(metadata), envelope(result.output.assets[1].readableSource!!))
+            assertEquals(Verdict.Valid, result.validation.verdict)
+            val before = BinaryReader(req.video, context); val after = BinaryReader(result.output.assets[1].readableSource!!, context)
+            val a = BmffVideoProbe(before).probe(ByteRange(0uL, bytes.size.toULong())).orThrow()
+            val b = BmffVideoProbe(after, allowTimedMetadata = true).probe(ByteRange(0uL, after.identity().orThrow().size)).orThrow()
+            RemuxVerification.verify(before, a, after, b.copy(tracks = b.tracks.filter { it.handler != "meta" }))
+            for ((trim, transcode) in listOf(false to false, true to false, true to true))
+                assertEquals(IssueCode("UNSAFE_METADATA_REWRITE"), assertIs<CoreResult.Failure>(attempt {
+                    RemuxVerification.metadata(before, a, trim, transcode) }).error.code)
+        }
+    }
+
+    @Test fun indexedUnknownNamespacesAuthorityKeysCountIndexAndEncodingCannotAuthorizeCreate(): Unit = runImmediate {
+        val bad = listOf(
+            OrdinaryMovieTextFixtures.indexedEnvelope(names = listOf("title", "title")),
+            OrdinaryMovieTextFixtures.indexedEnvelope(names = listOf("com.apple.quicktime.content.identifier")),
+            OrdinaryMovieTextFixtures.indexedEnvelope(names = listOf("com.apple.quicktime.still-image-time")),
+            OrdinaryMovieTextFixtures.indexedEnvelope(names = listOf("private")),
+            OrdinaryMovieTextFixtures.indexedEnvelope(namespace = "abcd"),
+            OrdinaryMovieTextFixtures.indexedEnvelope(count = 4u),
+            OrdinaryMovieTextFixtures.indexedEnvelope(count = UInt.MAX_VALUE),
+            OrdinaryMovieTextFixtures.indexedEnvelope(indices = listOf(0u, 2u, 3u, 4u, 5u)),
+            OrdinaryMovieTextFixtures.indexedEnvelope(indices = listOf(1u, 2u, 3u, 4u, 6u)),
+            OrdinaryMovieTextFixtures.indexedEnvelope(indices = listOf(1u, 2u, 3u, 4u, 4u)),
+            OrdinaryMovieTextFixtures.indexedEnvelope(indices = listOf(1u)),
+            OrdinaryMovieTextFixtures.indexedEnvelope(value = byteArrayOf()),
+            OrdinaryMovieTextFixtures.indexedEnvelope(value = byteArrayOf(65, 0, 66)),
+            OrdinaryMovieTextFixtures.indexedEnvelope(value = byteArrayOf(0xc0.toByte(), 0x80.toByte())),
+            OrdinaryMovieTextFixtures.indexedEnvelope(kind = 21u),
+            OrdinaryMovieTextFixtures.indexedEnvelope(locale = 1u),
+            OrdinaryMovieTextFixtures.indexedEnvelope(extra = OrdinaryMovieTextFixtures.atom("free", byteArrayOf())),
+            OrdinaryMovieTextFixtures.indexedEnvelope() + OrdinaryMovieTextFixtures.indexedEnvelope())
+        for ((index, metadata) in bad.withIndex()) {
+            val output = MemoryOutputTransaction(context, "mdta-invalid-$index")
+            assertIs<CoreResult.Failure>(core.create(request(OrdinaryMovieTextFixtures.movie(metadata = metadata), output)))
+            assertTrue(output.query().orThrow().assetIds.isEmpty())
+        }
     }
 }
