@@ -19,6 +19,12 @@ class MediaBackendDiscoveryTest {
         try { block(directory) } finally { Files.list(directory).use { paths -> paths.forEach(Files::delete) }; Files.delete(directory) }
     }
 
+    @Test fun desktopDefaultDiscoveryNeverAdvertisesRetainedSystemAdapters() {
+        val discovery = JvmMediaBackends.discover(Path.of("missing-desktop-ffmpeg-for-default-discovery"))
+        assertTrue(discovery.backend?.capabilities()?.backendIds.orEmpty().all { it == "ffmpeg-external" })
+        assertTrue(discovery.issues.any { it.code.value == "FFMPEG_EXPLICIT_PATH_UNAVAILABLE" })
+    }
+
     @Test fun executablePreflightHasBoundedColdStartBudgetAndNeverUsesAShell() {
         val path = Path.of("chosen ffmpeg & literal.exe")
         var calls = 0

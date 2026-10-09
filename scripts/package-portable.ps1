@@ -87,7 +87,11 @@ else {
 $launcher = Join-Path $verify $(if ($IsWindows) { 'LivePhoto/LivePhoto.exe' } elseif ($IsMacOS) { 'LivePhoto.app/Contents/MacOS/LivePhoto' } else { 'LivePhoto/bin/LivePhoto' })
 Push-Location $verify
 try {
-    if ($IsWindows) {
+    # Desktop system adapters remain in source, but this delivery never initializes them.
+    $desktopSystemMediaEnabled = $false
+    $windowsDecoderAvailable = $false
+    $decoderExit = 3
+    if ($IsWindows -and $desktopSystemMediaEnabled) {
         # Independent launcher uses the bundled runtime. Native access is restricted to this worker,
         # not granted to the primary CLI; bootstrap does not advertise a media decode capability.
         $mediaWorker = Join-Path $verify 'LivePhoto/WindowsMediaHelper.exe'
@@ -126,6 +130,7 @@ try {
     $mediaJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'missing-ffmpeg.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Portable media discovery failed.' }
     $media = ($mediaJson | ConvertFrom-Json).result
+    if (@($media.capabilities.backendIds | Where-Object { $_ -ne 'ffmpeg-external' }).Count -ne 0) { throw 'Desktop discovery must not initialize system adapters.' }
     if (-not ($media.discoveryIssues | Where-Object { $_.code.value -eq 'FFMPEG_EXPLICIT_PATH_UNAVAILABLE' })) {
         throw 'Portable media discovery did not report the unavailable explicit tool.'
     }

@@ -143,6 +143,8 @@ internal class WindowsMediaFoundationBackend(private val command: List<String>) 
                     listOf(WindowsMediaFoundationBackend(command)) else emptyList()
             } catch (_: Exception) { emptyList() }
         }
-        fun available(): List<MediaBackend> = installed
+        // Retained historical adapter acceptance only; desktop discovery never calls this.
+        // Do not initialize the lazy native preflight during normal builds/tests.
+        fun available(): List<MediaBackend> = if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") installed else emptyList()
     }
 }

@@ -23,6 +23,7 @@ class WindowsMediaApiPreflightTest {
         assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
     }
     @Test fun existingWindowsApiStartsAndShutsDownInAnIsolatedExistingRuntime() {
+        org.junit.Assume.assumeTrue("Retained desktop system API acceptance is disabled", System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true")
         val result = run(listOf("--preflight"), true)
         assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
         if (System.getProperty("os.name").startsWith("Windows") && System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") {
@@ -34,6 +35,7 @@ class WindowsMediaApiPreflightTest {
         }
     }
     @Test fun decoderEnumerationIsSeparateFromRuntimeBootstrap() {
+        org.junit.Assume.assumeTrue("Retained desktop system API acceptance is disabled", System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true")
         val result = run(listOf("--decoder-preflight"), true)
         assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") {

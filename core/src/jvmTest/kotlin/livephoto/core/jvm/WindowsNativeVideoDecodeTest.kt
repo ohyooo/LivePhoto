@@ -21,6 +21,7 @@ class WindowsNativeVideoDecodeTest {
             classes.joinToString(File.pathSeparator), "livephoto.core.jvm.WindowsMediaApiWorker") + args, 30_000)
     }
     private fun usable(): Boolean {
+        org.junit.Assume.assumeTrue("Retained desktop system API acceptance is disabled", System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true")
         val result = worker(listOf("--decoder-preflight"))
         assertFalse(result.timedOut || result.ioFailed || result.outputLimited)
         if (System.getenv("LIVEPHOTO_REQUIRE_WINDOWS_MEDIA") == "true") assertEquals(0, result.code, result.output)

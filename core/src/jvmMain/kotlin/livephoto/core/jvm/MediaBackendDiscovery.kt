@@ -13,11 +13,12 @@ public data class BackendDiscovery(
 /** No downloads, shell aliases, working-directory lookup, or implicit installation. */
 public object JvmMediaBackends {
     /**
-     * Explicit executable, then absolute PATH entries, then injected OS API adapters.
-     * Bundled system adapters report only their finite, runtime-checked implemented capabilities.
+     * Desktop defaults to an explicit executable, then absolute PATH entries, then disabled.
+     * Retained system adapters are not discovered or initialized automatically.
+     * Explicit dependency injection remains available for isolated adapter tests.
      * Unsupported operations may fall through; decode/IO/policy errors never trigger a retry.
      */
-    public fun discover(ffmpegPath: Path? = null, systemBackends: List<MediaBackend> = WindowsMediaFoundationBackend.available()): BackendDiscovery =
+    public fun discover(ffmpegPath: Path? = null, systemBackends: List<MediaBackend> = emptyList()): BackendDiscovery =
         discover(ffmpegPath, System.getenv("PATH") ?: "", System.getProperty("os.name").startsWith("Windows"), systemBackends, ::verifyFfmpeg)
 
     internal fun verifyFfmpeg(path: Path, run: (List<String>, Long) -> ProcessResult = { arguments, timeout -> ExternalProcess.run(arguments, timeout) }): Boolean {
