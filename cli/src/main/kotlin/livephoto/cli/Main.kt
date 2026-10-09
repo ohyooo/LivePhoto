@@ -28,7 +28,7 @@ Key/frame: exactly one of --frame-index N or --time-us N [--track-id ID for fram
 Extract-frame: [--resource ID] (select an embedded video in a live-photo carrier); extract-frame/replace-cover [--quality 0..100] (backend-dependent)
 Validate: [--layers Structure,Protocol,Media]
 Media: --format Jpeg|Png; trim --start-us N --end-us N [--mode LosslessPreferred|LosslessOnly|Exact] [--allow-transcode]
-Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, then available system adapters, otherwise disabled
+Backend: [--ffmpeg EXECUTABLE]; otherwise PATH, otherwise disabled (no desktop system API fallback)
 Probe: [--resource ID] [--decode-check] (never downloads media tools)
 Remux/transcode: --container Mp4|Mov; remux [--resource ID]; transcode --codec Avc|Hevc --allow-transcode
 Common: --strict, --max-bytes N (default 1 GiB), --log-level off|error|debug|trace, --help, --version

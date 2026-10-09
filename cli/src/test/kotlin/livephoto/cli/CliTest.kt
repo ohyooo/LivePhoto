@@ -62,6 +62,10 @@ class CliTest {
             val lines = mutableListOf<String>()
             assertEquals(0, Cli().run(args, lines::add))
             assertTrue(lines.single().isNotBlank())
+            if (args == listOf("--help")) {
+                assertTrue(lines.single().contains("otherwise PATH, otherwise disabled (no desktop system API fallback)"))
+                assertFalse(lines.single().contains("then available system adapters"))
+            }
         }
     }
     @Test fun invalidOptionsNeverReachCore() = blocking {
