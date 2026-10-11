@@ -137,7 +137,16 @@ internal fun validateEsds(bytes: Bytes, budget: ParseBudget? = null): AacConfigu
     if (channelConfiguration !in 1..7) unsupported("AAC channel layout is not implemented")
     val channelCount = if (channelConfiguration == 7) 8u else channelConfiguration.toUInt()
     if (bits(1) != 0 || bits(1) != 0 || bits(1) != 0) unsupported("AAC frame/core-coder/extension flags are not implemented")
-    if (specificBytes.size != if (frequency == 15) 5 else 2) unsupported("Additional AAC sync-extension configuration is not implemented")
+    val baseSize = if (frequency == 15) 5 else 2
+    if (specificBytes.size != baseSize) {
+        // Known AAC-LC configuration: syncExtensionType=0x2b7, extensionAudioObjectType=5,
+        // sbrPresentFlag=0. No spectral extension, rate/channel change, or audio encoding.
+        if (specificBytes.size < baseSize + 3) corrupt("AAC sync-extension configuration is truncated")
+        if (specificBytes.size != baseSize + 3) unsupported("Additional AAC sync-extension configuration is not implemented")
+        if (bits(11) != 0x2b7 || bits(5) != 5) unsupported("AAC sync-extension type is not implemented")
+        if (bits(1) != 0) unsupported("AAC spectral band replication is not implemented")
+        if (bits(7) != 0) corrupt("AAC sync-extension padding is nonzero")
+    }
     cursor.index = specific.end
     if (cursor.index != decoder.end) unsupported("Additional audio decoder descriptors are not implemented")
     val sl = descriptor(es.end)

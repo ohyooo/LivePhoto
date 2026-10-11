@@ -70,7 +70,8 @@ internal object GoogleFixtures {
                 put16(header, 6, 1); put16(header, 16, 2); put16(header, 18, 16)
                 put32(header, 24, 48000u shl 16)
                 // Independent ES_Descriptor -> DecoderConfig -> AAC-LC ASC, then SLConfig.
-                val es = bytes(3, 25, 0, 2, 0, 4, 17, 0x40, 0x15) + ByteArray(11) + bytes(5, 2) + audioConfig + bytes(6, 1, 2)
+                require(audioConfig.size in 2..64)
+                val es = bytes(3, 23 + audioConfig.size, 0, 2, 0, 4, 15 + audioConfig.size, 0x40, 0x15) + ByteArray(11) + bytes(5, audioConfig.size) + audioConfig + bytes(6, 1, 2)
                 val audioStsd = fullBox("stsd", u32(1u) + box("mp4a", header + fullBox("esds", es)))
                 val audioStts = fullBox("stts", u32(1u) + u32(audioSampleCount) + u32(1024u))
                 val audioStsc = fullBox("stsc", u32(1u) + u32(1u) + u32(audioSampleCount) + u32(1u))

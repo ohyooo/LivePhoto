@@ -20,11 +20,13 @@ class FfmpegAudioTrimIntegrationTest {
         assumeTrue("No existing FFmpeg; audio trim was not executed", found.ffmpegPath != null)
         return found
     }
-    private suspend fun fixture(found: BackendDiscovery, twoAudio: Boolean = true, body: suspend (BinarySource, VideoStructure, BinaryReader, DefaultLivePhotoCore) -> Unit) {
+    private suspend fun fixture(found: BackendDiscovery, twoAudio: Boolean = true, directConfiguration: Boolean = false,
+        body: suspend (BinarySource, VideoStructure, BinaryReader, DefaultLivePhotoCore) -> Unit) {
         val directory = Files.createTempDirectory("livephoto-audio-trim-")
         val file = directory.resolve("video with two audio tracks.mp4")
         val videoOnly = directory.resolve("video.mp4")
-        val audio = listOf(directory.resolve("mono.aac"), directory.resolve("stereo.aac"))
+        val extension = if (directConfiguration) "m4a" else "aac"
+        val audio = listOf(directory.resolve("mono.$extension"), directory.resolve("stereo.$extension"))
         fun generate(arguments: List<String>) {
             val process = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + arguments, 60_000L)
             assertEquals(0, process.code, process.output)
@@ -34,9 +36,10 @@ class FfmpegAudioTrimIntegrationTest {
                 "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "3", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                 "-use_editlist", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", videoOnly.toString()))
             for ((index, path) in audio.withIndex()) generate(listOf("-f", "lavfi", "-i", "sine=frequency=${440 + index * 440}:sample_rate=${if (index == 0) 44100 else 48000}:duration=1.6",
-                "-c:a", "aac", "-b:a", "64k", "-ac", (index + 1).toString(), "-flags:a", "+bitexact", "-f", "adts", path.toString()))
+                "-c:a", "aac", "-b:a", "64k", "-ac", (index + 1).toString(), "-flags:a", "+bitexact") +
+                (if (directConfiguration) listOf("-use_editlist", "0", "-fflags", "+bitexact", "-write_btrt", "0") else listOf("-f", "adts")) + listOf(path.toString()))
             generate(listOf("-i", videoOnly.toString(), "-i", audio[0].toString(), "-i", audio[1].toString(), "-map", "1:a", "-map", "0:v") + (if (twoAudio) listOf("-map", "2:a") else emptyList()) + listOf(
-                "-c", "copy", "-bsf:a", "aac_adtstoasc", "-use_editlist", "0", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0",
+                "-c", "copy") + (if (directConfiguration) emptyList() else listOf("-bsf:a", "aac_adtstoasc")) + listOf("-use_editlist", "0", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0",
                 "-streamid", "0:4", "-streamid", "1:17") + (if (twoAudio) listOf("-streamid", "2:29") else emptyList()) + listOf("-use_stream_ids_as_track_ids", "1", file.toString()))
             val source = FileBinarySource(file)
             try {
@@ -50,6 +53,33 @@ class FfmpegAudioTrimIntegrationTest {
                 assertEquals(hash, sha256Range(reader, range).orThrow())
             } finally { source.close() }
         } finally { (listOf(file, videoOnly) + audio).forEach { Files.deleteIfExists(it) }; Files.delete(directory) }
+    }
+
+    @Test fun knownAbsentSbrConfigurationIsPreservedByRealAllTrackRemuxAndTrim(): Unit = runImmediate {
+        // Encoding here creates independent test inputs only; neither tested operation may encode audio.
+        fixture(discovery(), directConfiguration = true) { source, original, _, core ->
+            for (track in original.tracks.filter { it.handler == "soun" }) {
+                val raw = track.codecConfiguration.toByteArray()
+                assertTrue(raw.asList().windowed(3).any { it == listOf(0x56.toByte(), 0xe5.toByte(), 0.toByte()) }, "Fixture must exercise the explicit absent-SBR extension")
+            }
+            val remuxRun = core.remux(RemuxRequest(ResourceRef(SourceSet.Single(source)), VideoContainer.Mp4,
+                policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "sync-remux"), context = context))
+            val remux = assertIs<CoreResult.Success<OperationResult>>(remuxRun, remuxRun.toString()).value
+            val trim = core.trim(TrimRequest(ResourceRef(SourceSet.Single(source)), TrimSpec(TimeRange(Time(130, 1000u), Time(270, 1000u))),
+                output = MemoryOutputTransaction(context, "sync-trim"), context = context)).orThrow()
+            try {
+                assertFalse(trim.wasTranscoded); assertTrue(trim.wasBitstreamPreserved)
+                for (operation in listOf(remux, trim.operation)) {
+                    assertTrue(operation.execution.none { it.transcoded })
+                    val output = operation.output.assets.single().readableSource!!
+                    val reader = BinaryReader(output, context)
+                    val actual = BmffVideoProbe(reader).probe(ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
+                    assertEquals(original.tracks.map { it.trackId }, actual.tracks.map { it.trackId })
+                    assertEquals(original.tracks.filter { it.handler == "soun" }.map { it.codecConfiguration }, actual.tracks.filter { it.handler == "soun" }.map { it.codecConfiguration })
+                    assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(output)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                }
+            } finally { (remux.output.assets + trim.operation.output.assets).forEach { it.readableSource?.close() } }
+        }
     }
 
     @Test fun nonzeroPreferredTrimCopiesBothAudioTracksAndDisclosesTheirExactPacketRanges(): Unit = runImmediate {

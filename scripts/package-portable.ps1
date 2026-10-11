@@ -866,13 +866,19 @@ try {
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=64x64:rate=25' -frames:v 40 -c:v libx264 -preset ultrafast -bf 0 -g 3 -sc_threshold 0 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $audioTrimVideo
         if ($LASTEXITCODE -ne 0) { throw 'Audio trim video fixture failed.' }
         $audioTrimInputs = @()
+        $audioTrimExtendedInputs = @()
         foreach ($rate in @(44100, 48000)) {
             $audioPath = Join-Path $verify "audio trim $rate.aac"
             & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i "sine=frequency=440:sample_rate=${rate}:duration=1.6" -c:a aac -b:a 64k -ac 1 -flags:a +bitexact -f adts $audioPath
             if ($LASTEXITCODE -ne 0) { throw 'Audio trim AAC fixture failed.' }
             $audioTrimInputs += $audioPath
+            # Independent fixtures with FFmpeg's explicit absent-SBR ASC; tested operations only copy audio.
+            $extendedPath = Join-Path $verify "audio trim $rate.m4a"
+            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i "sine=frequency=440:sample_rate=${rate}:duration=1.6" -c:a aac -b:a 64k -ac 1 -flags:a +bitexact -use_editlist 0 -fflags +bitexact -write_btrt 0 $extendedPath
+            if ($LASTEXITCODE -ne 0) { throw 'Extended AAC fixture failed.' }
+            $audioTrimExtendedInputs += $extendedPath
         }
-        $audioTrimOrders = @(@(0, 1), @(2, 0), @(1, 0, 2), @(2, 1, 0))
+        $audioTrimOrders = @(@(0, 1), @(2, 0), @(1, 0, 2), @(2, 1, 0), @(1, 0, 2), @(2, 0))
         for ($orderIndex = 0; $orderIndex -lt $audioTrimOrders.Count; $orderIndex++) {
             $order = $audioTrimOrders[$orderIndex]
             $fixture = Join-Path $verify "audio trim source $orderIndex.mp4"
@@ -881,7 +887,9 @@ try {
                 $trackIndex = $order[$streamIndex]
                 $mapping += @('-map', $trackMaps[$trackIndex], '-streamid', "$($streamIndex):$($trackIds[$trackIndex])")
             }
-            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -i $audioTrimVideo -i $audioTrimInputs[0] -i $audioTrimInputs[1] @mapping -c copy -bsf:a aac_adtstoasc -use_editlist 0 -map_metadata -1 -metadata:s:v 'encoder=' -fflags +bitexact -write_btrt 0 -use_stream_ids_as_track_ids 1 $fixture
+            $inputs = if ($orderIndex -ge 4) { $audioTrimExtendedInputs } else { $audioTrimInputs }
+            $filter = if ($orderIndex -ge 4) { @() } else { @('-bsf:a', 'aac_adtstoasc') }
+            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -i $audioTrimVideo -i $inputs[0] -i $inputs[1] @mapping -c copy @filter -use_editlist 0 -map_metadata -1 -metadata:s:v 'encoder=' -fflags +bitexact -write_btrt 0 -use_stream_ids_as_track_ids 1 $fixture
             if ($LASTEXITCODE -ne 0) { throw 'Audio trim fixture mux failed.' }
             $sourceHash = (Get-FileHash $fixture).Hash
             $trimJson = & $launcher trim --input $fixture --start-us 130000 --end-us 270000 --mode LosslessPreferred --output-dir (Join-Path $verify "audio trim result $orderIndex")
