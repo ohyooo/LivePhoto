@@ -55,6 +55,18 @@ class FfmpegAacRemuxProfileTest {
         }
     }
 
+    @Test fun grouplessAudioCannotReachExplicitVideoEncoderOrStaging(): Unit = runImmediate {
+        val source = source()
+        val reader = BinaryReader(source, context)
+        val before = sha256Range(reader, ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
+        val result = FfmpegTranscode.run(Path.of("nonexistent-ffmpeg-transcode-preflight-must-not-execute.exe"), BackendJob(
+            Operation.Transcode, listOf(ResourceRef(SourceSet.Single(source))), videoEncoding = VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4),
+            policy = MutationPolicy(transcode = TranscodePolicy.Explicit), context = context, destination = noStaging))
+        val error = assertIs<CoreResult.Failure>(result).error
+        assertEquals("CAPABILITY_UNSUPPORTED", error.code.value); assertEquals(Stage.Plan, error.stage)
+        assertEquals(before, sha256Range(reader, ByteRange(0uL, reader.identity().orThrow().size)).orThrow())
+    }
+
     @Test fun canonicalMapAndVideoOnlyRemainEligibleButMissingProofDoesNot(): Unit = runImmediate {
         for (audio in listOf(false, true)) {
             val reader = BinaryReader(source(groups(listOf(2u to 1u)), audio), context)

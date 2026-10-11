@@ -16,13 +16,13 @@ internal object TranscodeOperations {
         if (!caps.canReadStaged || request.policy.atomicity == Atomicity.AssetSetRequired && !caps.assetSetAtomic || request.policy.existingOutput == ExistingOutput.Replace && !caps.replacesAtomically)
             fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Transcode requires independent readable atomic output", Stage.Plan)
         val resource = VideoResource.open(request.video, request.context)
-        transcodeProfile(resource.video, request.encoding)
+        transcodeProfile(resource.video, request.encoding, allowCopiedAudio = true)
         RemuxVerification.metadata(resource.reader, resource.video, transcodeAvcConfiguration = true)
         resource.session.recheck()
         return resource
     }
     fun capability(): CapabilityEntry = CapabilityEntry(Operation.Transcode, Implementation.Experimental,
-        conditions = listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("explicit-bounded-single-avc1-mp4-no-audio-edit-reorder-identity-transform-preserve-every-vfr-sample")),
+        conditions = listOf(Condition(ConditionOperator.Equals, "profile", Value.Text("explicit-bounded-single-avc1-mp4-at-most-two-copied-aac-lc-no-edit-reorder-identity-transform-preserve-every-vfr-sample")),
             Condition(ConditionOperator.Equals, "pixelProfile", Value.Text("backend-proved-progressive-square-pixel-eight-bit-bt709-limited-sdr-before-and-after")),
             Condition(ConditionOperator.Equals, "guarantees", Value.Text("encoded-bitstream-changed-classified-ordinary-metadata-compared-no-full-fidelity-promise"))), verification = listOf(Verification.SourceReviewed))
     suspend fun plan(request: TranscodeRequest, backend: MediaBackend?): CoreResult<ExecutionPlan> = attempt {

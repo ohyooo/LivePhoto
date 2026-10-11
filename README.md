@@ -287,7 +287,9 @@ Linux（Bash/Zsh）：
 
 这些示例假设可用 FFmpeg 在 PATH 中，也可追加 `--ffmpeg '完整路径'`。`LosslessPreferred` 是默认裁剪模式，应读取结果中请求与实际边界；`Exact` 必要时转码仍需 `--allow-transcode`。`--frame-index` 是 **zero-based presentation order**，不是 decode order。时间参数单位为微秒。
 
-FFmpeg remux 的音频子集为 **MP4→MP4、一个视频轨＋至多两个 AAC-LC 音轨**：要求已分类的基础 ASC、canonical roll recovery map、容器及普通 metadata。逐轨保持 track ID/顺序、配置、sample、呈现时间线与 metadata，并回读验证后才发布；不会选一条音轨而丢掉其它音轨。带音频的 MP4→MOV、三条及更多音轨、未知 descriptor/metadata 或 recovery map 仍拒绝。remux 不授权编码，不代表带音频裁剪或转码已经实现。
+FFmpeg remux 的音频子集为 **MP4→MP4、一个视频轨＋至多两个 AAC-LC 音轨**：要求已分类的基础 ASC、canonical roll recovery map、容器及普通 metadata。逐轨保持 track ID/顺序、配置、sample、呈现时间线与 metadata，并回读验证后才发布；不会选一条音轨而丢掉其它音轨。带音频的 MP4→MOV、三条及更多音轨、未知 descriptor/metadata 或 recovery map 仍拒绝。remux 不授权编码，不代表音频重编码或带音频裁剪已经实现。
+
+显式 `transcode` 目前仅支持 **MP4 中至多 64 帧的单 AVC 视频**：无重排/编辑列表、identity transform，逐帧已知 BT.709 limited 8-bit SDR，不改尺寸或帧率（保留 VFR）。可带至多两个基础 AAC-LC 音轨，要求 canonical roll map、ES descriptor flags=0 和已分类 metadata；仅重新编码视频，音轨配置、每个 sample 和时间线原样保留，并完整解码与独立回读验证。它不支持 HEVC 输入、HDR、音频编码、MOV 或带音频裁剪；需要 `--allow-transcode`，不能同时要求 `--strict`。整文件 `BitstreamPreserving=Changed`、`MetadataPreserving=Unknown`，不会因音频原样复制而宣称整体无损。FFmpeg 的编码/复制区分见[官方 streamcopy 文档](https://ffmpeg.org/ffmpeg.html#Streamcopy)。
 
 `replace-cover` 与 `extract-frame` 分开：前者将抽出的帧作为动态照片主图，需要额外满足 metadata/图像编码保留门禁；`--update-key` 才请求一并修改 key。支持范围不能只从命令存在推断。
 
@@ -470,6 +472,8 @@ Apple 有限索引式普通文本：新全量 **826 tests，805 项执行成功�
 
 ### 最新可核验检查点
 
+显式 AVC/VFR 视频转码保留有限 AAC：新全量 **852 tests，831 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。真实单/双音轨、不同采样率/声道、四种轨道顺序及稀疏 ID 验证每轨 sample/configuration/时间线与普通 metadata，完整源/输出解码通过；丢轨、篡改音频 sample/配置/时间线在发布前回滚。新完整 Windows FFmpeg 便携包通过四组实际 CLI 编码/音轨保留验收，以及默认未授权、严格策略冲突、音频裁剪拒绝与全部既有 smoke。三平台 CI/上传状态按[对应提交 Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)核对；不借前一批结果，也不将缺少 FFmpeg 的 CI skip 当作实际媒体验收。
+
 Apple 普通 MOV 短文本扩展：新全量 **823 tests，802 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。合成结构正反例与真实编码 MOV 验证目录原字节保留、严格 Create、Clean 与再次严格复制；新完整 Windows 无 FFmpeg 便携包对 MP4/MOV 分别执行全部新验收。长度/语言/重复字段/未知类型/混合目录继续拒绝，不等同于通用 QuickTime metadata 或设备认证。
 
 Apple 普通电影文本 Clean/Split 与有限 Apple→Google 转换：新全量 **821 tests，800 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。仅清除确认的 CID/专用轨，普通目录原字节与媒体样本不变；再次对普通视频 Split 为严格整文件复制。首次未知关联、严格拒绝、篡改整对回滚与转换后原样提取回归通过。新完整 Windows 无 FFmpeg 便携验收通过 Create、首次 Clean、严格拒绝和再次整文件复制；不等同于通用 mdta/MakerNote/HEIC 写入或设备认证。
@@ -549,7 +553,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google/有限 Samsung/Huawei basic60/最小版本一 vivo 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
-| MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 纯协议能力及统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；运行时查询实际能力 | 更多 FFmpeg 媒体 profile 与三平台真实验收；最后移动端系统媒体 API |
+| MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；双 AAC remux 与显式 AVC 转码保留音轨；运行时查询实际能力 | 带音频裁剪、更多媒体/容器/复杂 edits profile 与三平台真实验收；最后移动端系统媒体 API |
 | CLI / 三平台便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、可选 stderr 日志、三平台打包与 smoke/artifacts、macOS 本机成品验收 | Native 原生发布尚未实施；新 Core 能力仍需逐项接入 CLI |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
@@ -635,6 +639,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] 有界双 AAC-LC MP4→MP4 remux：新全量 **847 tests，826 执行成功、21 历史系统专项跳过，0 failures / errors**；真实不同采样率/声道/频率、三种轨道顺序及稀疏 ID，每轨配置/逐 sample/metadata/源字节与完整解码通过。第二音轨独立 recovery proof、三音轨及跨容器拒绝门禁保留；对应便携与三平台产物按本提交 Actions 核对，不借上一批结果。
 - [x] Windows 有限系统无转码裁剪：803 项新全量和无 FFmpeg 完整便携验收通过；真正非零 IDR 选中 VFR 样本、时长表/offset 重建、requested/actual 与 key 重置、配置/样本/metadata 独立证明、系统完整解码。Exact 仅无编码可满足时可用，不开放 encoder、音轨、B 帧、MOV、复杂 edit/sample groups 或隐藏 preroll。
 - [ ] 完善统一 FFmpeg 抽帧/裁剪/transcode 的业务 profile 与三平台证据。音轨/重排/复杂 edits 需各自证明；桌面系统适配代码保留，停止新增 Windows/macOS/Linux 系统媒体 API 工作。
+- [x] 显式有限 AVC/VFR 转码保留单/双 AAC：新全量 **852 tests，831 执行成功、21 历史系统专项跳过，0 failures / errors**；四轨道顺序、稀疏 ID、逐音轨 sample/configuration/时间线/metadata 与完整解码及新完整 Windows FFmpeg 便携验收通过。三音轨、未知 recovery/descriptor、音频裁剪和未授权/Strict 仍拒绝；整文件保真不提升为无损。更多 profile 仍在上一项 TODO。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
 - [x] 恢复 macOS ARM64 runner 前置条件与真实打包验收；下载同提交 CI 包，核对 artifact 与内层归档哈希、ARM64 启动器/运行时，本机 13 个 CLI 检查通过，Raw 视频字节一致、源未改变。不是 Apple 相册认证或 AVFoundation 实现。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。

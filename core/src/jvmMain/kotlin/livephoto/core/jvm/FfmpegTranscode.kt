@@ -18,11 +18,15 @@ internal object FfmpegTranscode {
         val ref = job.inputs.single(); val source = (ref.input as? SourceSet.Single)?.source ?: fail("INVALID_ARGUMENT", "Transcode requires one isolated video")
         if (ref.resourceId != null || ref.snapshot != null) fail("INVALID_ARGUMENT", "Core must resolve the transcode resource")
         val reader = BinaryReader(source, job.context); val identity = reader.identity().orThrow()
-        val video = BmffVideoProbe(reader).probe(ByteRange(0uL, identity.size)).orThrow(); val track = transcodeProfile(video, encoding)
+        val video = BmffVideoProbe(reader).probe(ByteRange(0uL, identity.size)).orThrow()
+        val track = transcodeProfile(video, encoding, allowCopiedAudio = job.operation == Operation.Transcode)
         val trim = if (job.operation == Operation.Trim) planTrim(reader, video, job.trim!!, job.policy).also {
             if (!it.encoded) fail("INVALID_ARGUMENT", "Lossless trim must not invoke an encoder", Stage.Plan)
         } else null
-        RemuxVerification.metadata(reader, video, trimDurationsVerifiedSeparately = trim != null, transcodeAvcConfiguration = true)
+        val metadata = RemuxVerification.metadata(reader, video, trimDurationsVerifiedSeparately = trim != null, transcodeAvcConfiguration = true)
+        FfmpegAacRemuxProfile.validate(video, metadata)
+        for (audio in video.tracks.filter { it.handler == "soun" }) if (validateEsds(audio.codecConfiguration, ParseBudget(job.context)).esDescriptorFlags != 0)
+            fail("CAPABILITY_UNSUPPORTED", "Audio copy cannot rewrite referenced/URL/OCR ES descriptors", Stage.Plan)
         if (checkedMultiply(checkedMultiply(track.width!!.toULong(), track.height!!.toULong()), 4uL) > job.context.limits.maxMetadataBytes)
             fail("RESOURCE_LIMIT_EXCEEDED", "Decoded frame exceeds bounded verification budget", Stage.Plan)
         if (identity.size >= job.context.limits.maxSpoolBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Transcode input leaves no temporary output budget", Stage.Plan)
@@ -47,29 +51,32 @@ internal object FfmpegTranscode {
             checkProcess(sourceDecode, reader, "DECODE_FAILED"); verifyTrace(sourceDecode.output, track)
             val trimFilter = trim?.boundaries?.let { "trim=start_pts=${it.startTicks}:end_pts=${it.startTicks + it.durationTicks},setpts=PTS-${it.startTicks}," } ?: ""
             val encoded = ExternalProcess.run(decode(input) + listOf("-vf", "settb=expr=1/${track.timescale},${trimFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
-                "-fps_mode", "passthrough", "-enc_time_base:v", "1:${track.timescale}", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-bf", "0", "-g", "30", "-threads:v", "1", "-pix_fmt", "+yuv420p",
+                "-fps_mode", "passthrough", "-enc_time_base:v", "1:${track.timescale}", "-c:a", "copy", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-bf", "0", "-g", "30", "-threads:v", "1", "-pix_fmt", "+yuv420p",
                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-avoid_negative_ts", "disabled", "-use_editlist", "0",
                 "-map_metadata", "0", "-map_chapters", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0",
-                "-video_track_timescale", track.timescale.toString(), "-movie_timescale", video.movieTimescale.toString(), "-streamid", "0:${track.trackId}", "-use_stream_ids_as_track_ids", "1",
+                "-video_track_timescale", track.timescale.toString(), "-movie_timescale", video.movieTimescale.toString()) +
+                video.tracks.flatMapIndexed { index, entry -> listOf("-streamid", "$index:${entry.trackId}") } + listOf("-use_stream_ids_as_track_ids", "1",
                 "-fs", outputLimit.toString(), "-f", "mp4", output.toString()), 600_000L, job.context)
             checkProcess(encoded, reader, "ENCODE_FAILED")
             if (!Files.isRegularFile(output)) fail("ENCODE_FAILED", "Encoder produced no video", Stage.Transcode)
             val size = Files.size(output).toULong()
             if (size > outputLimit) fail("RESOURCE_LIMIT_EXCEEDED", "Encoded output exceeded temporary storage budget", Stage.Transcode)
+            AacRemuxMetadata.restore(video, output, job.context)
+            reader.validateIdentity().orThrow()
             val staged = FileBinarySource(output)
             try {
                 val outputReader = BinaryReader(staged, job.context); val actual = BmffVideoProbe(outputReader).probe(ByteRange(0uL, size)).orThrow()
                 if (trim == null) verifyTranscode(reader, video, outputReader, actual, encoding)
                 else verifyEncodedTrim(reader, trim.boundaries, outputReader, actual)
                 val decodedOutput = ExternalProcess.run(decode(output) + listOf("-vf", filter, "-fps_mode", "passthrough", "-f", "null", "-"), 600_000L, job.context)
-                checkProcess(decodedOutput, reader, "DECODE_FAILED"); verifyTrace(decodedOutput.output, actual.tracks.single())
+                checkProcess(decodedOutput, reader, "DECODE_FAILED"); verifyTrace(decodedOutput.output, actual.tracks.single { it.handler == "vide" })
                 val facts = videoFacts(actual); reader.validateIdentity().orThrow()
                 val handle = job.destination.create(OutputAssetSpec(AssetRole.MotionVideo, mime = "video/mp4")).orThrow()
                 try { copyRange(outputReader, handle.sink, ByteRange(0uL, size), job.context).orThrow(); handle.sink.flush().orThrow() }
                 finally { handle.sink.close().orThrow() }
                 reader.validateIdentity().orThrow()
                 BackendResult(listOf(StagedAsset(handle.id, AssetRole.MotionVideo, "video/mp4", size)), listOf(facts), listOf(
-                    ExecutionRecord(if (trim == null) Stage.Transcode else Stage.Trim, "ffmpeg-external", "Authorized software libx264 medium/CRF18/bf0; whole source/output SDR decode and exact selected sample timeline verified; not bitstream preserving", true, false, false, videoFacts(video), facts)),
+                    ExecutionRecord(if (trim == null) Stage.Transcode else Stage.Trim, "ffmpeg-external", "Authorized software libx264 medium/CRF18/bf0; whole source/output SDR decode and exact selected sample timeline verified; any AAC tracks copied and independently verified, not whole-asset bitstream preserving", true, false, false, videoFacts(video), facts)),
                     tracks = trim?.let { listOf(it.trackTrim) } ?: emptyList(), timelineMap = trim?.boundaries?.mapping ?: emptyList())
             } finally { staged.close() }
         } catch (fault: CoreFault) { throw fault }

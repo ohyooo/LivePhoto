@@ -1045,6 +1045,42 @@ try {
         $transcodeDecode = & $launcher probe --input $transcode.output.assets[0].path --decode-check
         if ($LASTEXITCODE -ne 0) { throw "Portable encoded video could not be completely decoded: $transcodeDecode" }
         Write-Host 'PORTABLE_FFMPEG_TRANSCODE=SUCCESS'
+        # Video is explicitly encoded; AAC must stay streamcopied, even when video is not stream zero.
+        $transcodeOrders = @(@(1,0), @(0,1,2), @(1,0,2), @(2,1,0))
+        $transcodeMaps = @('0:v:0','1:a:0','2:a:0')
+        $transcodeIds = @(17,4,29)
+        for ($orderIndex = 0; $orderIndex -lt $transcodeOrders.Count; $orderIndex++) {
+            $order = $transcodeOrders[$orderIndex]
+            $fixture = Join-Path $verify "AAC transcode order $orderIndex.mp4"
+            $maps = @()
+            for ($stream = 0; $stream -lt $order.Count; $stream++) { $maps += @('-map', $transcodeMaps[$order[$stream]], '-streamid', "$($stream):$($transcodeIds[$order[$stream]])") }
+            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -i $transcodeFixture -i $secondAac -i $aacElementary @maps -c copy -bsf:a aac_adtstoasc -use_editlist 0 -map_metadata -1 -metadata:s:v 'encoder=' -fflags +bitexact -write_btrt 0 -use_stream_ids_as_track_ids 1 $fixture
+            if ($LASTEXITCODE -ne 0) { throw 'Portable AAC-preserving transcode fixture mux failed.' }
+            $sourceHash = (Get-FileHash $fixture).Hash
+            $encodedJson = & $launcher transcode --input $fixture --codec Avc --container Mp4 --allow-transcode --output-dir (Join-Path $verify "AAC transcode result $orderIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable AAC-preserving transcode failed: $encodedJson" }
+            $encoded = ($encodedJson | ConvertFrom-Json).result
+            if (-not ($encoded.execution | Where-Object { $_.stage -eq 'Transcode' -and $_.transcoded -and $_.hardwareUsed -eq $false -and -not $_.remuxed }) -or
+                -not ($encoded.preservation.records | Where-Object { $_.guarantee -eq 'BitstreamPreserving' -and $_.outcome -eq 'Changed' }) -or
+                -not ($encoded.preservation.records | Where-Object { $_.guarantee -eq 'MetadataPreserving' -and $_.outcome -eq 'Unknown' })) { throw 'Portable AAC transcode made an invalid whole-asset preservation claim.' }
+            $decodedJson = & $launcher probe --input $encoded.output.assets[0].path --decode-check
+            if ($LASTEXITCODE -ne 0) { throw "Portable AAC encoded output decode failed: $decodedJson" }
+            $decoded = ($decodedJson | ConvertFrom-Json).result
+            if ($decoded.tracks.Count -ne $order.Count) { throw 'Portable AAC transcode dropped a track.' }
+            & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $encoded.output.assets[0].path -map 0:v:0 -map 0:a -sn -dn -f null -
+            if ($LASTEXITCODE -ne 0) { throw 'Portable encoded output did not fully decode every audio/video track.' }
+            $refusedDir = Join-Path $verify "AAC transcode unauthorized $orderIndex"
+            $refusedJson = & $launcher transcode --input $fixture --codec Avc --container Mp4 --output-dir $refusedDir
+            if ($LASTEXITCODE -ne 3 -or ($refusedJson | ConvertFrom-Json).error.code.value -ne 'TRANSCODE_NOT_AUTHORIZED' -or (Test-Path $refusedDir)) { throw 'AAC input bypassed explicit encoding authorization.' }
+            $strictDir = Join-Path $verify "AAC transcode strict $orderIndex"
+            $strictJson = & $launcher transcode --input $fixture --codec Avc --container Mp4 --allow-transcode --strict --output-dir $strictDir
+            if ($LASTEXITCODE -ne 3 -or ($strictJson | ConvertFrom-Json).error.code.value -ne 'PRESERVATION_REQUIREMENT_FAILED' -or (Test-Path $strictDir)) { throw 'AAC copy incorrectly authorized strict whole-asset video encoding.' }
+            $trimDir = Join-Path $verify "AAC encoded trim refused $orderIndex"
+            $trimJson = & $launcher trim --input $fixture --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --output-dir $trimDir
+            if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -notin @('LOSSLESS_TRIM_UNAVAILABLE','CAPABILITY_UNSUPPORTED') -or (Test-Path $trimDir)) { throw 'Explicit transcode audio permission leaked into trim.' }
+            if ($sourceHash -ne (Get-FileHash $fixture).Hash) { throw 'AAC transcode changed its original input.' }
+            Write-Host "PORTABLE_FFMPEG_AAC_TRANSCODE=SUCCESS order=$orderIndex scope=explicit-video-encoding-audio-copy-not-trim-or-device"
+        }
         # The freshly derived JPEG has no source EXIF/ICC/auxiliary dependencies.
         # Use Core Create, never a script-side protocol writer, to build the fixture.
         $replaceCarrierJson = & $launcher create --image $frame.operation.output.assets[0].path --video $frameFixture --target google.motionphoto.v2 --output-dir (Join-Path $verify 'replace carrier')

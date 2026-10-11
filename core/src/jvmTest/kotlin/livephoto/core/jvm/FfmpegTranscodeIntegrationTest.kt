@@ -11,6 +11,87 @@ import org.junit.Assume.assumeTrue
 import kotlin.test.*
 
 class FfmpegTranscodeIntegrationTest {
+    @Test fun explicitVfrVideoEncodingCopiesDistinctAacTracksWithSparseIdsAndAllOrders(): Unit = runImmediate {
+        val found = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of))
+        if (System.getenv("LIVEPHOTO_REQUIRE_FFMPEG") == "true") assertNotNull(found.ffmpegPath)
+        assumeTrue("No existing FFmpeg; AAC-preserving explicit transcode not run", found.ffmpegPath != null)
+        val context = Context(Limits(128_000_000uL, 128_000_000uL))
+        val directory = Files.createTempDirectory("livephoto-transcode-aac-")
+        val owned = mutableListOf<Path>()
+        fun path(name: String) = directory.resolve(name).also { owned.add(it) }
+        fun prepare(arguments: List<String>) {
+            val result = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + arguments, 60_000L)
+            assertEquals(0, result.code, result.output); assertFalse(result.ioFailed)
+        }
+        try {
+            val video = path("VFR video.mp4")
+            prepare(listOf("-f", "lavfi", "-i", "testsrc2=size=32x32:rate=25", "-frames:v", "8", "-vf",
+                "setpts='if(lt(N,4),N,4+(N-4)*2)/(25*TB)',setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
+                "-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-bf", "0", "-g", "3", "-pix_fmt", "yuv420p",
+                "-use_editlist", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", video.toString()))
+            val audio = listOf(path("mono44100.aac"), path("stereo48000.aac"))
+            for ((index, file) in audio.withIndex()) prepare(listOf("-f", "lavfi", "-i", "sine=frequency=${440 + index * 440}:sample_rate=${if (index == 0) 44100 else 48000}:duration=0.52",
+                "-c:a", "aac", "-b:a", if (index == 0) "64k" else "128k", "-ac", (index + 1).toString(), "-flags:a", "+bitexact", "-f", "adts", file.toString()))
+            val tracks = listOf("0:v:0" to 17u, "1:a:0" to 4u, "2:a:0" to 29u)
+            val inputs = listOf("-i", video.toString(), "-i", audio[0].toString(), "-i", audio[1].toString())
+            val mux = listOf("-c", "copy", "-bsf:a", "aac_adtstoasc", "-use_editlist", "0", "-map_metadata", "-1", "-metadata:s:v", "encoder=",
+                "-fflags", "+bitexact", "-write_btrt", "0", "-use_stream_ids_as_track_ids", "1")
+            val orders = listOf(listOf(1, 0), listOf(0, 1, 2), listOf(1, 0, 2), listOf(2, 1, 0))
+            val encoding = VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4)
+            val core = DefaultLivePhotoCore(found.backend)
+            for ((case, order) in orders.withIndex()) {
+                val fixture = path("order-$case.mp4")
+                prepare(inputs + order.flatMapIndexed { index, track -> listOf("-map", tracks[track].first, "-streamid", "$index:${tracks[track].second}") } + mux + fixture.toString())
+                val source = FileBinarySource(fixture)
+                try {
+                    val reader = BinaryReader(source, context)
+                    val before = BmffVideoProbe(reader).probe(ByteRange(0uL, source.size().orThrow())).orThrow()
+                    assertEquals(order.map { tracks[it].second }, before.tracks.map { it.trackId })
+                    assertTrue(before.tracks.single { it.handler == "vide" }.samples.map { it.duration }.distinct().size > 1)
+                    val hash = sha256Range(reader, before.range).orThrow()
+                    val result = core.transcode(TranscodeRequest(ResourceRef(SourceSet.Single(source)), encoding, MutationPolicy(transcode = TranscodePolicy.Explicit),
+                        MemoryOutputTransaction(context, "real-aac-transcode-$case"), context)).orThrow()
+                    try {
+                        val output = BinaryReader(result.output.assets.single().readableSource!!, context)
+                        val after = BmffVideoProbe(output).probe(ByteRange(0uL, output.identity().orThrow().size)).orThrow()
+                        verifyTranscode(reader, before, output, after, encoding)
+                        assertEquals(order.map { tracks[it].second }, after.tracks.map { it.trackId })
+                        assertNotEquals(before.tracks.single { it.handler == "vide" }.codecConfiguration, after.tracks.single { it.handler == "vide" }.codecConfiguration)
+                        for (track in before.tracks.filter { it.handler == "soun" }) {
+                            val actual = after.tracks.single { it.trackId == track.trackId }
+                            assertEquals(track.codecConfiguration, actual.codecConfiguration)
+                            assertEquals(track.audioActualSampleRate, actual.audioActualSampleRate)
+                            assertEquals(track.audioActualChannelCount, actual.audioActualChannelCount)
+                            assertEquals(track.samples.map { sha256Range(reader, it.range).orThrow() }, actual.samples.map { sha256Range(output, it.range).orThrow() })
+                        }
+                        assertEquals(GuaranteeOutcome.Changed, result.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
+                        assertEquals(GuaranteeOutcome.Unknown, result.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
+                        assertTrue(result.execution.any { it.stage == Stage.Transcode && it.transcoded && !it.remuxed && it.hardwareUsed == false })
+                        assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(output.source)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                    } finally { result.output.assets.forEach { it.readableSource?.close() } }
+                    for ((policy, code) in listOf(MutationPolicy() to "TRANSCODE_NOT_AUTHORIZED", MutationPolicy(transcode = TranscodePolicy.Explicit, preservation = PreservationPolicy.Strict) to "PRESERVATION_REQUIREMENT_FAILED")) {
+                        val tx = MemoryOutputTransaction(context, "aac-unauthorized-$case-$code")
+                        assertEquals(code, assertIs<CoreResult.Failure>(core.transcode(TranscodeRequest(ResourceRef(SourceSet.Single(source)), encoding, policy, tx, context))).error.code.value)
+                        assertTrue(tx.committedAssets().isEmpty())
+                    }
+                    val trimTx = MemoryOutputTransaction(context, "aac-trim-refused-$case")
+                    assertIs<CoreResult.Failure>(core.trim(TrimRequest(ResourceRef(SourceSet.Single(source)), TrimSpec(TimeRange(Time(40000, 1000000u), Time(400000, 1000000u)), TrimMode.Exact),
+                        MutationPolicy(transcode = TranscodePolicy.Explicit), trimTx, context)))
+                    assertTrue(trimTx.committedAssets().isEmpty())
+                    assertEquals(hash, sha256Range(reader, before.range).orThrow())
+                } finally { source.close() }
+            }
+            val excessive = path("three-audio.mp4")
+            prepare(inputs + listOf(0, 1, 2, 1).flatMapIndexed { index, track -> listOf("-map", tracks[track].first, "-streamid", "$index:${index + 1}") } + mux + excessive.toString())
+            val source = FileBinarySource(excessive)
+            try {
+                val tx = MemoryOutputTransaction(context, "three-audio-transcode-refused")
+                assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.transcode(TranscodeRequest(ResourceRef(SourceSet.Single(source)), encoding,
+                    MutationPolicy(transcode = TranscodePolicy.Explicit), tx, context))).error.code.value)
+                assertTrue(tx.committedAssets().isEmpty())
+            } finally { source.close() }
+        } finally { owned.asReversed().forEach { Files.deleteIfExists(it) }; Files.delete(directory) }
+    }
     @Test fun realExplicitAvcTranscodePreservesEveryVfrBoundaryAndRefusesUnknownColor(): Unit = runImmediate {
         val found = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of))
         if (System.getenv("LIVEPHOTO_REQUIRE_FFMPEG") == "true") assertNotNull(found.ffmpegPath)

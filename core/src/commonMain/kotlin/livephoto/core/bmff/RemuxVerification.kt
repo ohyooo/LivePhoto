@@ -99,7 +99,7 @@ internal object RemuxVerification {
                         // All visual/audio entry fields and known extensions must survive byte-for-byte.
                         val entries = boxes.readBoxes(ByteRange(box.payload.offset + 8uL, box.payload.length - 8uL), depth + 1u).orThrow()
                         for (entry in entries) {
-                            if (transcodeAvcConfiguration && entry.type != "avc1") fail("CAPABILITY_UNSUPPORTED", "Only AVC configuration rewrite has a classified transcode profile", Stage.Plan)
+                            if (transcodeAvcConfiguration && entry.type !in setOf("avc1", "mp4a")) fail("CAPABILITY_UNSUPPORTED", "Transcode only classifies AVC configuration rewrite and unchanged AAC entries", Stage.Plan)
                             val prefix = if (entry.type in setOf("avc1", "avc3", "hvc1", "hev1")) 78uL else 28uL
                             if (entry.payload.length < prefix) fail("CORRUPTED_CONTAINER", "Truncated remux sample entry")
                             val extensions = boxes.readBoxes(ByteRange(entry.payload.offset + prefix, entry.payload.length - prefix), depth + 2u).orThrow()
@@ -116,7 +116,7 @@ internal object RemuxVerification {
                             }
                             val hash = Sha256(); hash.update(Bytes(header))
                             for (extension in extensions.sortedBy { it.type }) {
-                                if (transcodeAvcConfiguration && extension.type == "avcC") continue // explicitly requested encoded configuration rewrite, not ordinary metadata
+                                if (transcodeAvcConfiguration && entry.type == "avc1" && extension.type == "avcC") continue // only the requested video configuration, never an audio extension
                                 hash.update(Bytes(extension.type.encodeToByteArray()))
                                 hash.update(Bytes(sha256Range(reader, extension.payload).orThrow().value.encodeToByteArray()))
                             }
@@ -172,9 +172,17 @@ internal object RemuxVerification {
         }
         if (before.movieDuration > Long.MAX_VALUE.toULong() || after.movieDuration > Long.MAX_VALUE.toULong()) fail("INTEGER_OVERFLOW", "Movie duration exceeds exact remux verification domain")
         unchanged(Time(before.movieDuration.toLong(), before.movieTimescale).compareTo(Time(after.movieDuration.toLong(), after.movieTimescale)) == 0, "movieDuration")
-        unchanged(before.tracks.map { it.trackId } == after.tracks.map { it.trackId }, "trackSet/order")
+        return verifyTracks(input, before.tracks, output, after.tracks)
+    }
+
+    /** Verify a complete caller-selected track set, including order, configuration and every sample. */
+    suspend fun verifyTracks(input: BinaryReader, before: List<VideoTrack>, output: BinaryReader, after: List<VideoTrack>): Digest {
+        fun unchanged(value: Boolean, field: String) {
+            if (!value) fail("POSTCONDITION_FAILED", "Copied tracks changed unrequested media semantics", Stage.Verify, Location(selector = field))
+        }
+        unchanged(before.map { it.trackId } == after.map { it.trackId }, "trackSet/order")
         val digest = Sha256()
-        for ((left, right) in before.tracks.zip(after.tracks)) {
+        for ((left, right) in before.zip(after)) {
             checkCancelled(input.context)
             unchanged(left.handler == right.handler && left.codec == right.codec && left.audioCodec == right.audioCodec && left.sampleEntry == right.sampleEntry, "trackCodec")
             if (left.codecConfiguration != right.codecConfiguration) {

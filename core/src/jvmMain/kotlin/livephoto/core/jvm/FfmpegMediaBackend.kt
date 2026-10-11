@@ -21,7 +21,7 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
                 Condition(ConditionOperator.Equals, "trimProfile", Value.Text("lossless-first-bounded-mp4-one-avc1-track-no-audio-no-reorder-no-hidden-content-exact-authorized-sdr-encoding-at-most-64-frames")),
                 Condition(ConditionOperator.Equals, "boundaryRepresentation", Value.Text("exact-integer-microseconds-and-source-movie-timescale"))))) +
             listOf(CapabilityEntry(Operation.Transcode, Implementation.Experimental, conditions = listOf(
-                Condition(ConditionOperator.Equals, "transcodeProfile", Value.Text("explicit-software-libx264-medium-crf18-bf0-avc-mp4-no-audio-edit-reorder-at-most-64-frames-no-hdr-resize-cfr")),
+                Condition(ConditionOperator.Equals, "transcodeProfile", Value.Text("explicit-software-libx264-medium-crf18-bf0-avc-mp4-at-most-two-copied-aac-lc-no-edit-reorder-at-most-64-frames-no-hdr-resize-cfr")),
                 Condition(ConditionOperator.Equals, "verification", Value.Text("whole-source-output-sdr-decode-and-every-vfr-sample-pts-duration-classified-metadata"))))))
 
     override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = attempt {

@@ -30,8 +30,8 @@ class TranscodeOperationsTest {
             assertEquals(0, backend.calls); assertEquals(TransactionState.Open, tx.query().orThrow().state)
         }
     }
-    @Test fun audioReorderHevcAndPrivateMetadataAreRefused(): Unit = runImmediate {
-        val variants = listOf(GoogleFixtures.video(aac = true).bytes, GoogleFixtures.video(hevc = true).bytes,
+    @Test fun reorderHevcAndPrivateMetadataAreRefused(): Unit = runImmediate {
+        val variants = listOf(GoogleFixtures.video(hevc = true).bytes,
             GoogleFixtures.video(composition = GoogleFixtures.fullBox("ctts", GoogleFixtures.u32(1u) + GoogleFixtures.u32(2u) + GoogleFixtures.u32(1u))).bytes,
             GoogleFixtures.video().bytes + GoogleFixtures.box("uuid", ByteArray(16)))
         for (bytes in variants) {
@@ -39,6 +39,60 @@ class TranscodeOperationsTest {
             assertIs<CoreResult.Failure>(DefaultLivePhotoCore(backend).transcode(request(tx, bytes)))
             assertEquals(0, backend.calls); assertTrue(tx.committedAssets().isEmpty())
         }
+    }
+    @Test fun explicitVideoEncodingKeepsEveryAudioSampleAndDoesNotClaimWholeAssetBitstreamPreservation(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video(aac = true, audioSampleCount = 2u, sampleDurations = 20u to 60u).bytes
+        val tx = MemoryOutputTransaction(context, "transcode-copied-audio")
+        val input = request(tx, bytes)
+        val result = DefaultLivePhotoCore(Backend()).transcode(input).orThrow()
+        try {
+            val beforeReader = BinaryReader((input.video.input as SourceSet.Single).source, context)
+            val outputReader = BinaryReader(result.output.assets.single().readableSource!!, context)
+            val before = BmffVideoProbe(beforeReader).probe(ByteRange(0uL, bytes.size.toULong())).orThrow()
+            val after = BmffVideoProbe(outputReader).probe(ByteRange(0uL, outputReader.identity().orThrow().size)).orThrow()
+            RemuxVerification.verifyTracks(beforeReader, before.tracks.filter { it.handler == "soun" }, outputReader, after.tracks.filter { it.handler == "soun" })
+            assertEquals(GuaranteeOutcome.Changed, result.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }.outcome)
+            assertEquals(GuaranteeOutcome.Unknown, result.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
+            // Audio permission is explicit-transcode-only; exact trim must not borrow it.
+            assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(attemptNow { transcodeProfile(before, input.encoding) }).error.code.value)
+        } finally { result.output.assets.forEach { it.readableSource?.close() } }
+    }
+    @Test fun copiedAudioDropSamplesConfigurationAndTimelineChangesAbortBeforePublication(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video(aac = true, audioSampleCount = 2u).bytes
+        val variants: List<(ByteArray, VideoStructure) -> ByteArray> = listOf(
+            { _, _ -> GoogleFixtures.video().bytes },
+            { out, video -> out.also { it[video.tracks.single { track -> track.handler == "soun" }.samples.last().range.offset.toInt()] = 0x22 } },
+            { out, _ -> out.also {
+                val payload = (4 until it.size - 4).first { offset -> it.copyOfRange(offset, offset + 4).contentEquals("esds".encodeToByteArray()) } + 4
+                it[payload + 15] = 1 // Valid changed decoder buffer hint, not a parser failure.
+            } },
+            { out, _ -> out.also {
+                val headers = (4 until it.size - 4).filter { offset -> it.copyOfRange(offset, offset + 4).contentEquals("mdhd".encodeToByteArray()) }
+                GoogleFixtures.u32(48001u).copyInto(it, headers.last() + 4 + 12) // Structurally within movie rounding tolerance, still an unrequested timeline change.
+            } })
+        for ((index, alter) in variants.withIndex()) {
+            val tx = MemoryOutputTransaction(context, "transcode-audio-tamper-$index")
+            val backend = Backend(outputTransform = alter)
+            assertEquals("POSTCONDITION_FAILED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore(backend).transcode(request(tx, bytes))).error.code.value)
+            assertEquals(1, backend.calls); assertEquals(TransactionState.Aborted, tx.query().orThrow().state)
+            assertTrue(tx.committedAssets().isEmpty())
+        }
+    }
+    @Test fun copiedAudioProfileRefusesEditsAdditionalTracksAndUnrepresentableIds(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video(aac = true).bytes
+        val reader = BinaryReader(MemoryBinarySource(Bytes(bytes), SourceId("audio-profile")), context)
+        val video = BmffVideoProbe(reader).probe(ByteRange(0uL, bytes.size.toULong())).orThrow()
+        val audio = video.tracks.single { it.handler == "soun" }
+        val encoding = VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4)
+        val variants = listOf(
+            video.copy(tracks = video.tracks.map { if (it.handler == "soun") it.copy(edit = VideoEdit(video.movieTimescale, 0uL, 21uL, 0L)) else it }),
+            video.copy(tracks = video.tracks + audio.copy(trackId = 3u) + audio.copy(trackId = 4u)),
+            video.copy(tracks = video.tracks + audio.copy(trackId = 3u, handler = "meta")),
+            video.copy(tracks = video.tracks.map { if (it.handler == "soun") it.copy(trackId = UInt.MAX_VALUE) else it }),
+            video.copy(tracks = video.tracks.map { if (it.handler == "soun") it.copy(timescale = UInt.MAX_VALUE) else it }))
+        for (variant in variants) assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(attemptNow {
+            transcodeProfile(variant, encoding, allowCopiedAudio = true)
+        }).error.code.value)
     }
     @Test fun explicitResizeCfrToneMapBitrateAndOtherTargetAreNotSilentlyIgnored(): Unit = runImmediate {
         val encodings = listOf(VideoEncoding(VideoCodec.Hevc, VideoContainer.Mp4), VideoEncoding(VideoCodec.Avc, VideoContainer.Mov),
@@ -86,16 +140,19 @@ class TranscodeOperationsTest {
         assertEquals("SOURCE_CHANGED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore(Backend(after = { changed = true })).transcode(request(tx).copy(video = ResourceRef(SourceSet.Single(source))))).error.code.value)
         assertTrue(tx.committedAssets().isEmpty())
     }
-    private class Backend(val falseExecution: Boolean = false, val changeTimeline: Boolean = false, val partialFailure: Boolean = false, val after: () -> Unit = {}) : MediaBackend {
+    private class Backend(val falseExecution: Boolean = false, val changeTimeline: Boolean = false, val partialFailure: Boolean = false, val after: () -> Unit = {},
+        val outputTransform: ((ByteArray, VideoStructure) -> ByteArray)? = null) : MediaBackend {
         var calls = 0
         override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("synthetic-transcode"), listOf(CapabilityEntry(Operation.Transcode, Implementation.Experimental)))
         override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = attempt {
             job.validate().orThrow(); calls++
             val reader = BinaryReader((job.inputs.single().input as SourceSet.Single).source, job.context)
             val identity = reader.identity().orThrow(); val video = BmffVideoProbe(reader).probe(ByteRange(0uL, identity.size)).orThrow()
-            val bytes = reader.readExactly(0uL, identity.size.toUInt()).orThrow().toByteArray().also { it[it.size - 1] = 0x23 }
+            val bytes = reader.readExactly(0uL, identity.size.toUInt()).orThrow().toByteArray().also {
+                it[video.tracks.single { track -> track.handler == "vide" }.samples.last().range.endExclusive.toInt() - 1] = 0x23
+            }
             // Same total duration but redistribute VFR boundaries in a separate hostile fixture.
-            val out = if (changeTimeline) GoogleFixtures.video(sampleDurations = 20u to 60u).bytes else bytes
+            val out = outputTransform?.invoke(bytes, video) ?: if (changeTimeline) GoogleFixtures.video(sampleDurations = 20u to 60u).bytes else bytes
             val actual = BmffVideoProbe(BinaryReader(MemoryBinarySource(Bytes(out), SourceId("synthetic-encoded")), job.context)).probe(ByteRange(0uL, out.size.toULong())).orThrow()
             val handle = job.destination.create(OutputAssetSpec(AssetRole.MotionVideo, mime = "video/mp4")).orThrow()
             handle.sink.write(Bytes(out)).orThrow()
