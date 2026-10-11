@@ -17,12 +17,15 @@ internal object TrimOperations {
             fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Trim requires independently readable atomic staging", Stage.Plan)
         val resource = VideoResource.open(request.video, request.context)
         val trim = planTrim(resource.reader, resource.video, request.spec, request.policy)
-        val metadata = RemuxVerification.metadata(resource.reader, resource.video, trimDurationsVerifiedSeparately = true, transcodeAvcConfiguration = trim.encoded)
+        if (trim.boundaries.audioRecoveryChanged && (request.policy.preservation == PreservationPolicy.Strict || Guarantee.MetadataPreserving in request.policy.requiredGuarantees))
+            fail("PRESERVATION_REQUIREMENT_FAILED", "Copied AAC decoder recovery changes at the cut; complete metadata/recovery preservation is not proven", Stage.Plan)
+        val metadata = RemuxVerification.metadata(resource.reader, resource.video, trimDurationsVerifiedSeparately = true, transcodeAvcConfiguration = trim.encoded,
+            trimAudioSampleCountsVerifiedSeparately = trim.boundaries.audio.isNotEmpty())
         resource.session.recheck()
         return Prepared(resource, trim, metadata)
     }
     fun capability(backend: MediaBackend?): CapabilityEntry = CapabilityEntry(Operation.Trim, Implementation.Experimental,
-        conditions = listOf(Condition(ConditionOperator.Equals, "input", Value.Text("one-avc1-video-no-audio-no-reorder-zero-or-identity-edit-closed-idr")),
+        conditions = listOf(Condition(ConditionOperator.Equals, "input", Value.Text("one-avc1-video-mp4-at-most-two-copied-aac-lc-canonical-roll-no-reorder-zero-or-identity-edit-closed-idr")),
             Condition(ConditionOperator.Equals, "precision", Value.Text("lossless-first-preferred-never-encodes-exact-authorized-finite-avc-sdr-encoding-no-hidden-preroll"))) +
             (backend?.capabilities()?.operations?.firstOrNull { it.operation == Operation.Trim }?.conditions ?: emptyList()), verification = listOf(Verification.SourceReviewed))
     suspend fun plan(request: TrimRequest, backend: MediaBackend?): CoreResult<ExecutionPlan> = attempt {
@@ -44,7 +47,7 @@ internal object TrimOperations {
                 policy = request.policy, context = request.context, destination = staging))
             resource.session.recheck()
             val declared = result.orThrow(); staging.validateResult(declared)
-            if (declared.tracks != listOf(plan.trackTrim) || declared.timelineMap != trim.mapping || declared.actualFrameTime != null || declared.actualFrameIndex != null || declared.actualFrameTrack != null ||
+            if (declared.tracks != plan.trackTrims || declared.timelineMap != trim.mapping || declared.actualFrameTime != null || declared.actualFrameIndex != null || declared.actualFrameTrack != null ||
                 declared.execution.isEmpty() || declared.execution.any { it.stage != Stage.Trim || it.transcoded != plan.encoded || it.remuxed == plan.encoded || plan.encoded && it.hardwareUsed != false || it.backendId !in processor.capabilities().backendIds ||
                     it.inputFacts != videoFacts(resource.video) || it.outputFacts != declared.media.singleOrNull() } || declared.issues.any { it.severity == Severity.Error })
                 fail("POSTCONDITION_FAILED", "Backend did not describe the proven trim range/timeline/encoding", Stage.Verify)
@@ -54,7 +57,8 @@ internal object TrimOperations {
             verifyTrimDurationHeaders(reader, actual, trim)
             val digest = if (plan.encoded) { verifyEncodedTrim(resource.reader, trim, reader, actual); null }
                 else RemuxVerification.verify(resource.reader, trim.expected(), reader, actual)
-            val metadata = RemuxVerification.metadata(reader, actual, trimDurationsVerifiedSeparately = true, transcodeAvcConfiguration = plan.encoded)
+            val metadata = RemuxVerification.metadata(reader, actual, trimDurationsVerifiedSeparately = true, transcodeAvcConfiguration = plan.encoded,
+                trimAudioSampleCountsVerifiedSeparately = trim.audio.isNotEmpty())
             RemuxVerification.verifyMetadata(prepared.metadata, metadata)
             val declared = backendResult ?: fail("POSTCONDITION_FAILED", "Missing trim backend result", Stage.Verify)
             if (declared.media != listOf(videoFacts(actual)) || declared.assets.single().byteLength != reader.identity().orThrow().size)
@@ -62,13 +66,14 @@ internal object TrimOperations {
             val report = ValidationReport(Verdict.Warning, Coverage.Partial, listOf(CheckResult("trim.structure", Layer.Structure, Verdict.Valid, Coverage.Complete),
                 CheckResult("trim.selected-samples-timeline-metadata", Layer.Media, Verdict.Valid, Coverage.Partial)), snapshot = Snapshot(listOf(reader.identity().orThrow()), reader.identity().orThrow().generation))
             AssetVerification(report, listOf(GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable), GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.NotApplicable),
-                GuaranteeRecord(id, Guarantee.BitstreamPreserving, if (plan.encoded) GuaranteeOutcome.Changed else GuaranteeOutcome.Verified, digest, digest, if (plan.encoded) "Explicit exact trim encoding; no bitstream preservation claim" else "Retained AVC samples/configuration unchanged; independent IDR start; exact rebased timeline; no hidden content"),
-                GuaranteeRecord(id, Guarantee.MetadataPreserving, if (plan.encoded) GuaranteeOutcome.Unknown else GuaranteeOutcome.Verified, prepared.metadata.digest, metadata.digest, "Classified ordinary headers compared separately from durations and explicitly authorized coding rewrite; no full encoded pixel/SEI fidelity claim")))
+                GuaranteeRecord(id, Guarantee.BitstreamPreserving, if (plan.encoded) GuaranteeOutcome.Changed else GuaranteeOutcome.Verified, digest, digest, if (plan.encoded) "Explicit exact trim encoding; no bitstream preservation claim" else "Every retained AVC/AAC sample and configuration unchanged; independent video IDR start; exact per-track rebased timeline; no hidden packets; no PCM startup equality claim"),
+                GuaranteeRecord(id, Guarantee.MetadataPreserving, if (plan.encoded || trim.audioRecoveryChanged) GuaranteeOutcome.Unknown else GuaranteeOutcome.Verified, prepared.metadata.digest, metadata.digest,
+                    "Classified ordinary headers and independently rebound AAC sample counts; a nonzero AAC cut does not prove identical decoder startup/recovery waveform")))
         })
         val operation = publish(request.output, request.policy, request.context, resource.session.readers, listOf(asset), listOf(change(plan))).orThrow()
         val declared = backendResult ?: fail("POSTCONDITION_FAILED", "Missing trim execution", Stage.Verify)
-        TrimResult(operation.copy(execution = declared.execution + operation.execution, issues = operation.issues + declared.issues),
-            request.spec.range.start, request.spec.range.end, trim.start, trim.end, listOf(plan.trackTrim), plan.encoded, !plan.encoded, !plan.encoded, false, request.spec.exactTolerance, trim.mapping)
+        TrimResult(operation.copy(execution = declared.execution + operation.execution, issues = operation.issues + declared.issues + trim.issues),
+            request.spec.range.start, request.spec.range.end, trim.start, trim.end, plan.trackTrims, plan.encoded, !plan.encoded, !plan.encoded, false, request.spec.exactTolerance, trim.mapping)
     }
     private fun change(plan: PlannedTrim): Change = Change("presentationRange", after = Value.Text("${plan.boundaries.start.value}/${plan.boundaries.start.timescale}..${plan.boundaries.end.value}/${plan.boundaries.end.timescale}"), reason = if (plan.encoded) "Authorized exact trim with changed encoded data; actual source-domain boundaries disclosed" else "Lossless trim, actual source-domain boundaries disclosed", requested = true)
 }

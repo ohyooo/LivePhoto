@@ -7,6 +7,7 @@ import livephoto.core.bmff.*
 /** Encoding is a separate, explicitly authorized plan, never a failed-process fallback. */
 internal data class PlannedTrim(val boundaries: LosslessTrimPlan, val encoded: Boolean = false) {
     val trackTrim: TrackTrim get() = boundaries.trackTrim.copy(transcoded = encoded, samplesPreserved = !encoded)
+    val trackTrims: List<TrackTrim> get() = if (encoded) listOf(trackTrim) else boundaries.trackTrims
 }
 
 internal suspend fun planTrim(reader: BinaryReader, video: VideoStructure, spec: TrimSpec, policy: MutationPolicy): PlannedTrim {
@@ -14,6 +15,8 @@ internal suspend fun planTrim(reader: BinaryReader, video: VideoStructure, spec:
     catch (fault: CoreFault) {
         if (spec.mode != TrimMode.Exact || fault.error.code.value !in setOf("EXACT_TRIM_UNAVAILABLE", "LOSSLESS_TRIM_UNAVAILABLE")) throw fault
         if (policy.transcode == TranscodePolicy.Forbid) throw fault
+        if (video.tracks.any { it.handler == "soun" })
+            fail("EXACT_TRIM_UNAVAILABLE", "Exact audio packet clipping would require an explicitly implemented audio encoder; no automatic fallback", Stage.Plan)
     }
     if (policy.preservation == PreservationPolicy.Strict || policy.requiredGuarantees.isNotEmpty())
         fail("PRESERVATION_REQUIREMENT_FAILED", "Encoded trim cannot promise strict/exact/bitstream/full metadata preservation", Stage.Plan)

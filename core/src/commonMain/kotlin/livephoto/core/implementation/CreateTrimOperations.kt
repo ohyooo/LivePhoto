@@ -48,13 +48,14 @@ internal object CreateTrimOperations {
         try {
             prepared.image.validateIdentity().orThrow(); prepared.video.session.recheck()
             if (trimmed.actualStart.compareTo(prepared.trim.start) != 0 || trimmed.actualEnd.compareTo(prepared.trim.end) != 0 || trimmed.wasTranscoded != prepared.plan.encoded ||
-                trimmed.retainedHiddenContent || trimmed.wasBitstreamPreserved == prepared.plan.encoded || trimmed.tracks != listOf(prepared.plan.trackTrim) || trimmed.timelineMap != prepared.trim.mapping)
+                trimmed.retainedHiddenContent || trimmed.wasBitstreamPreserved == prepared.plan.encoded || trimmed.tracks != prepared.plan.trackTrims || trimmed.timelineMap != prepared.trim.mapping)
                 fail("POSTCONDITION_FAILED", "Private trim contradicts the source-domain plan", Stage.Verify)
             val video = trimmed.operation.output.assets.single().readableSource ?: fail("POSTCONDITION_FAILED", "Private trimmed video is unreadable", Stage.Verify)
             val proof = trimmed.operation.preservation.records.single { it.guarantee == Guarantee.BitstreamPreserving }
             if (proof.outcome != (if (prepared.plan.encoded) GuaranteeOutcome.Changed else GuaranteeOutcome.Verified)) fail("POSTCONDITION_FAILED", "Private trim preservation contradicts authorized plan", Stage.Verify)
             val created = GoogleOperations.create(request.copy(video = video, edits = null), originalInputs + prepared.video.session.readers + prepared.image,
-                sourceChanges + listOf(trimChange(prepared.spec, trimmed.actualStart, trimmed.actualEnd, prepared.plan.encoded)), prepared.key, metadataUnproven || prepared.plan.encoded).orThrow()
+                sourceChanges + listOf(trimChange(prepared.spec, trimmed.actualStart, trimmed.actualEnd, prepared.plan.encoded)), prepared.key,
+                metadataUnproven || prepared.plan.encoded || prepared.trim.audioRecoveryChanged).orThrow()
             created.copy(preservation = created.preservation.copy(records = created.preservation.records.map { record ->
                 if (record.guarantee == Guarantee.BitstreamPreserving) record.copy(outcome = proof.outcome, sourceDigest = proof.sourceDigest, outputDigest = proof.outputDigest,
                     proof = if (prepared.plan.encoded) "Authorized Exact trim encoded source samples; derived video embedded byte-identically but original bitstream is changed" else "Every retained source sample/configuration verified by private trim; entire resulting video independently embedded byte-identically in final carrier; requested discarded samples excluded") else record

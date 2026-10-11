@@ -862,6 +862,50 @@ try {
             if ((Get-FileHash $twoAac).Hash -ne $twoAacHash) { throw 'Two AAC remux changed the source.' }
             Write-Host "PORTABLE_FFMPEG_TWO_AAC_REMUX=SUCCESS order=$orderIndex scope=mp4-sparse-ids-distinct-rates-channels-all-track-proof"
         }
+        $audioTrimVideo = Join-Path $verify 'audio trim video.mp4'
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=64x64:rate=25' -frames:v 40 -c:v libx264 -preset ultrafast -bf 0 -g 3 -sc_threshold 0 -pix_fmt yuv420p -use_editlist 0 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $audioTrimVideo
+        if ($LASTEXITCODE -ne 0) { throw 'Audio trim video fixture failed.' }
+        $audioTrimInputs = @()
+        foreach ($rate in @(44100, 48000)) {
+            $audioPath = Join-Path $verify "audio trim $rate.aac"
+            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i "sine=frequency=440:sample_rate=${rate}:duration=1.6" -c:a aac -b:a 64k -ac 1 -flags:a +bitexact -f adts $audioPath
+            if ($LASTEXITCODE -ne 0) { throw 'Audio trim AAC fixture failed.' }
+            $audioTrimInputs += $audioPath
+        }
+        $audioTrimOrders = @(@(0, 1), @(2, 0), @(1, 0, 2), @(2, 1, 0))
+        for ($orderIndex = 0; $orderIndex -lt $audioTrimOrders.Count; $orderIndex++) {
+            $order = $audioTrimOrders[$orderIndex]
+            $fixture = Join-Path $verify "audio trim source $orderIndex.mp4"
+            $mapping = @()
+            for ($streamIndex = 0; $streamIndex -lt $order.Count; $streamIndex++) {
+                $trackIndex = $order[$streamIndex]
+                $mapping += @('-map', $trackMaps[$trackIndex], '-streamid', "$($streamIndex):$($trackIds[$trackIndex])")
+            }
+            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -i $audioTrimVideo -i $audioTrimInputs[0] -i $audioTrimInputs[1] @mapping -c copy -bsf:a aac_adtstoasc -use_editlist 0 -map_metadata -1 -metadata:s:v 'encoder=' -fflags +bitexact -write_btrt 0 -use_stream_ids_as_track_ids 1 $fixture
+            if ($LASTEXITCODE -ne 0) { throw 'Audio trim fixture mux failed.' }
+            $sourceHash = (Get-FileHash $fixture).Hash
+            $trimJson = & $launcher trim --input $fixture --start-us 130000 --end-us 270000 --mode LosslessPreferred --output-dir (Join-Path $verify "audio trim result $orderIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable audio trim failed: $trimJson" }
+            $trim = ($trimJson | ConvertFrom-Json).result
+            if ($trim.wasTranscoded -or -not $trim.wasBitstreamPreserved -or $trim.retainedHiddenContent -or $trim.tracks.Count -ne $order.Count -or
+                ([decimal]$trim.actualStart.value * 1000000 / $trim.actualStart.timescale) -ne 120000 -or
+                ([decimal]$trim.actualEnd.value * 1000000 / $trim.actualEnd.timescale) -ne 280000) { throw 'Audio trim boundary/track/copy proof failed.' }
+            for ($streamIndex = 0; $streamIndex -lt $order.Count; $streamIndex++) {
+                if ($trim.tracks[$streamIndex].trackId.value -ne "$($trackIds[$order[$streamIndex]])" -or -not $trim.tracks[$streamIndex].samplesPreserved) { throw 'Audio trim changed a track identity or samples.' }
+            }
+            if (-not ($trim.operation.issues | Where-Object { $_.code.value -eq 'AUDIO_PACKET_BOUNDARY_GAP' }) -or
+                -not ($trim.operation.issues | Where-Object { $_.code.value -eq 'AUDIO_RECOVERY_BOUNDARY_CHANGED' })) { throw 'Audio trim omitted packet/recovery disclosure.' }
+            $decodeJson = & $launcher probe --input $trim.operation.output.assets[0].path --decode-check
+            if ($LASTEXITCODE -ne 0 -or ($decodeJson | ConvertFrom-Json).result.tracks.Count -ne $order.Count -or
+                -not (($decodeJson | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Audio trim all-track decode failed.' }
+            $prefixJson = & $launcher trim --input $fixture --start-us 0 --end-us 280000 --strict --output-dir (Join-Path $verify "audio trim prefix $orderIndex")
+            if ($LASTEXITCODE -ne 0 -or -not (($prefixJson | ConvertFrom-Json).result.operation.preservation.records | Where-Object { $_.guarantee -eq 'MetadataPreserving' -and $_.outcome -eq 'Verified' })) { throw 'Audio trim prefix strict metadata proof failed.' }
+            $rejectedDir = Join-Path $verify "audio trim exact rejected $orderIndex"
+            $rejectedJson = & $launcher trim --input $fixture --start-us 130000 --end-us 270000 --mode Exact --allow-transcode --output-dir $rejectedDir
+            if ($LASTEXITCODE -ne 3 -or ($rejectedJson | ConvertFrom-Json).error.code.value -ne 'EXACT_TRIM_UNAVAILABLE' -or (Test-Path $rejectedDir)) { throw 'Audio trim silently encoded or published an unsupported exact cut.' }
+            if ($sourceHash -ne (Get-FileHash $fixture).Hash) { throw 'Audio trim changed its input.' }
+            Write-Host "PORTABLE_FFMPEG_AUDIO_TRIM=SUCCESS order=$orderIndex scope=single-dual-aac-all-track-copy-actual-ranges-decode"
+        }
         $frameFixture = Join-Path $verify 'frame fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 4 -vf 'setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709' -c:v libx264 -preset medium -bf 2 -g 4 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $frameFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable frame fixture generation failed.' }
@@ -1077,7 +1121,7 @@ try {
             if ($LASTEXITCODE -ne 3 -or ($strictJson | ConvertFrom-Json).error.code.value -ne 'PRESERVATION_REQUIREMENT_FAILED' -or (Test-Path $strictDir)) { throw 'AAC copy incorrectly authorized strict whole-asset video encoding.' }
             $trimDir = Join-Path $verify "AAC encoded trim refused $orderIndex"
             $trimJson = & $launcher trim --input $fixture --start-us 40000 --end-us 400000 --mode Exact --allow-transcode --output-dir $trimDir
-            if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -notin @('LOSSLESS_TRIM_UNAVAILABLE','CAPABILITY_UNSUPPORTED') -or (Test-Path $trimDir)) { throw 'Explicit transcode audio permission leaked into trim.' }
+            if ($LASTEXITCODE -ne 3 -or ($trimJson | ConvertFrom-Json).error.code.value -notin @('LOSSLESS_TRIM_UNAVAILABLE','CAPABILITY_UNSUPPORTED','EXACT_TRIM_UNAVAILABLE') -or (Test-Path $trimDir)) { throw 'Explicit transcode audio permission leaked into trim.' }
             if ($sourceHash -ne (Get-FileHash $fixture).Hash) { throw 'AAC transcode changed its original input.' }
             Write-Host "PORTABLE_FFMPEG_AAC_TRANSCODE=SUCCESS order=$orderIndex scope=explicit-video-encoding-audio-copy-not-trim-or-device"
         }

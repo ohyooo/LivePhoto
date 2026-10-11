@@ -5,6 +5,33 @@ import livephoto.core.binary.*
 
 /** Only the finite AAC-LC one-previous-sample recovery graph; all bytes remain metadata proof inputs. */
 internal object RemuxRollGroups {
+    /** Independently bind the known all-sample recovery assignment to each audio track's sample count. */
+    suspend fun canonical(reader: BinaryReader, video: VideoStructure, code: String = "CAPABILITY_UNSUPPORTED") {
+        if (video.tracks.none { it.handler == "soun" }) return
+        val boxes = BmffReader(reader)
+        suspend fun children(box: BmffBox) = boxes.readBoxes(box.payload).orThrow()
+        fun one(children: List<BmffBox>, type: String): BmffBox = children.singleOrNull { it.type == type }
+            ?: fail(code, "AAC trim requires a unique classified recovery path", Stage.Plan)
+        val moov = one(boxes.readBoxes(video.range).orThrow(), "moov")
+        val tracks = children(moov).filter { it.type == "trak" }
+        if (tracks.size != video.tracks.size) fail(code, "AAC recovery track graph differs", Stage.Plan)
+        for ((index, track) in video.tracks.withIndex()) {
+            if (track.handler != "soun") continue
+            val stbl = children(one(children(one(children(one(children(tracks[index]), "mdia")), "minf")), "stbl"))
+            val description = one(stbl, "sgpd")
+            val mapping = one(stbl, "sbgp")
+            val expectedDescription = Bytes(byteArrayOf(1, 0, 0, 0) + "roll".encodeToByteArray() +
+                unsignedBytes(2uL, 4, Endian.Big).toByteArray() + unsignedBytes(1uL, 4, Endian.Big).toByteArray() + byteArrayOf(-1, -1))
+            val expectedMapping = Bytes(ByteArray(4) + "roll".encodeToByteArray() + unsignedBytes(1uL, 4, Endian.Big).toByteArray() +
+                unsignedBytes(track.samples.size.toULong(), 4, Endian.Big).toByteArray() + unsignedBytes(1uL, 4, Endian.Big).toByteArray())
+            if (description.payload.length != expectedDescription.size.toULong() || mapping.payload.length != expectedMapping.size.toULong() ||
+                reader.readExactly(description.payload.offset, expectedDescription.size.toUInt()).orThrow() != expectedDescription ||
+                reader.readExactly(mapping.payload.offset, expectedMapping.size.toUInt()).orThrow() != expectedMapping)
+                fail(code, "AAC trim requires the canonical one-sample recovery assignment, independently bound to every retained sample", Stage.Plan)
+        }
+        reader.validateIdentity().orThrow()
+    }
+
     suspend fun validate(reader: BinaryReader, boxes: BmffReader, children: List<BmffBox>, depth: UInt) {
         val groups = children.filter { it.type in setOf("sgpd", "sbgp") }
         if (groups.isEmpty()) return

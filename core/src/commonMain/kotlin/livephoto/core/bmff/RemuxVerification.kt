@@ -15,7 +15,8 @@ internal object RemuxVerification {
     }
 
     suspend fun metadata(reader: BinaryReader, video: VideoStructure, trimDurationsVerifiedSeparately: Boolean = false, transcodeAvcConfiguration: Boolean = false,
-        retainedMovieText: Boolean = false): Metadata {
+        retainedMovieText: Boolean = false, trimAudioSampleCountsVerifiedSeparately: Boolean = false): Metadata {
+        if (trimAudioSampleCountsVerifiedSeparately) RemuxRollGroups.canonical(reader, video)
         val budget = ParseBudget(reader.context)
         val boxes = BmffReader(reader, budget)
         val records = mutableListOf<Pair<String, Digest>>()
@@ -70,6 +71,7 @@ internal object RemuxVerification {
                         if (fileType.majorBrand !in neutral || fileType.compatibleBrands.any { it !in neutral } || fileType.minorVersion !in setOf(0u, 512u))
                             fail("UNSAFE_METADATA_REWRITE", "Unclassified brand/version semantics cannot be discarded by remux", Stage.Plan)
                     }
+                    box.type == "sbgp" && trimAudioSampleCountsVerifiedSeparately -> Unit // canonical assignment and selected sample count independently verified, not arbitrary group removal
                     box.type in setOf("elst", "stts", "ctts", "stsc", "stsz", "stco", "co64", "stss", "sdtp") -> Unit // independently verified sample/timeline semantics
                     box.type == "hdlr" -> {
                         budget.retain(box.payload.length)
