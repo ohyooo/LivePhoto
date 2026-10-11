@@ -12,7 +12,7 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
         listOf(CapabilityEntry(Operation.Probe, Implementation.Experimental, conditions = listOf(
             Condition(ConditionOperator.Equals, "decodeScope", Value.Text("bounded-jpeg-or-validated-bmff-video-and-audio-or-closed-single-hvc1-heic-no-private-properties-sei-metadata-one-decoded-frame-at-most-4096x4096-and-64MiB-single-allocation"))))) +
             listOf(CapabilityEntry(Operation.Remux, Implementation.Experimental, conditions = listOf(
-                Condition(ConditionOperator.Equals, "input", Value.Text("one-video-classified-mp4-mov-no-audio-or-mp4-to-mp4-one-aac-lc-base-asc-canonical-roll-map-all-track-independent-sample-and-metadata-proof"))))) +
+                Condition(ConditionOperator.Equals, "input", Value.Text("one-video-classified-mp4-mov-no-audio-or-mp4-to-mp4-at-most-two-aac-lc-base-asc-canonical-roll-map-all-track-independent-sample-and-metadata-proof"))))) +
             listOf(CapabilityEntry(Operation.ExtractFrame, Implementation.Experimental, conditions = listOf(
                 Condition(ConditionOperator.Equals, "frameProfile", Value.Text("progressive-square-pixel-identity-transform-eight-bit-bt709-limited-sdr-to-standard-srgb-jpeg")),
                 Condition(ConditionOperator.Equals, "defaultImageQuality", Value.Text("ffmpeg-mjpeg-qscale-2-no-backend-quality-equivalence-claim")),

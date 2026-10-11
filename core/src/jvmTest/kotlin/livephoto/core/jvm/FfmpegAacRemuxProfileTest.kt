@@ -39,6 +39,22 @@ class FfmpegAacRemuxProfileTest {
         }
     }
 
+    @Test fun secondAudioTrackNeedsItsOwnRecoveryGroupProof(): Unit = runImmediate {
+        val reader = BinaryReader(source(groups(listOf(2u to 1u))), context)
+        val facts = BmffVideoProbe(reader).probe(ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
+        val metadata = RemuxVerification.metadata(reader, facts)
+        val second = facts.tracks.single { it.handler == "soun" }.copy(trackId = 29u)
+        val two = facts.copy(tracks = facts.tracks + second)
+        val firstPrefix = "/moov[0]/trak[1]/mdia[0]/minf[0]/stbl[0]"
+        val secondPrefix = "/moov[0]/trak[2]/mdia[0]/minf[0]/stbl[0]"
+        val fields = metadata.fields + metadata.fields.filterKeys { it.startsWith(firstPrefix) }.mapKeys { it.key.replace(firstPrefix, secondPrefix) }
+        FfmpegAacRemuxProfile.validate(two, metadata.copy(fields = fields))
+        for (missing in listOf("sgpd", "sbgp")) {
+            val result = attemptNow { FfmpegAacRemuxProfile.validate(two, metadata.copy(fields = fields - "$secondPrefix/$missing[0]")) }
+            assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(result).error.code.value)
+        }
+    }
+
     @Test fun canonicalMapAndVideoOnlyRemainEligibleButMissingProofDoesNot(): Unit = runImmediate {
         for (audio in listOf(false, true)) {
             val reader = BinaryReader(source(groups(listOf(2u to 1u)), audio), context)

@@ -143,6 +143,78 @@ class FfmpegRemuxIntegrationTest {
         } finally { owned.asReversed().forEach { Files.deleteIfExists(it) }; Files.delete(directory) }
     }
 
+    @Test fun twoDistinctAacTracksKeepSparseIdsOrdersConfigurationsSamplesAndMetadata(): Unit = runImmediate {
+        val found = discovery()
+        val directory = Files.createTempDirectory("livephoto-two-aac-")
+        val owned = mutableListOf<Path>()
+        fun path(name: String) = directory.resolve(name).also { owned.add(it) }
+        suspend fun prepare(arguments: List<String>) {
+            val result = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + arguments, 60_000L)
+            assertEquals(0, result.code, result.output); assertFalse(result.ioFailed)
+        }
+        try {
+            val video = path("video.mp4")
+            prepare(listOf("-f", "lavfi", "-i", "color=c=black:s=16x16:r=25", "-frames:v", "4", "-c:v", "libx264", "-preset", "ultrafast",
+                "-bf", "0", "-g", "2", "-pix_fmt", "yuv420p", "-map_metadata", "-1", "-metadata:s:v", "encoder=",
+                "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", video.toString()))
+            val audio = listOf(path("mono44100.aac"), path("stereo48000.aac"))
+            for ((index, file) in audio.withIndex()) prepare(listOf("-f", "lavfi", "-i", "sine=frequency=${440 + index * 440}:sample_rate=${if (index == 0) 44100 else 48000}:duration=0.16",
+                "-c:a", "aac", "-b:a", if (index == 0) "64k" else "128k", "-ac", (index + 1).toString(), "-flags:a", "+bitexact", "-f", "adts", file.toString()))
+            val tracks = listOf("0:v:0" to 17u, "1:a:0" to 4u, "2:a:0" to 29u)
+            val orders = listOf(listOf(0, 1, 2), listOf(1, 0, 2), listOf(2, 1, 0))
+            for ((case, order) in orders.withIndex()) {
+                val fixture = path("order-$case.mp4")
+                val inputs = listOf("-i", video.toString(), "-i", audio[0].toString(), "-i", audio[1].toString())
+                val mux = listOf("-c", "copy", "-bsf:a", "aac_adtstoasc", "-map_metadata", "-1", "-metadata:s:v", "encoder=",
+                    "-fflags", "+bitexact", "-write_btrt", "0", "-use_stream_ids_as_track_ids", "1")
+                prepare(inputs + order.flatMapIndexed { index, track -> listOf("-map", tracks[track].first, "-streamid", "$index:${tracks[track].second}") } + mux + fixture.toString())
+                val input = FileBinarySource(fixture)
+                try {
+                    val reader = BinaryReader(input, context)
+                    val before = BmffVideoProbe(reader).probe(ByteRange(0uL, input.size().orThrow())).orThrow()
+                    assertEquals(order.map { tracks[it].second }, before.tracks.map { it.trackId })
+                    assertEquals(44100u, before.tracks.single { it.trackId == 4u }.audioActualSampleRate)
+                    assertEquals(48000u, before.tracks.single { it.trackId == 29u }.audioActualSampleRate)
+                    val hash = sha256Range(reader, before.range).orThrow()
+                    val core = DefaultLivePhotoCore(found.backend)
+                    val result = core.remux(RemuxRequest(ResourceRef(SourceSet.Single(input)), VideoContainer.Mp4,
+                        policy = MutationPolicy(preservation = PreservationPolicy.Strict, requiredGuarantees = listOf(Guarantee.BitstreamPreserving, Guarantee.MetadataPreserving)),
+                        output = MemoryOutputTransaction(context, "two-aac-$case"), context = context)).orThrow()
+                    try {
+                        val output = BinaryReader(result.output.assets.single().readableSource!!, context)
+                        val after = BmffVideoProbe(output).probe(ByteRange(0uL, output.identity().orThrow().size)).orThrow()
+                        assertEquals(3, after.tracks.size)
+                        assertEquals(before.tracks.map { it.trackId }, after.tracks.map { it.trackId })
+                        RemuxVerification.verify(reader, before, output, after)
+                        RemuxVerification.verifyMetadata(RemuxVerification.metadata(reader, before), RemuxVerification.metadata(output, after))
+                        for (track in before.tracks) {
+                            val actual = after.tracks.single { it.trackId == track.trackId }
+                            assertEquals(track.codecConfiguration, actual.codecConfiguration)
+                            assertEquals(track.samples.map { sha256Range(reader, it.range).orThrow() }, actual.samples.map { sha256Range(output, it.range).orThrow() })
+                        }
+                        assertTrue(result.execution.none { it.transcoded })
+                        assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(output.source)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+                    } finally { result.output.assets.forEach { it.readableSource?.close() } }
+                    val refused = MemoryOutputTransaction(context, "two-aac-mov-$case")
+                    assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(core.remux(RemuxRequest(ResourceRef(SourceSet.Single(input)), VideoContainer.Mov, output = refused, context = context))).error.code.value)
+                    assertTrue(refused.committedAssets().isEmpty())
+                    assertEquals(hash, sha256Range(reader, before.range).orThrow())
+                } finally { input.close() }
+                if (case == 0) {
+                    val excessive = path("three-aac.mp4")
+                    val maps = listOf(0, 1, 2, 1).flatMapIndexed { index, track -> listOf("-map", tracks[track].first, "-streamid", "$index:${index + 1}") }
+                    prepare(inputs + maps + mux + excessive.toString())
+                    val input3 = FileBinarySource(excessive)
+                    try {
+                        val tx = MemoryOutputTransaction(context, "three-aac-refused")
+                        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(DefaultLivePhotoCore(found.backend).remux(RemuxRequest(ResourceRef(SourceSet.Single(input3)), VideoContainer.Mp4, output = tx, context = context))).error.code.value)
+                        assertTrue(tx.committedAssets().isEmpty())
+                    } finally { input3.close() }
+                }
+            }
+        } finally { owned.asReversed().forEach { Files.deleteIfExists(it) }; Files.delete(directory) }
+    }
+
     @Test fun referenceVideoColorDeclarationsCannotBeSilentlyChangedAcrossContainers(): Unit = runImmediate {
         val found = discovery()
         val directory = Files.createTempDirectory("livephoto-color-remux-fixture-")

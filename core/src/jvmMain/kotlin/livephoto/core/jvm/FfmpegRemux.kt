@@ -22,10 +22,10 @@ internal object FfmpegRemux {
         val video = before.tracks.singleOrNull { it.handler == "vide" }
             ?: fail("CAPABILITY_UNSUPPORTED", "Remux requires exactly one verified video track; no track may be dropped", Stage.Plan)
         val audio = before.tracks.filter { it.handler == "soun" }
-        if (audio.size > 1 || before.tracks.any { it.handler !in setOf("vide", "soun") } ||
+        if (audio.size > 2 || before.tracks.any { it.handler !in setOf("vide", "soun") } ||
             audio.any { it.audioCodec != AudioCodec.Aac || it.sampleEntry != "mp4a" } ||
             audio.isNotEmpty() && (before.container != VideoContainer.Mp4 || job.remuxContainer != VideoContainer.Mp4))
-            fail("CAPABILITY_UNSUPPORTED", "AAC-bearing remux currently requires MP4 to MP4 with one verified AAC-LC track; no track may be dropped", Stage.Plan)
+            fail("CAPABILITY_UNSUPPORTED", "AAC-bearing remux requires MP4 to MP4 with at most two independently verified AAC-LC tracks; no track may be dropped", Stage.Plan)
         if (before.movieTimescale > Int.MAX_VALUE.toUInt() || before.tracks.any { it.timescale > Int.MAX_VALUE.toUInt() || it.trackId > Int.MAX_VALUE.toUInt() })
             fail("CAPABILITY_UNSUPPORTED", "FFmpeg muxer timescale domain cannot represent the source", Stage.Plan)
         val metadata = RemuxVerification.metadata(reader, before)

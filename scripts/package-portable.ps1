@@ -831,6 +831,37 @@ try {
         $aacMov = & $launcher remux --input $aacFixture --container Mov --output-dir (Join-Path $verify 'unsupported AAC MOV')
         if ($LASTEXITCODE -ne 3 -or ($aacMov | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Portable unimplemented AAC MOV remux gate failed.' }
         Write-Host 'PORTABLE_FFMPEG_AAC_REMUX=SUCCESS'
+        $secondAac = Join-Path $verify 'mono 44100 AAC fixture.aac'
+        & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'sine=frequency=880:sample_rate=44100:duration=0.16' -c:a aac -b:a 64k -ac 1 -flags:a +bitexact -f adts $secondAac
+        if ($LASTEXITCODE -ne 0) { throw 'Portable second AAC fixture encode failed.' }
+        $trackMaps = @('0:v:0', '1:a:0', '2:a:0')
+        $trackIds = @(17, 4, 29)
+        $orders = @(@(0, 1, 2), @(1, 0, 2), @(2, 1, 0))
+        for ($orderIndex = 0; $orderIndex -lt $orders.Count; $orderIndex++) {
+            $twoAac = Join-Path $verify "two AAC order $orderIndex.mp4"
+            $mapping = @()
+            for ($streamIndex = 0; $streamIndex -lt 3; $streamIndex++) {
+                $trackIndex = $orders[$orderIndex][$streamIndex]
+                $mapping += @('-map', $trackMaps[$trackIndex], '-streamid', "$($streamIndex):$($trackIds[$trackIndex])")
+            }
+            & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -i $remuxFixture -i $aacElementary -i $secondAac @mapping -c copy -bsf:a aac_adtstoasc -map_metadata -1 -metadata:s:v 'encoder=' -fflags +bitexact -write_btrt 0 -use_stream_ids_as_track_ids 1 $twoAac
+            if ($LASTEXITCODE -ne 0) { throw 'Portable two AAC fixture mux failed.' }
+            $twoAacHash = (Get-FileHash $twoAac).Hash
+            $twoJson = & $launcher remux --input $twoAac --container Mp4 --strict --output-dir (Join-Path $verify "two AAC remux $orderIndex")
+            if ($LASTEXITCODE -ne 0) { throw "Portable two AAC remux failed: $twoJson" }
+            $two = ($twoJson | ConvertFrom-Json).result
+            if (($two.execution | Where-Object transcoded -eq $true) -or -not ($two.execution | Where-Object remuxed -eq $true)) { throw 'Two AAC remux used an encoder or lacks its execution record.' }
+            foreach ($guarantee in @('BitstreamPreserving', 'MetadataPreserving')) {
+                if (-not ($two.preservation.records | Where-Object { $_.guarantee -eq $guarantee -and $_.outcome -eq 'Verified' })) { throw 'Two AAC remux lacks an independent preservation guarantee.' }
+            }
+            & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -i $two.output.assets[0].path -map 0:v:0 -map 0:a:0 -map 0:a:1 -f null -
+            if ($LASTEXITCODE -ne 0) { throw 'Portable remux did not decode the video and both audio tracks.' }
+            $rejectDir = Join-Path $verify "unsupported two AAC MOV $orderIndex"
+            $twoMov = & $launcher remux --input $twoAac --container Mov --output-dir $rejectDir
+            if ($LASTEXITCODE -ne 3 -or ($twoMov | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED' -or (Test-Path $rejectDir)) { throw 'Two AAC MOV gate changed or published refused output.' }
+            if ((Get-FileHash $twoAac).Hash -ne $twoAacHash) { throw 'Two AAC remux changed the source.' }
+            Write-Host "PORTABLE_FFMPEG_TWO_AAC_REMUX=SUCCESS order=$orderIndex scope=mp4-sparse-ids-distinct-rates-channels-all-track-proof"
+        }
         $frameFixture = Join-Path $verify 'frame fixture.mp4'
         & $media.ffmpegPath -nostdin -n -hide_banner -loglevel error -xerror -f lavfi -i 'testsrc2=size=32x32:rate=25' -frames:v 4 -vf 'setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709' -c:v libx264 -preset medium -bf 2 -g 4 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 -metadata:s:v 'encoder=' -fflags +bitexact -flags:v +bitexact -write_btrt 0 $frameFixture
         if ($LASTEXITCODE -ne 0) { throw 'Portable frame fixture generation failed.' }

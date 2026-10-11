@@ -287,6 +287,8 @@ Linux（Bash/Zsh）：
 
 这些示例假设可用 FFmpeg 在 PATH 中，也可追加 `--ffmpeg '完整路径'`。`LosslessPreferred` 是默认裁剪模式，应读取结果中请求与实际边界；`Exact` 必要时转码仍需 `--allow-transcode`。`--frame-index` 是 **zero-based presentation order**，不是 decode order。时间参数单位为微秒。
 
+FFmpeg remux 的音频子集为 **MP4→MP4、一个视频轨＋至多两个 AAC-LC 音轨**：要求已分类的基础 ASC、canonical roll recovery map、容器及普通 metadata。逐轨保持 track ID/顺序、配置、sample、呈现时间线与 metadata，并回读验证后才发布；不会选一条音轨而丢掉其它音轨。带音频的 MP4→MOV、三条及更多音轨、未知 descriptor/metadata 或 recovery map 仍拒绝。remux 不授权编码，不代表带音频裁剪或转码已经实现。
+
 `replace-cover` 与 `extract-frame` 分开：前者将抽出的帧作为动态照片主图，需要额外满足 metadata/图像编码保留门禁；`--update-key` 才请求一并修改 key。支持范围不能只从命令存在推断。
 
 ## 命令与参数
@@ -630,6 +632,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] Windows 有限系统 JPEG 显式质量 0..100 与 CLI `--quality`：792 项新全量及无 FFmpeg 完整便携验收通过；默认路径字节不变、独立 DQT/源不变/错误无输出。不代表无损或 FFmpeg 质量刻度等价。
 - [x] Windows 有限 Main/High 8-bit/4:2:0、无 B 帧 remux：794 项新全量和无 FFmpeg 完整便携验收通过，独立两 profile 样本与源头恢复、完整 metadata/样本/时间线验证；不开放自定义 scaling、重排、音轨或跨容器。
 - [ ] 扩展统一 FFmpeg remux/裁剪的音轨、复杂 edits、容器与媒体 profile，并补齐三平台真实验收；各自补独立证据，不能靠丢字段或放宽时间线检查开放能力。桌面系统 remux 代码保留、不继续扩展。
+- [x] 有界双 AAC-LC MP4→MP4 remux：新全量 **847 tests，826 执行成功、21 历史系统专项跳过，0 failures / errors**；真实不同采样率/声道/频率、三种轨道顺序及稀疏 ID，每轨配置/逐 sample/metadata/源字节与完整解码通过。第二音轨独立 recovery proof、三音轨及跨容器拒绝门禁保留；对应便携与三平台产物按本提交 Actions 核对，不借上一批结果。
 - [x] Windows 有限系统无转码裁剪：803 项新全量和无 FFmpeg 完整便携验收通过；真正非零 IDR 选中 VFR 样本、时长表/offset 重建、requested/actual 与 key 重置、配置/样本/metadata 独立证明、系统完整解码。Exact 仅无编码可满足时可用，不开放 encoder、音轨、B 帧、MOV、复杂 edit/sample groups 或隐藏 preroll。
 - [ ] 完善统一 FFmpeg 抽帧/裁剪/transcode 的业务 profile 与三平台证据。音轨/重排/复杂 edits 需各自证明；桌面系统适配代码保留，停止新增 Windows/macOS/Linux 系统媒体 API 工作。
 - [x] Windows 有限 MOV 系统 Probe 扩展：实际测试、Windows 便携包与对应 CI 产物验收通过；不因此声称音频/HDR 或通用 MOV 支持。[微软格式表](https://learn.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)列出 `.mov`，但本项目仍逐项限制并验证 decoder/profile。
