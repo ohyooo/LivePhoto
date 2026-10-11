@@ -6,7 +6,7 @@
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；当前构建目标为 JVM，尚未交付 Native、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付；Apple 有限 ExplicitRePair 已完成测试、便携包和 CI 验收。桌面媒体处理统一使用可选 FFmpeg，系统 API 历史代码保留但停用。后续重点为协议/修复/Apple 写入与 FFmpeg 验收；移动端及其系统媒体 API 排在最后，真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。桌面媒体处理统一使用可选 FFmpeg，系统 API 历史代码保留但停用。后续重点为非 Apple 协议/修复与 FFmpeg 完善和验收；Apple 新功能暂停，已有能力和测试保留。移动端及其系统媒体 API 排在最后，真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -49,6 +49,8 @@ Linux，在解压位置运行：
 ```
 
 ## 前提与推荐
+
+实现职责明确分为三部分：图片＋视频的 Live Photo 协议封装由 Core 代码完成；桌面裁剪、抽帧、重封装和转码直接调用 FFmpeg；未来移动端使用系统服务/API。Core 保留请求策略、协议解析、边界与实际输出验证，不自行替代 FFmpeg 编写桌面媒体剪切器或编码器。
 
 - **只做协议操作通常不需要 FFmpeg。** 检测、结构检查、原样提取及有限的协议封装/编辑，可直接由 Core 完成。结构检查不代表已经解码视频。
 - **桌面媒体处理使用自己准备的 FFmpeg。** Windows/macOS/Linux 的后端选择顺序为：`--ffmpeg` 显式路径 → 系统 `PATH` → 禁用相应媒体能力。不自动调用系统媒体 API，不自动下载或安装 FFmpeg、Java 或其它后端；不识别 shell 的 FFmpeg 别名，PATH 中使用绝对目录。没有 FFmpeg 时，纯协议解析、metadata 编辑与已有有限协议操作仍可用，需要解码/抽帧/媒体编辑的操作则明确拒绝。
@@ -472,6 +474,8 @@ Apple 有限索引式普通文本：新全量 **826 tests，805 项执行成功�
 
 ### 最新可核验检查点
 
+三条职责边界与 FFmpeg 调用整理：新全量 **863 tests，842 项执行成功，0 failures / errors；21 项停用的历史系统 API 专项跳过**。五个桌面媒体入口统一输入暂存、存储预算、取消/超时/进程错误、源身份检查和临时文件清理；解码与编码错误分阶段返回。历史 Windows 结构剪切器及五项测试移到 JVM 层，公共 Core 不再包含该媒体处理实现，源码/测试保留。新增 11 项调用管理测试和真实 FFmpeg 回归通过；新完整 Windows 便携包通过三组双 AAC remux、四组音轨保留转码及全部既有 smoke。三平台 CI 与产物按[本提交 Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)核对。此批没有扩展带音频裁剪、Apple 写入或移动端能力。
+
 显式 AVC/VFR 视频转码保留有限 AAC：新全量 **852 tests，831 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。真实单/双音轨、不同采样率/声道、四种轨道顺序及稀疏 ID 验证每轨 sample/configuration/时间线与普通 metadata，完整源/输出解码通过；丢轨、篡改音频 sample/配置/时间线在发布前回滚。新完整 Windows FFmpeg 便携包通过四组实际 CLI 编码/音轨保留验收，以及默认未授权、严格策略冲突、音频裁剪拒绝与全部既有 smoke。三平台 CI/上传状态按[对应提交 Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)核对；不借前一批结果，也不将缺少 FFmpeg 的 CI skip 当作实际媒体验收。
 
 Apple 普通 MOV 短文本扩展：新全量 **823 tests，802 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。合成结构正反例与真实编码 MOV 验证目录原字节保留、严格 Create、Clean 与再次严格复制；新完整 Windows 无 FFmpeg 便携包对 MP4/MOV 分别执行全部新验收。长度/语言/重复字段/未知类型/混合目录继续拒绝，不等同于通用 QuickTime metadata 或设备认证。
@@ -550,7 +554,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
-| Apple Pair / Create / Convert | 部分完成 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google/有限 Samsung/Huawei basic60/最小版本一 vivo 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径 |
+| Apple Pair / Create / Convert | 部分完成；暂停新增功能 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google/有限 Samsung/Huawei basic60/最小版本一 vivo 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 暂缓已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径；保留已有代码/测试 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
 | MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；双 AAC remux 与显式 AVC 转码保留音轨；运行时查询实际能力 | 带音频裁剪、更多媒体/容器/复杂 edits profile 与三平台真实验收；最后移动端系统媒体 API |
@@ -569,6 +573,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] 唯一证据的有限 metadata Repair、只读预览/allowlist/幂等/失败回滚；Apple 源绑定 CID inspection evidence 与有限 ExplicitRePair。
 - [x] key metadata 与抽帧/封面重建分离；FFmpeg 有限 probe、抽帧、裁剪、remux、显式 transcode 及 Core 集成。
 - [x] 桌面默认后端统一为显式 FFmpeg → PATH → 禁用；系统 API 源码保留、不默认发现或运行。新全量测试与有/无 FFmpeg 两轮 Windows 完整便携验收通过。
+- [x] 三条职责边界与 FFmpeg 调用管理整理：五个入口统一 IO/预算/取消/错误/清理；历史 Windows 自写剪切器移出 commonMain，保留源码及 JVM 测试。863 项新全量与新完整 Windows 便携验收通过，不因此扩大媒体支持范围。
 - [x] Windows 有限系统 API 完整解码 Probe 回退与隔离 helper；不能当作系统媒体编辑已完成。
 - [x] 薄 CLI、JSON/退出码、两资产原子发布、源变化/预算/取消/篡改/第二资产失败回归。
 - [x] Windows/Linux 便携 CI、reference 测试、合成 parser/writer/round-trip/byte-exact/metadata/malformed 测试与有限真实媒体解码验收。
@@ -580,13 +585,14 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | 顺序 | 工作包 | 状态 / 前提 | 交付时应看到的结果 |
 | --- | --- | --- | --- |
 | 已完成批次 | Apple 有限 ExplicitRePair | **已完成有限范围交付**；复用既有 Request 与新鲜 CID 证据 | 用户指定两个源及权威，冲突 ID 不自动选；独立验证后原子发布 |
-| 2 | Repair 其它显式模式及 Apple 写入扩展 | Samsung/vivo/Huawei basic60 JPEG 有限容器修复已通过；剩余路径先确认 ownership/依赖，重大规范/API 冲突需报告 | 每个 mode/profile 独立标能力；不能凭其它入口已可用推断支持 |
+| 2 | 非 Apple Repair 其它显式模式 | Samsung/vivo/Huawei basic60 JPEG 有限容器修复已通过；剩余路径先确认 ownership/依赖，重大规范/API 冲突需报告 | 每个 mode/profile 独立标能力；不能凭其它入口已可用推断支持 |
 | 3 | 统一桌面 FFmpeg 后端与跨平台验收 | 三平台复用后端；已有 Windows 真实媒体验证，继续完善其它平台证据与业务范围 | 显式路径/PATH 发现，媒体结果独立回读；没有 FFmpeg 就禁用，不调用桌面系统 API |
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
 | 已完成批次 | macOS ARM64 便携包 | **已完成当前便携范围**，仍为 jpackage/JVM | ARM64 CI 构建、归档解压、smoke 与本机 13 个 CLI 检查通过；不是系统媒体后端或设备认证 |
 | macOS 验收后逐步推进 | Kotlin/Native Core 与原生 CLI | **TODO：尚未实现，不在本批重写** | 先复用 commonMain 并增加 Native 库/测试，再替换 JVM 文件 IO、原子事务、进程调用和 JSON/日志适配，最后接入原生媒体后端；逐平台交付不依赖 JVM 的产物 |
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
+| 暂停 | Apple 新功能与复杂 HEIF Pair 写入 | **用户决定暂停；已有代码和测试保留** | 恢复时再补真实 iOS 证据，不计作已完成，也不占用当前桌面 FFmpeg 工作 |
 | 最后 | Android/iOS 接入与移动端系统媒体 API | **TODO：桌面与协议剩余任务之后；尚未配置移动 target 或产物** | 先编译与 common 测试，再接 Uri/文件 IO、事务与权限，最后移动端媒体后端及设备验收；不复用桌面进程假装移动端支持 |
 | 当前范围之外 | Compose UI | 未来规划，不计入本轮 Core + CLI 交付 | 复用统一 Core/Application API，不提前引入 GUI 依赖 |
 
@@ -614,7 +620,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] 有限 Samsung JPEG 标准 EXIF→Apple：835 项新全量、新完整 Windows 10 组合便携验收与 10 视频解码通过；非 Legacy 两记录 SEF＋原 MP4，未知 key 要求显式选择，不丢普通 SEF，不借清理证明升级 Strict。
 - [x] Huawei basic60 JPEG 标准 EXIF→Apple：838 项新全量（817 执行成功、21 历史系统专项跳过）、新完整 Windows 12 组合便携验收通过；独立尾标/EXIF 来源证明、显式 key、Honor/间隙/未知时间拒绝、源不变和清理视图篡改零输出。对应提交后的三平台 CI/产物见 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)，不借用上一批 CI，不证明设备兼容。
 - [x] 最小版本一 vivo 标准 EXIF→Apple：841 项新全量（820 执行成功、21 历史系统专项跳过）、新完整 Windows 14 组合便携验收与 14 输出完整解码通过；非零 key/普通字段/样本/源字节保留，未知版本、私有字段、Flags、GainMap、Strict 与清理视图篡改零资产拒绝。对应提交的三平台 CI/产物以 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 为准，不借其它提交结果。
-- [ ] 其它含 EXIF 来源的 Apple 转换与 Normalize：按各协议分别证明清理 ownership 和普通字段保留，不能直接借用 Google 路径；已有 MakerNote 合并仍未实现。
+- [ ] **暂停：**其它含 EXIF 来源的 Apple 转换与 Normalize；已有 MakerNote 合并仍未实现。恢复后按各协议分别证明清理 ownership 和普通字段保留，不能直接借用 Google 路径。
 - [ ] 扩展其它显式 Repair 与 Apple 写入：有限 ExplicitRePair、Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux 已有实现；其它 profile、更复杂 MakerNote/private metadata 尚未实现，不能借用独立 remux 能力。
 - [x] Apple Create 保留有限 iTunes 普通文本：817 项本轮全量，796 项执行成功、21 项历史系统专项跳过；UTF-8/多目录/重复字段/私有编码拒绝及整对篡改回滚通过。raw 保留的追加装配与读取不授权 remux/trim/transcode 改写。
 - [x] Apple 有限普通文本 Clean/Split 与 Apple→Google：821 项新全量，800 项执行成功、21 项历史系统专项跳过；选择性清除 CID/专用轨、原目录/样本保留、再次 Split 整文件复制；首次 Unknown 与严格拒绝、篡改回滚及转换后原样提取回归通过。
@@ -623,7 +629,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] 索引式普通文本与 Apple CID 并存的跨工具兼容：已观察到 FFprobe 扁平化标题混入 CID；原目录原字节保留及 Clean 标签正常不代表此项完成，需更多独立读取器/相册证据。
 - [x] 有限旧式 QuickTime 普通文本：823 项新全量与完整 Windows 双容器便携验收通过；真实 MOV、精确长度/und/UTF-8/唯一 atom、目录原样保留，未知语言/编码/混合目录继续拒绝。
 - [x] Apple 有限默认 JPEG＋MOV Create：757 项全量测试、新完整 Windows 便携包和对应两平台 CI 与 6 个 artifacts 已验收；不开放 MP4 自动转换或复杂 metadata 写入。
-- [ ] Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
+- [ ] **暂停：**Apple 复杂 Generic Create、HEIC Create/ConvertTo、HEIC 跨协议转换/Normalize、更多真实相机 MakerNote 和复杂媒体 profile；已有有限默认路径不代表这些完成。
 - [ ] 扩展复杂 HEIF/AVIF、HDR/GainMap、未知 metadata 关联、辅助资源/混合轨道等；无法证明安全时继续 Unsupported/Partial，不先删 metadata 再宣称无损。
 - [x] Windows 真实解码缓冲区读取前置：758 项全量测试、新完整 Windows 便携包、对应两平台 CI 与 6 个 artifacts 已验收；不是已完成抽帧。
 - [x] Windows 有限 SDR 系统抽帧实现及 NAS/便携验收：紧密 NV12、独立 SPS/VUI/容器色彩门禁、完整呈现时间线与实际帧像素、JPEG 回读、源不变与原子发布；764 项全量通过，空 PATH 便携入口通过。CI 发布状态按上述对应提交 Actions 检查；不是通用 AVC/HDR/真机支持。

@@ -3,7 +3,6 @@ package livephoto.core.jvm
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.jpeg.JpegParser
-import java.nio.file.Files
 import java.nio.file.Path
 
 /** Optional user-installed executable. No FFmpeg binaries or libraries are bundled. */
@@ -42,37 +41,15 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
             fail("CAPABILITY_UNSUPPORTED", "Finite HEIF decoding currently requires declared dimensions at most 4096x4096", Stage.Validate)
         if (facts.imageFormat == ImageFormat.Jpeg && JpegParser.parse(reader, ParseBudget(request.context)).orThrow().primary.length != identity.size)
             fail("INVALID_ARGUMENT", "FFmpeg accepts resolved JPEG resources, not composite carriers", Stage.Validate)
-        if (identity.size > request.context.limits.maxSpoolBytes)
-            fail("RESOURCE_LIMIT_EXCEEDED", "Resolved media exceeds the temporary storage budget", Stage.Read)
-        var directory: Path? = null
-        var file: Path? = null
-        try {
-            directory = Files.createTempDirectory("livephoto-ffmpeg-")
-            file = directory.resolve("media.bin")
-            Files.newOutputStream(file).use { stream ->
-                var offset = 0uL
-                while (offset < identity.size) {
-                    val bytes = reader.readBuffer(offset, minOf(65_536uL, identity.size - offset).toUInt()).orThrow()
-                    stream.write(bytes.toByteArray()); offset += bytes.size.toULong()
-                }
-            }
-            reader.validateIdentity().orThrow()
-            val result = ExternalProcess.run(listOf(executable.toString()) + (if (heic) listOf("-max_alloc", "67108864") else emptyList()) +
+        FfmpegWorkspace.use(reader, Stage.Validate, "Media decode", producesOutput = false, ioStage = Stage.Read, cleanupStage = Stage.Read) {
+            val result = run(listOf(executable.toString()) + (if (heic) listOf("-max_alloc", "67108864") else emptyList()) +
                 listOf("-nostdin", "-hide_banner", "-loglevel", if (heic) "info" else "error", "-xerror",
                 "-abort_on", "empty_output+empty_output_stream", "-protocol_whitelist", "file", "-err_detect", "explode",
                 "-f", if (facts.imageFormat == ImageFormat.Jpeg) "mjpeg" else "mov", "-threads", "1", "-noautorotate") +
                 (if (heic) listOf("-max_pixels", "16777216", "-codec_whitelist", "hevc") else emptyList()) +
-                listOf("-i", file.toString(), "-map", "0:v", "-map", "0:a?", "-sn", "-dn") +
+                listOf("-i", input.toString(), "-map", "0:v", "-map", "0:a?", "-sn", "-dn") +
                 (if (heic) listOf("-vf", "showinfo=checksum=0", "-fps_mode", "passthrough") else emptyList()) + listOf("-f", "null", "-"),
-                timeoutMillis = 600_000L, context = request.context)
-            reader.validateIdentity().orThrow()
-            when {
-                result.cancelled -> fail("CANCELLED", "Media decode was cancelled", Stage.Validate)
-                result.timedOut -> fail("BACKEND_TIMEOUT", "Media decode exceeded its runtime limit", Stage.Validate)
-                result.outputLimited -> fail("RESOURCE_LIMIT_EXCEEDED", "Media backend exceeded its diagnostic output budget", Stage.Validate)
-                result.ioFailed -> fail("IO_READ_FAILED", "Media backend did not exit with completely drained diagnostics", Stage.Validate)
-                result.code != 0 -> fail("DECODE_FAILED", "FFmpeg could not decode the entire selected media resource", Stage.Validate)
-            }
+                errorCode = "DECODE_FAILED")
             if (heic) {
                 val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$").findAll(result.output).map { it.value }.toList()
                 val dimensions = frames.singleOrNull()?.let { Regex("\\bs:(\\d+)x(\\d+)\\b").find(it) }
@@ -81,18 +58,7 @@ internal class FfmpegMediaBackend(private val executable: Path) : MediaBackend {
             }
             // Full A/V decode is not full metadata/color conformance; do not promote all facts to Complete.
             facts.copy(coverage = Coverage.Partial, issues = facts.issues + Issue(IssueCode("MEDIA_DECODE_COMPLETED"), Severity.Info, Layer.Media))
-        } catch (fault: CoreFault) { throw fault }
-        catch (_: Exception) { fail("IO_READ_FAILED", "FFmpeg temporary media IO failed", Stage.Read) }
-        finally {
-            // Exact paths created by this invocation only; never recursive cleanup or user paths.
-            var cleanupFailed = false
-            for (owned in listOfNotNull(file, directory)) try { Files.deleteIfExists(owned) } catch (_: Exception) { cleanupFailed = true }
-            if (cleanupFailed) fail("IO_WRITE_FAILED", "FFmpeg temporary media cleanup failed", Stage.Read)
         }
-    }
-    private fun unsupported(job: BackendJob): CoreResult<BackendResult> = when (val validation = job.validate()) {
-        is CoreResult.Failure -> validation
-        is CoreResult.Success -> CoreResult.Failure(CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This FFmpeg operation is not yet implemented"))
     }
     override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = FfmpegTrim.run(executable, job)
     override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = FfmpegRemux.run(executable, job)

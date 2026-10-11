@@ -8,7 +8,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
-/** Common structural selection followed by actual bounded OS compressed remux and decode.
+/** Historical Windows-only structural selection followed by bounded OS compressed remux and decode.
  * No seek approximation, hidden preroll, or encoder fallback. Core owns final publication. */
 internal object WindowsTrim {
     suspend fun run(command: List<String>, job: BackendJob): CoreResult<BackendResult> = attempt {
@@ -39,7 +39,7 @@ internal object WindowsTrim {
                     override suspend fun close(): CoreResult<Unit> = CoreResult.Success(Unit)
                     private fun unsupported() = CoreResult.Failure(CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Trim, "Private trim is sequential"))
                 }
-                LosslessTrimWriter.write(BinaryReader(source, privateContext), job.trim, sink).orThrow()
+                WindowsStructuralTrimWriter.write(BinaryReader(source, privateContext), job.trim, sink).orThrow()
             }
             val trimmed = FileBinarySource(file)
             try {
@@ -56,7 +56,7 @@ internal object WindowsTrim {
                 reader.validateIdentity().orThrow()
                 remux.copy(tracks = listOf(plan.trackTrim), timelineMap = plan.mapping, execution = remux.execution.map {
                     it.copy(stage = Stage.Trim, inputFacts = videoFacts(before),
-                        reason = "Common closed-IDR sample selection and exact table/duration relocation; actual OS compressed remux; independently verified selected samples, ordinary metadata and complete OS decode; no encoding or hidden content")
+                        reason = "Historical Windows closed-IDR sample selection and exact table/duration relocation; actual OS compressed remux; independently verified selected samples, ordinary metadata and complete OS decode; no encoding or hidden content")
                 })
             } finally { trimmed.close() }
         } catch (fault: CoreFault) { throw fault }

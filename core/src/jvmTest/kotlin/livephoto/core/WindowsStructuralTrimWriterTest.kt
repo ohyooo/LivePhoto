@@ -7,13 +7,13 @@ import livephoto.core.implementation.*
 import livephoto.core.memory.MemoryBinarySource
 import kotlin.test.*
 
-/** Synthetic structural writer evidence, not OS/device playback evidence. */
-class LosslessTrimWriterTest {
+/** Retained historical adapter's synthetic evidence, not OS/device playback evidence. */
+class WindowsStructuralTrimWriterTest {
     private val context = Context(Limits(8_000_000uL, 8_000_000uL))
     private fun reader(bytes: ByteArray, context: Context = this.context) = BinaryReader(MemoryBinarySource(Bytes(bytes), SourceId("trim-writer")), context)
     private suspend fun check(bytes: ByteArray, spec: TrimSpec) {
         val input = reader(bytes); val sink = TestSink(maxChunk = 7)
-        val plan = LosslessTrimWriter.write(input, spec, sink).orThrow()
+        val plan = WindowsStructuralTrimWriter.write(input, spec, sink).orThrow()
         val output = reader(sink.written.toByteArray())
         val after = BmffVideoProbe(output).probe(ByteRange(0uL, sink.written.size.toULong())).orThrow()
         verifyTrimDurationHeaders(output, after, plan)
@@ -48,7 +48,7 @@ class LosslessTrimWriterTest {
             Triple(GoogleFixtures.video(aac = true).bytes, TrimSpec(TimeRange(Time.Zero, Time(40, 1000u))), "CAPABILITY_UNSUPPORTED"),
             Triple(normal, TrimSpec(TimeRange(Time(20, 1000u), Time(40, 1000u)), TrimMode.LosslessOnly), "LOSSLESS_TRIM_UNAVAILABLE"))) {
             val sink = TestSink()
-            assertEquals(code, assertIs<CoreResult.Failure>(LosslessTrimWriter.write(reader(bytes), spec, sink)).error.code.value)
+            assertEquals(code, assertIs<CoreResult.Failure>(WindowsStructuralTrimWriter.write(reader(bytes), spec, sink)).error.code.value)
             assertEquals(0, sink.calls)
         }
     }
@@ -58,7 +58,7 @@ class LosslessTrimWriterTest {
             context.copy(limits = context.limits.copy(maxMetadataBytes = 1uL)), context.copy(cancellation = Cancellation { true }))) {
             val sink = TestSink()
             assertEquals(if (limited.cancellation != null) "CANCELLED" else "RESOURCE_LIMIT_EXCEEDED", assertIs<CoreResult.Failure>(
-                LosslessTrimWriter.write(reader(bytes, limited), TrimSpec(TimeRange(Time.Zero, Time(40, 1000u))), sink)).error.code.value)
+                WindowsStructuralTrimWriter.write(reader(bytes, limited), TrimSpec(TimeRange(Time.Zero, Time(40, 1000u))), sink)).error.code.value)
             assertEquals(0, sink.calls); assertFalse(sink.closed)
         }
     }

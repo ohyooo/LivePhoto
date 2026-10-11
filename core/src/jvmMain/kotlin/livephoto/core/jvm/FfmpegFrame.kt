@@ -7,7 +7,6 @@ import livephoto.core.implementation.selectFrame
 import livephoto.core.implementation.videoFacts
 import livephoto.core.implementation.jpegFacts
 import livephoto.core.jpeg.*
-import java.nio.file.Files
 import java.nio.file.Path
 import javax.imageio.ImageIO
 
@@ -52,40 +51,20 @@ internal object FfmpegFrame {
             fail("VALUE_NOT_REPRESENTABLE", "Frame PTS cannot be selected exactly by this filter profile", Stage.Plan)
         val pixels = checkedMultiply(track.width.toULong(), track.height.toULong())
         if (checkedMultiply(pixels, 4uL) > job.context.limits.maxMetadataBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Decoded frame exceeds the bounded image verification budget", Stage.Plan)
-        if (identity.size >= job.context.limits.maxSpoolBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Frame input leaves no temporary output budget", Stage.Plan)
-        val outputLimit = minOf(job.context.limits.maxOutputBytes, job.context.limits.maxSpoolBytes - identity.size, Long.MAX_VALUE.toULong())
-        if (outputLimit == 0uL) fail("RESOURCE_LIMIT_EXCEEDED", "No frame output storage budget", Stage.Plan)
-        var directory: Path? = null
-        var input: Path? = null
-        var output: Path? = null
-        try {
-            directory = Files.createTempDirectory("livephoto-ffmpeg-frame-")
-            input = directory.resolve("input.bin"); output = directory.resolve("frame.jpg")
-            Files.newOutputStream(input).use { stream ->
-                var offset = 0uL
-                while (offset < identity.size) {
-                    val bytes = reader.readBuffer(offset, minOf(65536uL, identity.size - offset).toUInt()).orThrow()
-                    stream.write(bytes.toByteArray()); offset += bytes.size.toULong()
-                }
-            }
-            reader.validateIdentity().orThrow()
+        FfmpegWorkspace.use(reader, Stage.DecodeFrame, "Frame", "frame.jpg", cleanupStage = Stage.EncodeImage) {
             val common = listOf(executable.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "info", "-nostats", "-xerror", "-copyts",
                 "-protocol_whitelist", "file", "-err_detect", "explode", "-f", "mov", "-ignore_editlist", "1", "-threads", "1", "-noautorotate", "-i", input.toString(),
                 "-map", "0:i:${track.trackId}", "-an", "-sn", "-dn")
             val select = "settb=expr=1/${track.timescale},select='eq(pts,$mediaPts)'"
-            val decoded = ExternalProcess.run(common + listOf("-vf", "$select,showinfo=checksum=0", "-frames:v", "1", "-fps_mode", "passthrough", "-f", "null", "-"), 600_000L, job.context)
-            checkProcess(decoded, reader)
+            val decoded = run(common + listOf("-vf", "$select,showinfo=checksum=0", "-frames:v", "1", "-fps_mode", "passthrough", "-f", "null", "-"), "DECODE_FAILED")
             verifyTrace(decoded.output, mediaPts, track, encoded = false)
             // A documented standard-sRGB JPEG transform, only after proving an 8-bit BT.709 SDR frame.
             val converted = "$select,colorspace=space=bt470bg:primaries=bt709:trc=iec61966-2-1:range=pc:format=yuv420p,format=yuvj420p,showinfo=checksum=0"
-            val encoded = ExternalProcess.run(common + listOf("-vf", converted, "-frames:v", "1", "-fps_mode", "passthrough", "-c:v", "mjpeg", "-q:v", "2",
+            val encoded = run(common + listOf("-vf", converted, "-frames:v", "1", "-fps_mode", "passthrough", "-c:v", "mjpeg", "-q:v", "2",
                 "-threads:v", "1", "-map_metadata", "-1", "-map_chapters", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
-                "-fs", outputLimit.toString(), "-f", "image2", "-update", "1", output.toString()), 600_000L, job.context)
-            checkProcess(encoded, reader)
+                "-fs", outputLimit.toString(), "-f", "image2", "-update", "1", output.toString()), "ENCODE_FAILED", Stage.EncodeImage)
             verifyTrace(encoded.output, mediaPts, track, encoded = true)
-            if (!Files.isRegularFile(output)) fail("ENCODE_FAILED", "Frame encoder produced no image", Stage.EncodeImage)
-            val size = Files.size(output).toULong()
-            if (size > outputLimit) fail("RESOURCE_LIMIT_EXCEEDED", "Frame exceeded temporary/output storage budget", Stage.EncodeImage)
+            val size = outputSize("ENCODE_FAILED", Stage.EncodeImage)
             val staged = FileBinarySource(output)
             try {
                 val outputReader = BinaryReader(staged, job.context)
@@ -106,23 +85,6 @@ internal object FfmpegFrame {
                         if (stage == Stage.DecodeFrame) "Exact integer media PTS verified; presentation index resolved from sample/edit timeline" else "Explicit derived SDR JPEG encoding; source video is not transcoded",
                         false, false, false, videoFacts(video), facts) }, actualFrameTime = selected.time, actualFrameIndex = selected.index, actualFrameTrack = TrackId(track.trackId.toString()))
             } finally { staged.close() }
-        } catch (fault: CoreFault) { throw fault }
-        catch (_: Exception) { fail("IO_READ_FAILED", "Frame temporary media IO or independent image decoding failed", Stage.DecodeFrame) }
-        finally {
-            var failed = false
-            for (owned in listOfNotNull(output, input, directory)) try { Files.deleteIfExists(owned) } catch (_: Exception) { failed = true }
-            if (failed) fail("IO_WRITE_FAILED", "Frame temporary cleanup failed", Stage.EncodeImage)
-        }
-    }
-
-    private suspend fun checkProcess(process: ProcessResult, reader: BinaryReader) {
-        reader.validateIdentity().orThrow()
-        when {
-            process.cancelled -> fail("CANCELLED", "Frame extraction cancelled", Stage.DecodeFrame)
-            process.timedOut -> fail("BACKEND_TIMEOUT", "Frame processing exceeded runtime limit", Stage.DecodeFrame)
-            process.outputLimited -> fail("RESOURCE_LIMIT_EXCEEDED", "Frame diagnostic budget exceeded", Stage.DecodeFrame)
-            process.ioFailed -> fail("IO_READ_FAILED", "Frame process failed to exit with drained diagnostics", Stage.DecodeFrame)
-            process.code != 0 -> fail("DECODE_FAILED", "Frame decoder/encoder failed", Stage.DecodeFrame)
         }
     }
 

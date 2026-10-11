@@ -4,10 +4,11 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 
-/** Bounded structural sample selection, not a decoder, encoder, or general movie muxer.
+/** Retained historical Windows adapter only; not used by the active FFmpeg desktop backend.
+ * Bounded structural sample selection, not a decoder, encoder, or general movie muxer.
  * Rebuilds only classified indexing/duration fields; ordinary leaf payloads remain exact.
  * The caller must independently reread the result before staging/publication. */
-internal object LosslessTrimWriter {
+internal object WindowsStructuralTrimWriter {
     suspend fun write(reader: BinaryReader, spec: TrimSpec, sink: BinarySink): CoreResult<LosslessTrimPlan> = attempt {
         val context = reader.context
         val size = reader.identity().orThrow().size
