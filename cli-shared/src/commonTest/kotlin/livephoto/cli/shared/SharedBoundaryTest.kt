@@ -17,7 +17,7 @@ class SharedBoundaryTest {
 
     @Test fun binarySourcesAndBytesAreRedactedWithoutReading() {
         val platform = TestPlatform()
-        val source = platform.openSource("private-file", Context())
+        val source = platform.openSource("private-file", Context(Limits(1024uL, 1024uL)))
         assertEquals("\"redacted\"", CliJson.encode(source))
         assertEquals("{\"byteLength\":3}", CliJson.encode(Bytes(byteArrayOf(1, 2, 3))))
     }
