@@ -38,7 +38,7 @@ class CliLifecycleTest {
             override fun openSource(path: String, context: Context): BinarySource {
                 val source = super.openSource(path, context)
                 return if (path == "image") object : BinarySource by source {
-                    override suspend fun close() { source.close(); error("private-path") }
+                    override suspend fun close() { source.close(); throw IllegalStateException("private-path") }
                 } else source
             }
             override fun finish(): CoreResult<Unit> { finishes++; return CoreResult.Success(Unit) }
@@ -56,7 +56,7 @@ class CliLifecycleTest {
         var finishes = 0
         val platform = object : TestPlatform() {
             override fun openSource(path: String, context: Context): BinarySource {
-                if (path == "video") error("private-path")
+                if (path == "video") throw IllegalStateException("private-path")
                 return super.openSource(path, context)
             }
             override fun finish(): CoreResult<Unit> { finishes++; return CoreResult.Success(Unit) }
