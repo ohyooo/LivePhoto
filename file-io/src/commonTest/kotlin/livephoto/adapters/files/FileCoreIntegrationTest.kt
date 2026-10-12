@@ -28,7 +28,10 @@ class FileCoreIntegrationTest {
             assertEquals(ProtocolIds.Oplus, inspection.detection.primaryProtocol!!.protocol)
             val validation = result(core.validate(ValidationRequest(input, layers = listOf(Layer.Structure, Layer.Protocol), context = context)))
             assertNotEquals(Verdict.Invalid, validation.verdict)
-            val videoResource = inspection.layout.resources.single { it.kind == ResourceKind.Video }.id
+            // Multi-match detection has separate Google/Oplus aliases for the same video range.
+            // Select the declared primary match, not an arbitrary first resource.
+            val selected = inspection.detection.matches.single { it.target == inspection.detection.primaryProtocol }.resourceIds
+            val videoResource = inspection.layout.resources.single { it.kind == ResourceKind.Video && it.id in selected }.id
             val extracted = result(core.extract(ExtractRequest(input, listOf(videoResource),
                 output = FileOutputTransaction((box.root / "extracted").toString(), context), context = context)))
             assertEquals(videoIdentity.digest, extracted.output.assets.single().digest)

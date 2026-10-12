@@ -137,6 +137,7 @@ jobs:
           name: LivePhoto-native-core-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-output/native-core/core.klib
+            ci-output/native-core/file-io.klib
             ci-output/native-core-evidence.json
             ci-output/shared-cli-evidence.json
             ci-output/file-io-evidence.json
