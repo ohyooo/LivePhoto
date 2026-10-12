@@ -16,3 +16,4 @@ rootProject.name = "LivePhoto"
 include(":core")
 include(":cli")
 include(":cli-shared")
+include(":file-io")

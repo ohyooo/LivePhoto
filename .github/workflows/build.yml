@@ -91,6 +91,10 @@ jobs:
           echo "LIVEPHOTO_FFMPEG=$ffmpeg_path" >> "$GITHUB_ENV"
           echo "$(dirname "$ffmpeg_path")" >> "$GITHUB_PATH"
 
+      - name: Prepare real filesystem fixtures
+        shell: pwsh
+        run: ./scripts/prepare-file-io-fixtures.ps1
+
       - name: Build and test
         shell: pwsh
         env:
@@ -106,6 +110,8 @@ jobs:
             ':cli-shared:jvmTest'
             '--rerun'
             ':cli:test'
+            '--rerun'
+            ':file-io:jvmTest'
             '--rerun'
             ':cli:installDist'
             '--console=plain'
