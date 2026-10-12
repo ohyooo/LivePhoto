@@ -5,13 +5,27 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-Get-ChildItem core/build -Recurse -Filter '*.klib' | ForEach-Object {
-    Write-Host "NATIVE_LIBRARY_OUTPUT path=$($_.FullName) directory=$($_.PSIsContainer) bytes=$($_.Length)"
+# Kotlin's compile output is an unpacked KLIB, whose directory need not have
+# a .klib suffix. Pack the actual main compilation, never the test binary.
+$manifests = @(Get-ChildItem "core/build/classes/kotlin/$Target/main" -Recurse -File -Filter manifest |
+    Where-Object { $_.Directory.Name -eq 'default' })
+if ($manifests.Count -ne 1) { throw 'Expected one compiled main KLIB manifest.' }
+$manifest = @{}
+Get-Content $manifests[0].FullName | ForEach-Object {
+    $parts = $_.Split('=', 2)
+    if ($parts.Count -eq 2) { $manifest[$parts[0]] = $parts[1] }
 }
-$libraries = @(Get-ChildItem core/build/libs -Recurse -File -Filter '*.klib')
-if ($libraries.Count -ne 1 -or $libraries[0].Length -le 0) {
-    throw "Expected exactly one nonempty compiled Native Core KLIB; found $($libraries.Count)."
+$konanTarget = @{ linuxX64 = 'linux_x64'; macosArm64 = 'macos_arm64'; mingwX64 = 'mingw_x64' }[$Target]
+if ($manifest['builtins_platform'] -ne 'NATIVE' -or $manifest['native_targets'] -ne $konanTarget) {
+    throw 'The compiled main library is not the requested Native target.'
 }
+$libraryRoot = $manifests[0].Directory.Parent.FullName
+$packedDirectory = Join-Path (Get-Location) 'ci-output/native-core'
+New-Item -ItemType Directory -Path $packedDirectory | Out-Null
+$archive = Join-Path $packedDirectory 'core.klib'
+[IO.Compression.ZipFile]::CreateFromDirectory($libraryRoot, $archive, [IO.Compression.CompressionLevel]::Optimal, $false)
+$libraries = @(Get-Item $archive)
+if ($libraries[0].Length -le 0) { throw 'Empty packed Native library.' }
 $reports = @(Get-ChildItem "core/build/test-results/${Target}Test" -File -Filter 'TEST-*.xml')
 if ($reports.Count -eq 0) { throw 'Missing executed Native test reports.' }
 $tests = 0
@@ -48,6 +62,8 @@ $summary = [ordered]@{
     library = $libraries[0].Name
     librarySha256 = (Get-FileHash $libraries[0].FullName).Hash.ToLowerInvariant()
     libraryBytes = $libraries[0].Length
+    compilerVersion = $manifest['compiler_version']
+    nativeTarget = $konanTarget
     scope = 'kotlin-native-core-library-and-shared-tests-not-native-cli-or-ffi'
 }
 $summary | ConvertTo-Json -Depth 4 | Set-Content ci-output/native-core-evidence.json -Encoding utf8

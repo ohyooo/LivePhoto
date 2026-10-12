@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: native-core-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   native-core:
@@ -68,12 +68,14 @@ jobs:
           validate-wrappers: true
 
       - name: Cache Native compiler and dependencies
-        uses: actions/cache@v6
+        id: konan-cache
+        uses: actions/cache/restore@v6
         with:
           path: ~/.konan
           key: livephoto-konan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
 
       - name: Compile Native Core and run shared tests
+        id: native-test
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -96,6 +98,13 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { throw 'Native compilation or tests failed.' }
 
+      - name: Save validated Native toolchain cache
+        if: ${{ steps.native-test.conclusion == 'success' && steps.konan-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.konan
+          key: ${{ steps.konan-cache.outputs.cache-primary-key }}
+
       - name: Verify Native library and test evidence
         shell: pwsh
         run: ./scripts/verify-native-core-evidence.ps1 -Target '${{ matrix.target }}'
@@ -105,7 +114,7 @@ jobs:
         with:
           name: LivePhoto-native-core-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            core/build/libs/*.klib
+            ci-output/native-core/core.klib
             ci-output/native-core-evidence.json
           if-no-files-found: error
           retention-days: 14
@@ -119,6 +128,7 @@ jobs:
             core/build/test-results/${{ matrix.target }}Test/
             core/build/reports/tests/${{ matrix.target }}Test/
             core/build/libs/
+            core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log
             ci-output/native-core-evidence.json
           if-no-files-found: warn
