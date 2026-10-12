@@ -79,7 +79,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $gradleArgs = @(
             '-Plivephoto.nativeTarget=${{ matrix.platform }}'
-            ':core:compileKotlin${{ matrix.target }}'
+            ':core:${{ matrix.target }}MainKlibrary'
             ':core:${{ matrix.target }}Test'
             '--rerun'
             '--max-workers=1'
@@ -105,7 +105,7 @@ jobs:
         with:
           name: LivePhoto-native-core-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            core/build/classes/kotlin/${{ matrix.target }}/main/
+            core/build/libs/*.klib
             ci-output/native-core-evidence.json
           if-no-files-found: error
           retention-days: 14

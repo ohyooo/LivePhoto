@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$libraries = @(Get-ChildItem "core/build/classes/kotlin/$Target/main" -Recurse -File -Filter '*.klib')
+$libraries = @(Get-ChildItem core/build/libs -Recurse -File -Filter '*.klib')
 if ($libraries.Count -ne 1 -or $libraries[0].Length -le 0) {
     throw 'Expected exactly one nonempty compiled Native Core KLIB.'
 }
