@@ -93,7 +93,9 @@ jobs:
 
       - name: Prepare real filesystem fixtures
         shell: pwsh
-        run: ./scripts/prepare-file-io-fixtures.ps1
+        run: |
+          ./scripts/prepare-file-io-fixtures.ps1
+          ./scripts/prepare-file-io-fixtures.ps1
 
       - name: Build and test
         shell: pwsh

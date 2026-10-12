@@ -401,10 +401,13 @@ if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
     throw '发现 gradle-daemon-jvm.properties；请先处理该配置，再继续。'
 }
 
+.\scripts\prepare-file-io-fixtures.ps1
 .\gradlew.bat build :core:jvmTest :cli:installDist --console=plain --warning-mode=all
 ```
 
 完整重新执行验收时追加 `--rerun-tasks`。不要把缓存命中、旧 XML 或 `NO-SOURCE` 当作新代码已测试。
+
+全量 `build` 也包含文件适配测试，需先用 PowerShell 7 运行上述链接素材准备脚本，并具备创建符号链接的权限。Linux/macOS 可用 `pwsh -File ./scripts/prepare-file-io-fixtures.ps1`；缺少真实链接会使测试失败，不会静默跳过。重复准备已知素材可复用，遇到未知既有文件则拒绝覆盖。
 
 产物位置：
 
@@ -629,7 +632,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 
 | 阶段 / 工作包 | 当前状态 | 已完成 | 仍未完成 |
 | --- | --- | --- | --- |
-| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | JVM 与三平台 Native Core 库、统一模型/API、IO/后端契约、共享测试 | Native 文件 IO、CLI、媒体适配及移动 targets 尚未交付 |
+| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | JVM 与三平台 Native Core 库、统一模型/API、IO/后端契约、共享测试；本地 Native 文件适配与整组事务另行交付 | Native CLI/进程/媒体适配及移动 targets 尚未交付 |
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
