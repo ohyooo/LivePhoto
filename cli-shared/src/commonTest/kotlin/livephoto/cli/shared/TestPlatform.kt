@@ -9,7 +9,7 @@ internal open class TestPlatform : CliPlatform {
     val opened = mutableListOf<BinarySource>()
     val transactions = mutableListOf<MemoryOutputTransaction>()
     var environmentLevel: String? = null
-    override fun openSource(path: String): BinarySource =
+    override fun openSource(path: String, context: Context): BinarySource =
         MemoryBinarySource(Bytes(byteArrayOf()), SourceId(path), GenerationToken("test")).also { opened += it }
     override fun output(path: String, context: Context): CliOutput {
         val transaction = MemoryOutputTransaction(context, "test-output")

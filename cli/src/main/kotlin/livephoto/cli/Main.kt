@@ -29,7 +29,7 @@ internal class Cli(
 ) {
     private val discoverBackend = discover
     private val engine = CliEngine(object : CliPlatform {
-        override fun openSource(path: String): BinarySource = FileBinarySource(Path.of(path))
+        override fun openSource(path: String, context: Context): BinarySource = FileBinarySource(Path.of(path))
         override fun output(path: String, context: Context): CliOutput {
             val transaction = DirectoryOutputTransaction(Path.of(path), context)
             return CliOutput(transaction) { transaction.assetPath(it).toString() }

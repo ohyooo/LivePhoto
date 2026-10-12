@@ -36,11 +36,53 @@ Unsupported/Planned operations return errors, never simulated media output.
 public class CliEngine(private val platform: CliPlatform, private val providedCore: LivePhotoCore? = null,
     private val diagnostic: (String) -> Unit = platform::error) {
     suspend fun run(args: List<String>, emit: (String) -> Unit): Int {
-        if (args.isEmpty() || args == listOf("--help") || args == listOf("help")) { emit(HELP); return 0 }
-        if (args == listOf("--version")) { emit("LivePhoto 0.1.0"); return 0 }
         val sources = mutableListOf<BinarySource>()
         val log = Diagnostics(diagnostic, platform)
         val started = platform.nanoTime()
+        var output: CliOutput? = null
+        var message: String? = null
+        var cleanupError: CoreError? = null
+        fun failed(error: CoreError) { if (cleanupError == null) cleanupError = error }
+        fun unexpectedCleanup() = failed(CoreError(IssueCode("IO_READ_FAILED"), Stage.Read,
+            "CLI adapter cleanup failed"))
+        val status = try {
+            execute(args, { message = it }, sources, log) { output = it }
+        } finally {
+            // A failed close must not prevent releasing the remaining sources or snapshot session.
+            sources.forEach { source ->
+                try { source.close() } catch (_: Exception) { unexpectedCleanup() }
+            }
+            try {
+                output?.let {
+                    when (val receipt = it.transaction.query()) {
+                        is CoreResult.Failure -> failed(receipt.error)
+                        is CoreResult.Success -> if (receipt.value.state in setOf(TransactionState.Open, TransactionState.Prepared)) {
+                            val aborted = it.transaction.abort()
+                            if (aborted is CoreResult.Failure) failed(aborted.error)
+                        }
+                    }
+                }
+            } catch (_: Exception) { unexpectedCleanup() }
+            try {
+                val finished = platform.finish()
+                if (finished is CoreResult.Failure) failed(finished.error)
+            } catch (_: Exception) { unexpectedCleanup() }
+            log.trace("event=finished elapsed-ms=${(platform.nanoTime() - started) / 1_000_000}")
+        }
+        val failure = cleanupError
+        if (failure != null) {
+            log.failure(failure.code.value, failure.stage.name)
+            emit(CliJson.encode(CoreResult.Failure(failure)))
+            return 3
+        }
+        message?.let(emit)
+        return status
+    }
+
+    private suspend fun execute(args: List<String>, emit: (String) -> Unit,
+        sources: MutableList<BinarySource>, log: Diagnostics, onOutput: (CliOutput) -> Unit): Int {
+        if (args.isEmpty() || args == listOf("--help") || args == listOf("help")) { emit(HELP); return 0 }
+        if (args == listOf("--version")) { emit("LivePhoto 0.1.0"); return 0 }
         var output: CliOutput? = null
         try {
             log.configure(platform.environment("LIVEPHOTO_LOG_LEVEL"))
@@ -95,10 +137,10 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
             val maxBytes = options["max-bytes"]?.toULong() ?: 1_073_741_824uL
             require(maxBytes in 1uL..Long.MAX_VALUE.toULong()) { "Invalid byte budget" }
             val context = Context(Limits(maxBytes, maxBytes), progress = ProgressReceiver { log.progress(it.stage.name, it.completed, it.total) })
-            fun file(name: String): BinarySource = platform.openSource(required(name)).also { sources += it }
+            fun file(name: String): BinarySource = platform.openSource(required(name), context).also { sources += it }
             fun source(): SourceSet = if (options.containsKey("pair-video")) SourceSet.Pair(file("input"), file("pair-video")) else SourceSet.Single(file("input"))
             fun target() = ProtocolSelector(ProtocolId(required("target")), options["profile"]?.let(::ProfileId))
-            fun destination(): OutputTransaction = platform.output(required("output-dir"), context).also { output = it }.transaction
+            fun destination(): OutputTransaction = platform.output(required("output-dir"), context).also { output = it; onOutput(it) }.transaction
             fun position(prefix: String = ""): CoverPosition {
                 require(options.containsKey("${prefix}frame-index") xor options.containsKey("${prefix}time-us")) { "Choose exactly one of --${prefix}frame-index or --${prefix}time-us" }
                 require(!options.containsKey("${prefix}track-id") || options.containsKey("${prefix}frame-index")) { "--${prefix}track-id requires --${prefix}frame-index" }
@@ -164,13 +206,6 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
             log.exception(e)
             emit(CliJson.encode(mapOf("error" to mapOf("code" to "UNEXPECTED_ERROR", "message" to "Unexpected failure; enable trace diagnostics for redacted call frames"))))
             return 3
-        } finally {
-            sources.forEach { it.close() }
-            output?.let { transaction ->
-                val state = (transaction.transaction.query() as? CoreResult.Success)?.value?.state
-                if (state in setOf(TransactionState.Open, TransactionState.Prepared)) transaction.transaction.abort()
-            }
-            log.trace("event=finished elapsed-ms=${(platform.nanoTime() - started) / 1_000_000}")
         }
     }
 }
