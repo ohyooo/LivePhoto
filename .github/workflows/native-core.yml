@@ -84,6 +84,8 @@ jobs:
             ':core:${{ matrix.target }}MainKlibrary'
             ':core:${{ matrix.target }}Test'
             '--rerun'
+            ':cli-shared:${{ matrix.target }}Test'
+            '--rerun'
             '--max-workers=1'
             '--console=plain'
             '--warning-mode=all'
@@ -109,6 +111,10 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-native-core-evidence.ps1 -Target '${{ matrix.target }}'
 
+      - name: Verify shared CLI Native test evidence
+        shell: pwsh
+        run: ./scripts/verify-shared-cli-evidence.ps1 -Target '${{ matrix.target }}'
+
       - name: Upload Native Core library
         uses: actions/upload-artifact@v7
         with:
@@ -116,6 +122,7 @@ jobs:
           path: |
             ci-output/native-core/core.klib
             ci-output/native-core-evidence.json
+            ci-output/shared-cli-evidence.json
           if-no-files-found: error
           retention-days: 14
 
@@ -127,9 +134,12 @@ jobs:
           path: |
             core/build/test-results/${{ matrix.target }}Test/
             core/build/reports/tests/${{ matrix.target }}Test/
+            cli-shared/build/test-results/${{ matrix.target }}Test/
+            cli-shared/build/reports/tests/${{ matrix.target }}Test/
             core/build/libs/
             core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log
             ci-output/native-core-evidence.json
+            ci-output/shared-cli-evidence.json
           if-no-files-found: warn
           retention-days: 14

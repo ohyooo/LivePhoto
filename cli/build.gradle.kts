@@ -6,6 +6,7 @@ plugins {
 kotlin { jvmToolchain(25) }
 dependencies {
     implementation(project(":core"))
+    implementation(project(":cli-shared"))
     testImplementation(libs.kotlin.test)
 }
 application { mainClass.set("livephoto.cli.MainKt") }
