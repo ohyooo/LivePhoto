@@ -18,24 +18,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           persist-credentials: false
 
       - name: Setup JDK
-        uses: actions/setup-java@main
+        uses: actions/setup-java@v6
         with:
           distribution: 'zulu'
           java-version: '25'
           java-package: jdk
-          cache: 'gradle'
+          cache-jdk: true
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          validate-wrappers: true
 
       - name: List files
         run: ls -ahl
 
       - name: Update Gradle Wrapper
-        uses: gradle-update/update-gradle-wrapper-action@main
+        uses: gradle-update/update-gradle-wrapper-action@v2
         with:
           repo-token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
 
