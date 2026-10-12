@@ -490,6 +490,8 @@ Native 库可使用 `MemoryBinarySource` / `MemoryOutputTransaction`、下述文
 
 生产 JSON 已移除 Java 反射，显式映射结果 DTO，保留原命令、退出码、64 位十进制字符串及句柄/token 脱敏规则。三平台各实际执行 **34 项共享 CLI 测试，零失败、零跳过**，包括现有命令转发、嵌套结果图、日志隔离和失败后的资源清理；这些测试使用内存 IO，不是原生文件/FFmpeg 或完整原生程序的验收。
 
+CLI 输入适配现接收本次操作的 `Context`，使所有输入共享 `--max-bytes` 预算；命令结束先关闭借用来源、处理待提交事务，再调用平台会话清理。任一关闭失败仍继续清理其它资源；清理失败返回错误和退出码 3，不输出成功结果。测试代码另增加 4 项预算与异常清理回归，最新执行结果见 [Native CI](https://github.com/ohyooo/LivePhoto/actions/workflows/native-core.yml)。这只是原生入口接线的前置能力，尚未交付 Native CLI 或 Native FFmpeg。
+
 ```sh
 ./gradlew -Plivephoto.nativeTarget=linux-x64 :cli-shared:linuxX64Test --rerun
 ./gradlew -Plivephoto.nativeTarget=macos-arm64 :cli-shared:macosArm64Test --rerun
