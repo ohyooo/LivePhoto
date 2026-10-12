@@ -40,6 +40,15 @@ internal fun sandbox(block: suspend (Sandbox) -> Unit): Unit = immediate {
 }
 
 class FileIOTest {
+    @Test fun proofBudgetIsSharedAcrossAllInputSnapshots() = sandbox { box ->
+        val context = Context(Limits(100uL, 100uL, maxMetadataBytes = 32uL))
+        val input = box.file("input", byteArrayOf(1))
+        val session = FileInputSession((box.root / "snapshot").toString(), context)
+        result(session.capture(input.toString()))
+        failure(session.capture(input.toString()), "RESOURCE_LIMIT_EXCEEDED")
+        assertEquals(1, box.fs.list(box.root / "snapshot").size)
+        result(session.close())
+    }
     @Test fun captureUsesRealFilesystemAndFreezesOriginalBytes() = sandbox { box ->
         val bytes = ByteArray(150000) { (it % 251).toByte() }
         val original = box.file("原始 input.bin", bytes)

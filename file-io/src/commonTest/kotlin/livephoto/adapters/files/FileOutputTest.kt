@@ -5,6 +5,15 @@ import okio.*
 import kotlin.test.*
 
 class FileOutputTest {
+    @Test fun proofBudgetIsSharedAcrossTheEntireAssetSet() = sandbox { box ->
+        val context = Context(Limits(100uL, 100uL, maxMetadataBytes = 32uL))
+        val transaction = FileOutputTransaction((box.root / "output").toString(), context)
+        val a = result(transaction.create(image)); val b = result(transaction.create(video))
+        result(a.sink.write(Bytes(byteArrayOf(1)))); result(b.sink.write(Bytes(byteArrayOf(2))))
+        failure(transaction.prepare(), "RESOURCE_LIMIT_EXCEEDED")
+        result(transaction.abort())
+        assertFalse(box.fs.exists(box.root / "output"))
+    }
     private val image = OutputAssetSpec(AssetRole.PrimaryImage, "../../unsafe.jpg", "image/jpeg")
     private val video = OutputAssetSpec(AssetRole.MotionVideo, "ignored.mp4", "video/mp4")
     @Test fun twoAssetsBecomeVisibleTogetherAndPreparedReadersSurviveRename() = sandbox { box ->

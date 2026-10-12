@@ -70,6 +70,16 @@ public class FileOutputTransaction(
         requireState(TransactionState.Open); poll(context)
         if (entries.isEmpty()) reject("INVALID_ARGUMENT", "Cannot prepare an empty asset set")
         checkTree(staging())
+        var proofItems = 0uL
+        entries.values.forEach {
+            val blocks = it.sink.length / FILE_BLOCK_BYTES.toULong() +
+                if (it.sink.length % FILE_BLOCK_BYTES.toULong() != 0uL) 1uL else 0uL
+            if (blocks > context.limits.maxItems - proofItems ||
+                blocks > context.limits.maxMetadataBytes / 32uL - proofItems) {
+                reject("RESOURCE_LIMIT_EXCEEDED", "Asset-set proof budget exceeded")
+            }
+            proofItems += blocks
+        }
         entries.values.forEach { entry ->
             entry.sink.finish()
             entry.proof = fileSystem.openReadOnly(staging() / entry.name).use {

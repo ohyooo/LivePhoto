@@ -20,6 +20,7 @@ public class FileInputSession(
     private var directory: Path? = null
     private var closed = false
     private var allocated = 0uL
+    private var proofItems = 0uL
     private val token = newToken()
     private val files = mutableListOf<Path>()
     private val sources = mutableListOf<FileSnapshotSource>()
@@ -27,7 +28,7 @@ public class FileInputSession(
     public fun capture(input: String): CoreResult<BinarySource> = fileResult(Stage.Read) {
         if (closed) reject("IO_READ_FAILED", "Input session is closed")
         poll(context)
-        if (sources.size.toULong() >= context.limits.maxSources.toULong()) {
+        if (files.size.toULong() >= context.limits.maxSources.toULong()) {
             reject("RESOURCE_LIMIT_EXCEEDED", "Source count budget exceeded")
         }
         val original = input.toPath()
@@ -35,6 +36,11 @@ public class FileInputSession(
         val length = before.size!!
         if (length.toULong() > context.limits.maxSpoolBytes - allocated) {
             reject("RESOURCE_LIMIT_EXCEEDED", "Input spool budget exceeded")
+        }
+        val blocks = (length / FILE_BLOCK_BYTES + if (length % FILE_BLOCK_BYTES != 0L) 1L else 0L).toULong()
+        if (blocks > context.limits.maxItems - proofItems ||
+            blocks > context.limits.maxMetadataBytes / 32uL - proofItems) {
+            reject("RESOURCE_LIMIT_EXCEEDED", "Input proof budget exceeded")
         }
         val parent = directory ?: freshRoot(fileSystem, requestedRoot).also {
             reserve(fileSystem, it)
@@ -63,6 +69,7 @@ public class FileInputSession(
                 freezeFile(it, length, captured, context)
             }
             allocated += length.toULong()
+            proofItems += blocks
             FileSnapshotSource(fileSystem, { copy }, SourceId("$token:source-${sources.size + 1}"),
                 GenerationToken("$token:${captured.value}"), proof, context).also { sources += it }
         } catch (failure: Exception) {
@@ -82,5 +89,6 @@ public class FileInputSession(
         files.toList().forEach { fileSystem.delete(it); files.remove(it) }
         directory?.let { fileSystem.delete(it, mustExist = true); directory = null }
         allocated = 0uL
+        proofItems = 0uL
     }
 }
