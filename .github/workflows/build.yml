@@ -71,20 +71,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v ffmpeg >/dev/null; then
-            if [[ "$RUNNER_OS" == 'macOS' ]]; then
-              brew install ffmpeg
-            else
-              sudo apt-get update
-              sudo apt-get install --no-install-recommends -y ffmpeg
-            fi
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
+          # Use the maintained stable formula on both hosts, not Ubuntu's older
+          # FFmpeg 6 build (which cannot decode the controlled HEIF fixtures).
+          brew update
+          if brew list --versions ffmpeg >/dev/null 2>&1; then
+            brew upgrade ffmpeg
+          else
+            brew install ffmpeg
+          fi
+          ffmpeg_path="$(brew --prefix ffmpeg)/bin/ffmpeg"
           mkdir -p ci-output
-          ffmpeg -version > ci-output/ffmpeg-version.txt
-          ffmpeg -hide_banner -encoders > ci-output/ffmpeg-encoders.txt 2>&1
+          "$ffmpeg_path" -version > ci-output/ffmpeg-version.txt
+          "$ffmpeg_path" -hide_banner -encoders > ci-output/ffmpeg-encoders.txt 2>&1
           grep -q 'libx264' ci-output/ffmpeg-encoders.txt
           grep -q ' aac ' ci-output/ffmpeg-encoders.txt
-          echo "LIVEPHOTO_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+          echo "LIVEPHOTO_FFMPEG=$ffmpeg_path" >> "$GITHUB_ENV"
+          echo "$(dirname "$ffmpeg_path")" >> "$GITHUB_PATH"
 
       - name: Build and test
         shell: pwsh
