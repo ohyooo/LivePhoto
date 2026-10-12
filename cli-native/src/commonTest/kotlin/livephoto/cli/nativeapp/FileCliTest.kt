@@ -1,0 +1,76 @@
+package livephoto.cli.nativeapp
+
+import livephoto.cli.shared.*
+import livephoto.core.*
+import okio.*
+import kotlin.coroutines.*
+import kotlin.random.Random
+import kotlin.test.*
+
+private fun <T> immediate(block: suspend () -> T): T {
+    var result: Result<T>? = null
+    block.startCoroutine(object : Continuation<T> {
+        override val context = EmptyCoroutineContext
+        override fun resumeWith(value: Result<T>) { result = value }
+    })
+    return checkNotNull(result) { "Test unexpectedly suspended" }.getOrThrow()
+}
+
+private class Platform(root: String) : FileCliPlatform({ root }) {
+    override fun environment(name: String): String? = null
+    override fun nanoTime(): Long = 0L
+    override fun error(message: String) {}
+    override fun exceptionType(error: Throwable): String = "Exception"
+    override fun exceptionFrames(error: Throwable): List<DiagnosticFrame> = emptyList()
+}
+
+class FileCliTest {
+    @Test fun missingWorkspaceReturnsStructuredFailureWithoutCreatingOutput(): Unit = immediate {
+        var json = ""
+        assertEquals(3, CliEngine(Platform("")).run(listOf("detect", "--input", "private-path")) { json = it })
+        assertTrue(json.contains("INVALID_ARGUMENT"))
+        assertFalse(json.contains("private-path"))
+    }
+
+    @Test fun realInputsShareBudgetAndCleanupLeavesOriginalUntouched(): Unit = immediate {
+        val fs = FileSystem.SYSTEM
+        val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-cli-test-${Random.nextLong().toULong()}"
+        fs.createDirectory(root, mustCreate = true)
+        val input = root / "输入 file.bin"
+        try {
+            fs.write(input) { write(byteArrayOf(1, 2)) }
+            var json = ""
+            val engine = CliEngine(Platform(root.toString()))
+            assertEquals(3, engine.run(listOf("create", "--image", input.toString(), "--video", input.toString(),
+                "--target", "oplus.olive", "--output-dir", (root / "output").toString(), "--max-bytes", "3")) { json = it })
+            assertTrue(json.contains("RESOURCE_LIMIT_EXCEEDED"))
+            assertEquals(listOf(input), fs.list(root))
+            assertContentEquals(byteArrayOf(1, 2), fs.read(input) { readByteArray() })
+            assertEquals(0, engine.run(listOf("--version")) {})
+            assertEquals(listOf(input), fs.list(root))
+        } finally {
+            fs.delete(input)
+            fs.delete(root, mustExist = true)
+        }
+    }
+
+    @Test fun frozenSourceSessionClosesBeforeReuseWithDifferentBudget(): Unit = immediate {
+        val fs = FileSystem.SYSTEM
+        val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-cli-test-${Random.nextLong().toULong()}"
+        fs.createDirectory(root, mustCreate = true)
+        val input = root / "input"
+        val platform = Platform(root.toString())
+        try {
+            fs.write(input) { writeByte(1) }
+            val source = platform.openSource(input.toString(), Context(Limits(3uL, 3uL)))
+            assertIs<CoreResult.Success<Unit>>(platform.finish())
+            assertIs<CoreResult.Failure>(source.size())
+            val second = platform.openSource(input.toString(), Context(Limits(2uL, 2uL)))
+            assertEquals(1uL, assertIs<CoreResult.Success<ULong>>(second.size()).value)
+            assertIs<CoreResult.Success<Unit>>(platform.finish())
+            assertEquals(listOf(input), fs.list(root))
+        } finally {
+            platform.finish(); fs.delete(input); fs.delete(root, mustExist = true)
+        }
+    }
+}

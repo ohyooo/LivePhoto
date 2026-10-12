@@ -91,6 +91,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $binaryTarget = '${{ matrix.target }}'
+          $binaryTarget = $binaryTarget.Substring(0, 1).ToUpperInvariant() + $binaryTarget.Substring(1)
           $gradleArgs = @(
             '-Plivephoto.nativeTarget=${{ matrix.platform }}'
             ':core:${{ matrix.target }}MainKlibrary'
@@ -100,6 +102,9 @@ jobs:
             '--rerun'
             ':file-io:${{ matrix.target }}Test'
             '--rerun'
+            ':cli-native:${{ matrix.target }}Test'
+            '--rerun'
+            ":cli-native:linkReleaseExecutable$binaryTarget"
             '--max-workers=1'
             '--console=plain'
             '--warning-mode=all'
@@ -133,6 +138,21 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-file-io-evidence.ps1 -Target '${{ matrix.target }}'
 
+      - name: Package and verify Native protocol CLI
+        shell: pwsh
+        run: ./scripts/package-native-cli.ps1 -Platform '${{ matrix.platform }}' -Target '${{ matrix.target }}'
+
+      - name: Upload Native protocol CLI
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhoto-native-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/native-cli/LivePhoto-native-*.zip
+            ci-output/native-cli/LivePhoto-native-*.tar.gz
+            ci-output/native-cli-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload Native Core library
         uses: actions/upload-artifact@v7
         with:
@@ -158,11 +178,15 @@ jobs:
             cli-shared/build/reports/tests/${{ matrix.target }}Test/
             file-io/build/test-results/${{ matrix.target }}Test/
             file-io/build/reports/tests/${{ matrix.target }}Test/
+            cli-native/build/test-results/${{ matrix.target }}Test/
+            cli-native/build/reports/tests/${{ matrix.target }}Test/
             core/build/libs/
             core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log
             ci-output/native-core-evidence.json
             ci-output/shared-cli-evidence.json
             ci-output/file-io-evidence.json
+            ci-output/native-cli-evidence.json
+            ci-output/native-cli-smoke.log
           if-no-files-found: warn
           retention-days: 14

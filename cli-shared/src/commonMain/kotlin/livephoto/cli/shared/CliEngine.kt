@@ -198,6 +198,10 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
                     else -> 0
                 }
             }
+        } catch (e: CliAdapterFailure) {
+            log.failure(e.error.code.value, e.error.stage.name)
+            emit(CliJson.encode(CoreResult.Failure(e.error)))
+            return 3
         } catch (e: IllegalArgumentException) {
             log.exception(e)
             emit(CliJson.encode(mapOf("error" to mapOf("code" to "INVALID_ARGUMENT", "message" to e.message))))

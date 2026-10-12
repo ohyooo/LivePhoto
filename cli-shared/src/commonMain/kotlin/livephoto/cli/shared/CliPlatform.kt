@@ -21,3 +21,6 @@ public interface CliPlatform {
 public data class CliDiscovery(public val backend: MediaBackend?, public val ffmpegPath: String?, public val issues: List<Issue>)
 public data class CliOutput(public val transaction: OutputTransaction, public val assetPath: (AssetId) -> String)
 public data class DiagnosticFrame(public val owner: String, public val method: String, public val line: Int)
+
+/** Adapter failures preserve structured codes without leaking OS exception messages. */
+public class CliAdapterFailure(public val error: CoreError) : Exception(error.message)
