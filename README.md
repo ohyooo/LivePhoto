@@ -4,9 +4,9 @@
 
 使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core 与命令行工具。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
-**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；当前构建目标为 JVM，尚未交付 Native、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
+**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；Core 已提供 JVM 与三平台 Kotlin/Native 库，现有 CLI 便携应用仍是 JVM，尚未交付原生 CLI、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。桌面媒体处理统一使用可选 FFmpeg，系统 API 历史代码保留但停用。后续重点为非 Apple 协议/修复与 FFmpeg 完善和验收；Apple 新功能暂停，已有能力和测试保留。移动端及其系统媒体 API 排在最后，真机验收暂缓。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。macOS/Linux 真实 FFmpeg 与便携 CLI 验收已补齐；Native Core 三平台各执行 726 项共享测试通过，原生 CLI/IO/媒体适配尚未完成。当前只推进 Native 改造，其它业务 TODO 暂不实施；Apple 新功能暂停，已有能力和测试保留。桌面系统 API 历史代码保留停用，移动端及其系统媒体 API 排在最后。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -385,7 +385,7 @@ Apple CID inspection evidence 绑定 source/generation/role/字段位置；它�
 
 ### 环境
 
-当前仓库固定 Kotlin **2.4.20**、Gradle Wrapper **9.8.1**、Java Toolchain **25**。这些是当前配置值；Wrapper 更新 workflow 可提交版本更新，但编译时不会自动升级配置，不要为了 README 示例自行切换工具链。
+当前仓库固定 Kotlin **2.4.21**、Gradle Wrapper **9.8.1**、Java Toolchain **25**。这些是当前配置值；Wrapper 更新 workflow 可提交版本更新，但编译时不会自动升级配置，不要为了 README 示例自行切换工具链。
 
 需要已有的 **JDK 25**，`JAVA_HOME` 指向 JDK 根目录。项目禁用自动供应 Java，并通过 `JAVA_HOME` 发现 toolchain；无需系统 Gradle，始终使用 Wrapper。Wrapper 和首次依赖解析需要网络，允许下载仓库指定的 Gradle 与依赖，但不会安装 JDK。打包另需 JDK 的 `jpackage` / `jlink`，以及已有的 PowerShell 7；应用使用者不需要这些构建工具。
 
@@ -456,6 +456,31 @@ Destination 必须使用新路径，脚本不覆盖既有应用 image；会调�
 
 Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Platform macos-arm64`，**必须在对应 OS/架构的构建机运行，不支持交叉 jpackage**；均已通过 GitHub Actions 执行该流程。macOS bundle 打包版本为 `1.0.0`，用于满足 jpackage 的首段非零要求；产品/CLI/API 仍为开发版 `0.1.0`，不是稳定版声明。建议复用现有 Gradle 缓存，保留数 GB 磁盘余量；image、解压验收目录与素材副本会明显增加空间使用。
 
+### Kotlin/Native Core 库
+
+三平台 Core 复用原有 `commonMain`，不复制协议实现；每个平台都实际执行全部 **726 项共享测试，零失败、零跳过**。现有 JVM 入口保留。Native Core 是 Kotlin/Native 可引用的库，不是原生 CLI、C ABI、DLL 或 iOS framework。
+
+在对应宿主平台显式选择 target：
+
+```sh
+# Linux x64
+./gradlew -Plivephoto.nativeTarget=linux-x64 :core:compileKotlinLinuxX64 :core:linuxX64Test --rerun
+
+# macOS ARM64
+./gradlew -Plivephoto.nativeTarget=macos-arm64 :core:compileKotlinMacosArm64 :core:macosArm64Test --rerun
+```
+
+```powershell
+# Windows x64
+.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :core:compileKotlinMingwX64 :core:mingwX64Test --rerun
+```
+
+构建仍使用现有 JDK 25 和项目 Wrapper；显式 Native 构建会由 Kotlin 插件准备编译器及平台依赖，但库产物不包含 JVM/JRE。普通 JVM 构建不启用这些 targets，也不因此下载 Native 工具链。保留 Gradle 9.8.1，三平台已实测；KGP 的内部 Gradle 10 deprecation 警告仍保留，不通过隐藏警告宣称未来兼容。
+
+编译后的未打包主库位于 `core/build/classes/kotlin/<target>/main/`。[Native Core CI](https://github.com/ohyooo/LivePhoto/actions/workflows/native-core.yml) 将已核对 `NATIVE` 平台标识的主库打包为 `core.klib`，上传 `LivePhoto-native-core-<平台>-<run_id>-<attempt>`，另附编译器版本、目标、库 SHA-256 和新执行测试数；报告 artifact 为 `native-core-reports-<平台>-<run_id>-<attempt>`。
+
+Native 库当前可使用 `MemoryBinarySource` / `MemoryOutputTransaction` 或调用方注入的 IO/事务。原生文件 IO、CLI、进程调用和 FFmpeg 适配尚未交付；没有真实媒体后端时，需要解码/媒体处理的操作明确拒绝，不影响纯协议能力。下载 KLIB 不会使现有 JVM 便携包变成单文件原生程序。
+
 ## CI 与产物
 
 [Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 / macOS ARM64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux/macOS 直接执行仓库中带可执行位的 `gradlew`。便携 smoke 启用 trace，日志随报告上传。
@@ -466,9 +491,15 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 - `build-outputs-...`：JAR 与 JVM 分发包。
 - `build-reports-...`：测试报告、XML、合成 fixture、兼容回归素材包及哈希清单、Gradle 和便携日志；构建失败时也尝试上传已有报告。
 
-三平台成功通常共 9 个 artifacts。CI 可能没有 FFmpeg，不能把它的协议/便携测试等同于配置完整媒体后端的集成验收，也不能把缺失工具后的 skip 当作该媒体操作成功。
+Build workflow 三平台成功通常共 9 个 artifacts。macOS/Linux 已要求维护中的稳定 FFmpeg，20 项媒体集成测试必须零跳过，打包后 CLI 媒体成功标记必须完整；本轮使用 FFmpeg 9.0.2。Windows CI 仍不要求 FFmpeg，不能用它的跳过项代替 Windows 已有的完整媒体后端验证。Native Core workflow 另有 6 个库/报告 artifacts，不混同于便携应用。
+
+所有 Action 引用均使用最新稳定主版本 `@vN`。CI 复用 JDK 缓存与 Gradle 开源 basic 缓存；Native 另按 OS/架构/工具链缓存编译器依赖。编译任务允许缓存命中，但验收用 `jvmTest --rerun` 或对应 Native test `--rerun` 重新执行，不把旧报告计为新测试。Native 测试成功后保存工具链缓存，即使后续产物检查失败也不重复下载已验证的工具链。
 
 ## 进度、已完成与 TODO
+
+Native Core 第一阶段：[CI 38204248439](https://github.com/ohyooo/LivePhoto/actions/runs/38204248439) 的 Windows x64 / Linux x64 / macOS ARM64 均成功，各 **726 项共享测试执行通过、零 failures/errors/skips**，KLIB 与报告已上传。使用 Kotlin 2.4.21 / Gradle 9.8.1；这里只交付 Core 库，原生 CLI 与平台适配仍待完成。
+
+macOS/Linux 真实 FFmpeg 验收：[CI 38188615547](https://github.com/ohyooo/LivePhoto/actions/runs/38188615547) 三平台回归通过，两个 Unix 平台各 20 项媒体集成测试零跳过，并通过完整便携 CLI 媒体操作及无 PATH/无后端负例。九个同提交 artifacts 已核对，两个 Unix 报告下载哈希与上传 digest 一致；没有扩展旧 FFmpeg 版本或新的业务 profile。
 
 Samsung 标准 EXIF → Apple：新全量 **835 tests，814 项执行成功，0 failures / errors；21 项历史系统 API 专项跳过**。大小端、有/无 Google 基础层、显式未知 key、原 EXIF/编码/样本保留、普通 SEF/Legacy/严格拒绝与清理视图篡改通过。新完整 Windows 无 FFmpeg 便携包通过 10 组转换（原 8 组 Google＋2 组 Samsung），并另用已有 FFmpeg 完整解码 10 个输出；只开放已声明的标准两记录 MP4 来源，更多来源仍在 TODO。
 
@@ -558,15 +589,15 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 
 | 阶段 / 工作包 | 当前状态 | 已完成 | 仍未完成 |
 | --- | --- | --- | --- |
-| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | KMP/JVM 工程、统一模型/API、IO/后端契约 | 新平台接入属后续范围，不等于已交付 Native |
+| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | JVM 与三平台 Native Core 库、统一模型/API、IO/后端契约、共享测试 | Native 文件 IO、CLI、媒体适配及移动 targets 尚未交付 |
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |
 | Apple Pair / Create / Convert | 部分完成；暂停新增功能 | 有限 JPEG 两资产写入、安全标准 EXIF 与普通电影文本；Google/有限 Samsung/Huawei basic60/最小版本一 vivo 标准 EXIF→Apple；默认 JPEG＋MOV；有限普通文本 Clean/Split 与 Apple→Google；HEIC 读取、原样输出、SetKey/Clean；有限显式重配对 | 暂缓已有 MakerNote 合并、复杂 Generic/HEIC/mdta 写入、更多原片与跨协议路径；保留已有代码/测试 |
 | Repair | 部分完成；有限容器修复通过构建/便携验收 | 有限 SafeMetadataOnly；ExplicitRePair 已交付；Samsung/最小版本一 vivo/Huawei basic60 JPEG ExplicitRemux、全量测试、真实解码及新便携验收 | 其它容器修复与复杂 MakerNote/metadata profile；各提交 CI 结果见 Actions |
 | Cover / Key Photo | 部分完成 | key metadata 与抽帧/封面重建分离，已有有限编辑路径 | 更复杂图像编码、orientation/ICC/HDR/metadata 保留 |
-| MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 统一 FFmpeg 有限 probe/抽帧/裁剪/remux/显式 transcode；单/双 AAC 裁剪、remux 与显式 AVC 转码保留音轨；运行时查询实际能力 | 更多媒体/容器/复杂 edits profile 与三平台真实验收；音频只 copy，不计划音频编码；最后移动端系统媒体 API |
-| CLI / 三平台便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、可选 stderr 日志、三平台打包与 smoke/artifacts、macOS 本机成品验收 | Native 原生发布尚未实施；新 Core 能力仍需逐项接入 CLI |
+| MediaBackend | 部分完成；桌面 FFmpeg 已接入，系统 API 历史代码保留但停用 | 统一 FFmpeg 有限媒体操作；单/双 AAC copy；macOS/Linux 真实集成与便携 CLI 验收已补齐，Windows 已有真实验证 | 更多媒体/容器/复杂 edits profile 及 Native 后端；音频只 copy，不计划音频编码；最后移动端系统媒体 API |
+| CLI / 三平台便携 CI | 已完成当前有限入口批次 | 薄 CLI、JSON、退出码、可选 stderr 日志、三平台打包与 smoke/artifacts、macOS 本机成品验收 | 原生 CLI 发布尚未实施；Native Core 库已另行交付 |
 | Conformance / fixtures | 持续补齐 | 已有 L0–L3 范围内的合成/真实样本/往返/保真证据 | 尚未覆盖全部变体；L4 真机验收暂缓 |
 
 每个实施工作包完成后，应同时更新本表、下面的 TODO 和对应提交/验收检查点。只有完成实际构建、测试与 CLI 验收并核对相应 CI/产物，才把该批次标记为完成；测试数增加本身不代表某个阶段全部完成。
@@ -600,7 +631,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
 | 已完成批次 | macOS ARM64 便携包 | **已完成当前便携范围**，仍为 jpackage/JVM | ARM64 CI 构建、归档解压、smoke 与本机 13 个 CLI 检查通过；不是系统媒体后端或设备认证 |
-| macOS 验收后逐步推进 | Kotlin/Native Core 与原生 CLI | **TODO：尚未实现，不在本批重写** | 先复用 commonMain 并增加 Native 库/测试，再替换 JVM 文件 IO、原子事务、进程调用和 JSON/日志适配，最后接入原生媒体后端；逐平台交付不依赖 JVM 的产物 |
+| 当前推进 | Kotlin/Native Core 与原生 CLI | **Core 库与三平台共享测试已完成；CLI/平台适配未完成** | 继续替换 JVM 文件 IO、原子事务、进程调用和 JSON/日志适配，接入原生 FFmpeg 后端；不把 Core KLIB 当作原生 CLI |
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
 | 暂停 | Apple 新功能与复杂 HEIF Pair 写入 | **用户决定暂停；已有代码和测试保留** | 恢复时再补真实 iOS 证据，不计作已完成，也不占用当前桌面 FFmpeg 工作 |
 | 最后 | Android/iOS 接入与移动端系统媒体 API | **TODO：桌面与协议剩余任务之后；尚未配置移动 target 或产物** | 先编译与 common 测试，再接 Uri/文件 IO、事务与权限，最后移动端媒体后端及设备验收；不复用桌面进程假装移动端支持 |
@@ -661,7 +692,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [x] 恢复 macOS ARM64 runner 前置条件与真实打包验收；下载同提交 CI 包，核对 artifact 与内层归档哈希、ARM64 启动器/运行时，本机 13 个 CLI 检查通过，Raw 视频字节一致、源未改变。不是 Apple 相册认证或 AVFoundation 实现。
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
-- [ ] Kotlin/Native 分阶段迁移：先 Native Core 库与协议测试，再原生 CLI/IO/事务/进程/JSON/日志，再平台媒体后端和原生发布 CI。目标为 macOS ARM64、Windows x64、Linux x64；每个平台独立验证，不能把当前 jpackage 包称为 Native。JVM 适配与 Native 产物分离，不为迁移提前引入 GUI。
+- [x] Kotlin/Native Core 第一阶段：macOS ARM64、Windows x64、Linux x64 主库与各726项共享测试实际执行通过，库/报告独立上传；默认 JVM 构建不下载 Native 编译器。
+- [ ] Kotlin/Native 后续阶段：原生 CLI/文件 IO/事务/进程/无反射 JSON/日志、FFmpeg 后端和原生应用发布 CI；每个平台独立验证，不把现有 jpackage 包或 KLIB 称为原生 CLI，不提前引入 GUI。
 - [ ] **最后推进移动端 Android/iOS**：增加移动 targets 与真实构建/测试产物；适配文件/Android Uri、原子事务、权限与资源生命周期；系统媒体 API 仅在此阶段接入移动端，逐项验证 probe/抽帧/裁剪/remux/条件转码及设备行为。当前未实现，桌面 FFmpeg/803 项 JVM 测试不代替移动验收。
 - [ ] 未来 Compose UI：不属于当前 Core + CLI 交付范围，不提前引入 GUI 依赖。
 
