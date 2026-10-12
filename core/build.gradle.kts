@@ -7,6 +7,16 @@ kotlin {
     jvm()
     jvmToolchain(25)
 
+    // Native is opt-in per host. Ordinary JVM/NAS builds must not download a
+    // Native compiler or try to execute another platform's test binary.
+    when (val nativeTarget = providers.gradleProperty("livephoto.nativeTarget").orNull) {
+        null -> Unit
+        "linux-x64" -> linuxX64()
+        "macos-arm64" -> macosArm64()
+        "windows-x64" -> mingwX64()
+        else -> error("Unsupported livephoto.nativeTarget: $nativeTarget")
+    }
+
     sourceSets {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
