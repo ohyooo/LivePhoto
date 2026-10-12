@@ -5,9 +5,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
+Get-ChildItem core/build -Recurse -Filter '*.klib' | ForEach-Object {
+    Write-Host "NATIVE_LIBRARY_OUTPUT path=$($_.FullName) directory=$($_.PSIsContainer) bytes=$($_.Length)"
+}
 $libraries = @(Get-ChildItem core/build/libs -Recurse -File -Filter '*.klib')
 if ($libraries.Count -ne 1 -or $libraries[0].Length -le 0) {
-    throw 'Expected exactly one nonempty compiled Native Core KLIB.'
+    throw "Expected exactly one nonempty compiled Native Core KLIB; found $($libraries.Count)."
 }
 $reports = @(Get-ChildItem "core/build/test-results/${Target}Test" -File -Filter 'TEST-*.xml')
 if ($reports.Count -eq 0) { throw 'Missing executed Native test reports.' }

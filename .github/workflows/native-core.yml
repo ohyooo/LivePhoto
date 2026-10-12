@@ -118,6 +118,7 @@ jobs:
           path: |
             core/build/test-results/${{ matrix.target }}Test/
             core/build/reports/tests/${{ matrix.target }}Test/
+            core/build/libs/
             ci-output/native-core.log
             ci-output/native-core-evidence.json
           if-no-files-found: warn
