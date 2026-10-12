@@ -147,9 +147,9 @@ try {
     foreach ($name in @('carrier.heic', 'movie.mp4')) {
         if ((Get-FileHash (Join-Path $huaweiFixtures $name)).Hash.ToLowerInvariant() -ne $huaweiManifest[$name]) { throw 'Huawei HEIC fixture hash mismatch.' }
     }
-    $huaweiPath = $env:Path
+    $huaweiPath = $env:PATH
     try {
-        $env:Path = ''
+        $env:PATH = ''
         $huaweiCarrier = Join-Path $verify 'Huawei carrier with misleading extension.jpg'
         Copy-Item (Join-Path $huaweiFixtures 'carrier.heic') $huaweiCarrier
         $huaweiJson = & $launcher inspect --input $huaweiCarrier
@@ -172,7 +172,7 @@ try {
             throw 'Huawei HEIC writable ownership was inferred or partial files were published.'
         }
         if ((Get-FileHash $huaweiCarrier).Hash.ToLowerInvariant() -ne $huaweiManifest['carrier.heic']) { throw 'Huawei HEIC input changed.' }
-    } finally { $env:Path = $huaweiPath }
+    } finally { $env:PATH = $huaweiPath }
     Write-Host 'PORTABLE_HUAWEI_HEIC_NO_BACKEND=SUCCESS scope=bounded-read-exact-raw-not-clean-decode-or-device'
     # Core Clean needs no FFmpeg/encoder/decoder. Run this on every packaged platform,
     # including CI runners without external media tools, using independently hashed fixtures.
@@ -184,9 +184,9 @@ try {
     if ($neutralManifest['scope'] -ne 'synthetic-protocol-framing-not-decoder-or-device-proof' -or -not $neutralManifest['runId']) {
         throw 'Portable neutral fixture provenance is missing.'
     }
-    $neutralSearchPath = $env:Path
+    $neutralSearchPath = $env:PATH
     try {
-        $env:Path = ''
+        $env:PATH = ''
         foreach ($name in @('motion')) {
             $fixture = Join-Path $neutralFixtures "$name.mp4"
             if ((Get-FileHash $fixture).Hash.ToLowerInvariant() -ne $neutralManifest["$name.mp4"]) { throw 'Neutral fixture hash differs.' }
@@ -208,7 +208,7 @@ try {
                 if ((Get-FileHash $path).Hash.ToLowerInvariant() -ne $neutralManifest["$name.mp4"]) { throw 'No-FFmpeg Clean was not byte-exact or mutated input.' }
             }
         }
-    } finally { $env:Path = $neutralSearchPath }
+    } finally { $env:PATH = $neutralSearchPath }
     Write-Host 'PORTABLE_NEUTRAL_MOVIE_NO_FFMPEG=SUCCESS scope=synthetic-avc-aac-framing-file-exact-idempotence-not-decode-or-device'
     # Ordinary EXIF Apple Create is protocol-only; no desktop system API or decoder is invoked.
     $ordinaryExifFixtures = Join-Path $repository 'core/build/portable-apple-ordinary-exif-fixtures'
@@ -298,9 +298,9 @@ try {
     if ($appleHeifManifest['scope'] -ne 'synthetic-apple-heif-pair-framing-not-decoder-or-device-proof' -or -not $appleHeifManifest['runId']) {
         throw 'Apple HEIC fixture provenance is missing.'
     }
-    $appleHeifPath = $env:Path
+    $appleHeifPath = $env:PATH
     try {
-        $env:Path = ''
+        $env:PATH = ''
         $appleHeifInputs = @{}
         foreach ($name in @('primary-mdat.heic', 'primary-idat.heic', 'motion.mov', 'other.mov', 'key-mov.heic', 'key-mp4.heic', 'key-motion.mov', 'key-motion.mp4', 'repair-motion.mov', 'repair-motion.mp4')) {
             $fixture = Join-Path $appleHeifFixtures $name
@@ -426,7 +426,7 @@ try {
         foreach ($name in $appleHeifInputs.Keys) {
             if ((Get-FileHash $appleHeifInputs[$name]).Hash.ToLowerInvariant() -ne $appleHeifManifest[$name]) { throw 'Apple HEIC borrowed input changed.' }
         }
-    } finally { $env:Path = $appleHeifPath }
+    } finally { $env:PATH = $appleHeifPath }
     Write-Host 'PORTABLE_APPLE_HEIC_NO_FFMPEG=SUCCESS scope=finite-synthetic-pair-item-graph-byte-exact-not-decode-or-device'
     Write-Host 'PORTABLE_APPLE_HEIC_SETKEY_NO_FFMPEG=SUCCESS scope=classified-mp4-mov-fixed-time-fields-whole-primary-not-image-rewrite-or-device'
     Write-Host 'PORTABLE_APPLE_HEIC_CLEAN_NO_FFMPEG=SUCCESS scope=cid-only-fixed-retirement-and-byte-exact-idempotence-unknown-associations-not-device'
@@ -440,9 +440,9 @@ try {
         if ($fixtureManifest['scope'] -ne 'nas-encoded-synthetic-avc-not-device-proof' -or -not $fixtureManifest['runId']) {
             throw 'Portable encoded OS fixtures have no classified test proof.'
         }
-        $savedSearchPath = $env:Path
+        $savedSearchPath = $env:PATH
         try {
-            $env:Path = ''
+            $env:PATH = ''
             $systemJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'absent fixture-encoder.exe')
             if ($LASTEXITCODE -ne 0) { throw 'Portable system-only discovery failed.' }
             $system = ($systemJson | ConvertFrom-Json).result
@@ -470,7 +470,7 @@ try {
                 if ((Get-FileHash $outsideFixture).Hash.ToLowerInvariant() -ne $fixtureManifest["$name.$container"]) { throw 'OS decoder mutated source.' }
               }
             }
-        } finally { $env:Path = $savedSearchPath }
+        } finally { $env:PATH = $savedSearchPath }
         Write-Host 'PORTABLE_WINDOWS_API_ENCODED_FIXTURES=SUCCESS scope=avc-bframes-vfr-audio-rejection-no-ffmpeg-no-system-java-not-device'
         Write-Host 'PORTABLE_WINDOWS_API_MOV_FIXTURES=SUCCESS scope=synthetic-qt-brand-real-avc-bframes-vfr-audio-rejection-not-camera-or-general-remux'
         foreach ($frameProfile in @('baseline', 'main', 'high', 'high-mov')) {
@@ -500,9 +500,9 @@ try {
         $timelineHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($timelineBytes.ToArray())).ToLowerInvariant()
         [byte[]]$selectedGolden = $goldenBytes[(3 * 6144)..(4 * 6144 - 1)]
         $selectedHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($selectedGolden)).ToLowerInvariant()
-        $savedSearchPath = $env:Path
+        $savedSearchPath = $env:PATH
         try {
-            $env:Path = ''
+            $env:PATH = ''
             $start = [Diagnostics.ProcessStartInfo]::new($mediaWorker)
             $start.UseShellExecute = $false
             $start.RedirectStandardOutput = $true
@@ -544,7 +544,7 @@ try {
                 if ($LASTEXITCODE -ne 2 -or ($invalidQuality | ConvertFrom-Json).error.code -ne 'INVALID_ARGUMENT' -or (Test-Path $invalidQualityDirectory)) { throw 'Invalid JPEG quality was not rejected before output.' }
                 Write-Host 'PORTABLE_WINDOWS_JPEG_QUALITY=SUCCESS values=0,35,100 scope=actual-system-frame-independent-DQT-not-lossless-or-backend-equivalence'
             }
-        } finally { $env:Path = $savedSearchPath }
+        } finally { $env:PATH = $savedSearchPath }
         if ((Get-FileHash $frameInput).Hash.ToLowerInvariant() -ne $frameHash) { throw 'Portable frame source changed.' }
         Write-Host "PORTABLE_WINDOWS_API_FRAME=SUCCESS profile=$frameProfile scope=finite-eight-bit-avc-vfr-bframe-packed-pixels-sdr-jpeg-no-ffmpeg-no-system-java-not-device"
         }
@@ -560,9 +560,9 @@ try {
             }
         }
         $packetDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($packetTimeline.ToArray())).ToLowerInvariant()
-        $savedSearchPath = $env:Path
+        $savedSearchPath = $env:PATH
         try {
-            $env:Path = ''
+            $env:PATH = ''
             $start = [Diagnostics.ProcessStartInfo]::new($mediaWorker)
             $start.UseShellExecute = $false; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
             foreach ($argument in @('--remux-video-private', $packetInput, $packetOutput, '8', '8000000', '16065536', $packetTimes)) { $start.ArgumentList.Add($argument) }
@@ -657,7 +657,7 @@ try {
             if ($LASTEXITCODE -ne 3 -or ($refused | ConvertFrom-Json).error.code.value -ne 'EXACT_TRIM_UNAVAILABLE' -or (Test-Path (Join-Path $refusedDirectory 'assets'))) { throw 'System trim must not encode even with explicit authorization.' }
             if ((Get-FileHash $trimInput).Hash.ToLowerInvariant() -ne $trimSourceHash) { throw 'System trim changed its input.' }
             Write-Host 'PORTABLE_WINDOWS_API_TRIM_COMBINED=SUCCESS create-convert-key-rebase-selected-video-exact-encoder-refusal'
-        } finally { $env:Path = $savedSearchPath }
+        } finally { $env:PATH = $savedSearchPath }
         if ((Get-FileHash $packetInput).Hash.ToLowerInvariant() -ne '0c7ebf0ca88f7d601ad953353321cc048a84cd5785392f3ab6cb7718c6193dd6') { throw 'Private remux experiment changed its input.' }
         Write-Host 'PORTABLE_WINDOWS_API_PRIVATE_REMUX=SUCCESS scope=finite-compressed-packets-exact-vfr-clock-complete-decode-not-public-remux-or-metadata-preservation'
     }
@@ -711,14 +711,14 @@ try {
                     throw 'Huawei container repair changed opaque fixed fields.'
                 }
             } elseif ($keyResult.position.value -ne $repairManifest['key']) { throw 'Container repair changed the key.' }
-            $repairPath = $env:Path
+            $repairPath = $env:PATH
             try {
-                $env:Path = ''
+                $env:PATH = ''
                 $again = & $launcher repair --input $repairedCarrier --mode ExplicitRemux
                 if ($LASTEXITCODE -ne 0 -or @((($again | ConvertFrom-Json).result.proposedChanges)).Count -ne 0) { throw 'Container repair no-op unexpectedly requires backend.' }
                 $disabled = & $launcher repair --input $repairCarrier --mode ExplicitRemux --apply --output-dir (Join-Path $verify "disabled $repairProfile repair")
                 if ($LASTEXITCODE -ne 3 -or ($disabled | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Unavailable remux backend must not authorize repair.' }
-            } finally { $env:Path = $repairPath }
+            } finally { $env:PATH = $repairPath }
             if ((Get-FileHash $repairCarrier).Hash.ToLowerInvariant() -ne $repairManifest['carrier']) { throw 'Container repair mutated its source.' }
             $repairScope = if ($repairProfile -eq 'samsung') { 'canonical-sef-mov-to-mp4-no-encoding-not-device-proof' }
                 elseif ($repairProfile -eq 'vivo') { 'minimal-vivo-version-one-no-auxiliary-mov-to-mp4-no-encoding-not-device-proof' }
@@ -756,9 +756,9 @@ try {
                         $osHash -ne (Get-FileHash $osFixture).Hash) { throw "Portable OS decoder failed independent frame/timeline/source checks: $trace" }
                     if ([long]$Matches[1] -lt 24576 -or [long]$Matches[1] -gt 262144) { throw 'Portable decoded payload exceeds its independent byte bounds.' }
                 } finally { $process.Dispose() }
-                $savedSearchPath = $env:Path
+                $savedSearchPath = $env:PATH
                 try {
-                    $env:Path = ''
+                    $env:PATH = ''
                     $systemJson = & $launcher media-capabilities --ffmpeg (Join-Path $verify 'missing OS-fallback ffmpeg.exe')
                     if ($LASTEXITCODE -ne 0) { throw 'Portable OS fallback discovery failed.' }
                     $system = ($systemJson | ConvertFrom-Json).result
@@ -772,7 +772,7 @@ try {
                         -not (($systemProbe | ConvertFrom-Json).result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) {
                         throw "Portable Core system-only decode failed: $systemProbe"
                     }
-                } finally { $env:Path = $savedSearchPath }
+                } finally { $env:PATH = $savedSearchPath }
                 if ($osHash -ne (Get-FileHash $osFixture).Hash) { throw 'Portable Core OS decoder mutated input.' }
             }
             Write-Host 'PORTABLE_WINDOWS_API_DECODE=SUCCESS scope=selected-avc-video-not-audio-or-device'
@@ -998,9 +998,9 @@ try {
         Write-Host 'PORTABLE_APPLE_CREATE_SETKEY=SUCCESS scope=bounded-jpeg-mp4-not-device-compatibility'
         $movSource = $remux.output.assets[0].path
         $movSourceHash = (Get-FileHash $movSource).Hash
-        $defaultApplePath = $env:Path
+        $defaultApplePath = $env:PATH
         try {
-            $env:Path = ''
+            $env:PATH = ''
             $defaultCapsJson = & $launcher capabilities --target apple.livephoto
             if ($LASTEXITCODE -ne 0) { throw 'Default Apple capability query failed.' }
             $defaultCaps = ($defaultCapsJson | ConvertFrom-Json).result.operations
@@ -1021,7 +1021,7 @@ try {
             $defaultRejected = & $launcher create --image $frame.operation.output.assets[0].path --video $referenceVideo --target apple.livephoto --strict --output-dir $defaultRejectDirectory
             if ($LASTEXITCODE -ne 3 -or ($defaultRejected | ConvertFrom-Json).error.code.value -ne 'CAPABILITY_UNSUPPORTED' -or
                 (Test-Path $defaultRejectDirectory)) { throw 'Default Apple Create silently remuxed MP4 or published refused output.' }
-        } finally { $env:Path = $defaultApplePath }
+        } finally { $env:PATH = $defaultApplePath }
         & $media.ffmpegPath -nostdin -hide_banner -loglevel error -xerror -err_detect explode -f mov -i $defaultMovie -map 0:v -map '0:a?' -sn -dn -f null -
         if ($LASTEXITCODE -ne 0 -or (Get-FileHash $movSource).Hash -ne $movSourceHash) { throw 'Default Apple MOV did not decode or source changed.' }
         Write-Host 'PORTABLE_APPLE_DEFAULT_CREATE=SUCCESS scope=finite-jpeg-mov-no-backend-no-remux-not-heic-or-device-proof'
