@@ -115,6 +115,8 @@ jobs:
             '--rerun'
             ':file-io:jvmTest'
             '--rerun'
+            ':cli-native:jvmTest'
+            '--rerun'
             ':cli:installDist'
             '--console=plain'
             '--warning-mode=all'

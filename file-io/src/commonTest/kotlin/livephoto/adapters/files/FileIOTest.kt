@@ -7,9 +7,9 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 internal val testContext = Context(Limits(16uL * 1024uL * 1024uL, 16uL * 1024uL * 1024uL))
-internal fun <T> result(value: CoreResult<T>): T = when (value) {
+internal fun <T> result(value: CoreResult<T>, operation: String = "operation"): T = when (value) {
     is CoreResult.Success -> value.value
-    is CoreResult.Failure -> fail("Unexpected Core failure: ${value.error.code.value} ${value.error.message}")
+    is CoreResult.Failure -> fail("Unexpected Core failure during $operation: ${value.error.code.value} ${value.error.message} ${value.error.details}")
 }
 internal fun failure(value: CoreResult<*>, code: String) { assertEquals(code, assertIs<CoreResult.Failure>(value).error.code.value) }
 internal fun <T> immediate(block: suspend () -> T): T {
@@ -94,10 +94,22 @@ class FileIOTest {
         val context = Context(Limits(100uL, 100uL, maxSources = 1u))
         val input = box.file("input", byteArrayOf(1))
         val session = FileInputSession((box.root / "snapshot").toString(), context)
-        result(session.capture(input.toString())).close()
+        result(session.capture(input.toString()), "source-count first capture").close()
         failure(session.capture(input.toString()), "RESOURCE_LIMIT_EXCEEDED")
-        result(session.close())
-        result(session.close())
+        result(session.close(), "source-count first cleanup")
+        result(session.close(), "source-count repeated cleanup")
+    }
+    @Test fun sourceCountAndCleanupRemainStableAcrossRepeatedRealSessions() = sandbox { box ->
+        val input = box.file("input", byteArrayOf(1))
+        val context = Context(Limits(100uL, 100uL, maxSources = 1u))
+        repeat(20) { iteration ->
+            val session = FileInputSession((box.root / "snapshot-$iteration").toString(), context)
+            result(session.capture(input.toString()), "repeat $iteration capture").close()
+            failure(session.capture(input.toString()), "RESOURCE_LIMIT_EXCEEDED")
+            result(session.close(), "repeat $iteration cleanup")
+            result(session.close(), "repeat $iteration second cleanup")
+        }
+        assertEquals(listOf(input), box.fs.list(box.root))
     }
     @Test fun existingSnapshotDirectoriesAndInputDirectoriesAreNeverOverwritten() = sandbox { box ->
         val input = box.file("input", byteArrayOf(1))

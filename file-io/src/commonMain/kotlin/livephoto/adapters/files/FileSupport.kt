@@ -7,14 +7,14 @@ import kotlin.random.Random
 
 internal class FileFault(val code: String, val safeMessage: String) : Exception()
 internal fun reject(code: String, message: String): Nothing = throw FileFault(code, message)
-internal fun <T> fileResult(stage: Stage, block: () -> T): CoreResult<T> = try {
+internal fun <T> fileResult(stage: Stage, operation: String = "File adapter operation", block: () -> T): CoreResult<T> = try {
     CoreResult.Success(block())
 } catch (failure: FileFault) {
     CoreResult.Failure(CoreError(IssueCode(failure.code), stage, failure.safeMessage))
-} catch (_: Exception) {
+} catch (failure: Exception) {
     // Provider exception messages can contain paths, credentials or metadata.
     CoreResult.Failure(CoreError(IssueCode(if (stage == Stage.Read) "IO_READ_FAILED" else "IO_WRITE_FAILED"),
-        stage, "File adapter operation failed"))
+        stage, "$operation failed", details = mapOf("exceptionType" to Value.Text(failure::class.simpleName ?: "Exception"))))
 }
 internal fun poll(context: Context) {
     if (context.cancellation?.isCancelled() == true) reject("CANCELLED", "Operation was cancelled")

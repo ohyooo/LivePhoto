@@ -25,7 +25,7 @@ public class FileInputSession(
     private val files = mutableListOf<Path>()
     private val sources = mutableListOf<FileSnapshotSource>()
 
-    public fun capture(input: String): CoreResult<BinarySource> = fileResult(Stage.Read) {
+    public fun capture(input: String): CoreResult<BinarySource> = fileResult(Stage.Read, "Input snapshot acquisition") {
         if (closed) reject("IO_READ_FAILED", "Input session is closed")
         poll(context)
         if (files.size.toULong() >= context.limits.maxSources.toULong()) {
@@ -83,7 +83,7 @@ public class FileInputSession(
         }
     }
 
-    public fun close(): CoreResult<Unit> = fileResult(Stage.Read) {
+    public fun close(): CoreResult<Unit> = fileResult(Stage.Read, "Input snapshot cleanup") {
         sources.forEach { it.release() }
         closed = true
         files.toList().forEach { fileSystem.delete(it); files.remove(it) }
