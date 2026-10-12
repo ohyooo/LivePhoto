@@ -116,7 +116,7 @@ class FileIOTest {
         val source = result(session.capture(box.file("input", byteArrayOf(1, 2)).toString()))
         val copy = box.fs.list(sessionRoot).single()
         box.fs.openReadWrite(copy, mustExist = true).use { it.write(0, byteArrayOf(9, 8), 0, 2) }
-        failure(source.identity(), "SOURCE_CHANGED")
+        failure(source.readAt(0uL, 2u), "SOURCE_CHANGED")
         result(session.close())
     }
     @Test fun unknownSpoolChildrenStopCleanupWithoutDeletingUserData() = sandbox { box ->

@@ -59,12 +59,12 @@ public class FileInputSession(
                 after.createdAtMillis != before.createdAtMillis) {
                 reject("SOURCE_CHANGED", "Input metadata changed during capture")
             }
-            fileSystem.openReadOnly(copy).use {
-                if (digestFile(it, length, context) != captured) reject("IO_READ_FAILED", "Snapshot verification failed")
+            val proof = fileSystem.openReadOnly(copy).use {
+                freezeFile(it, length, captured, context)
             }
             allocated += length.toULong()
             FileSnapshotSource(fileSystem, { copy }, SourceId("$token:source-${sources.size + 1}"),
-                GenerationToken("$token:${captured.value}"), length, captured, context).also { sources += it }
+                GenerationToken("$token:${captured.value}"), proof, context).also { sources += it }
         } catch (failure: Exception) {
             if (ownsCopy) {
                 try { fileSystem.delete(copy, mustExist = true); files.remove(copy) } catch (_: Exception) {

@@ -2,6 +2,7 @@ package livephoto.adapters.files
 
 import livephoto.core.*
 import okio.*
+import okio.ByteString.Companion.toByteString
 
 /**
  * Reads a frozen file owned by the adapter, never the caller's mutable input.
@@ -13,11 +14,11 @@ internal class FileSnapshotSource(
     private val path: () -> Path,
     private val id: SourceId,
     private val generation: GenerationToken,
-    private val length: Long,
-    private val digest: Digest,
+    private val proof: FrozenFile,
     private val context: Context,
 ) : BinarySource {
     private var closed = false
+    private val length: Long get() = proof.length
     private fun checkFile(): Path {
         if (closed) reject("IO_READ_FAILED", "Source is closed")
         poll(context)
@@ -26,10 +27,10 @@ internal class FileSnapshotSource(
         return file
     }
     override suspend fun identity(): CoreResult<SourceIdentity> = fileResult(Stage.Read) {
-        fileSystem.openReadOnly(checkFile()).use {
-            if (digestFile(it, length, context) != digest) reject("SOURCE_CHANGED", "Frozen source content changed")
-        }
-        SourceIdentity(id, generation, length.toULong(), digest)
+        // This identity describes the owned immutable content, not the mutable original.
+        // Every returned byte is checked against its frozen block proof in readAt().
+        checkFile()
+        SourceIdentity(id, generation, length.toULong(), proof.digest)
     }
     override suspend fun size(): CoreResult<ULong> = fileResult(Stage.Read) { checkFile(); length.toULong() }
     override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> = fileResult(Stage.Read) {
@@ -41,10 +42,20 @@ internal class FileSnapshotSource(
         fileSystem.openReadOnly(file).use { handle ->
             if (handle.size() != this.length) reject("SOURCE_CHANGED", "Frozen source size changed")
             var read = 0
+            val block = ByteArray(FILE_BLOCK_BYTES)
             while (read < count) {
                 poll(context)
-                val n = handle.read(offset.toLong() + read, bytes, read, count - read)
-                if (n <= 0) reject("SOURCE_CHANGED", "Frozen source ended unexpectedly")
+                val position = offset.toLong() + read
+                val blockIndex = (position / FILE_BLOCK_BYTES).toInt()
+                val blockStart = position / FILE_BLOCK_BYTES * FILE_BLOCK_BYTES
+                val blockSize = minOf(FILE_BLOCK_BYTES.toLong(), this.length - blockStart).toInt()
+                readFileBlock(handle, blockStart, block, blockSize, context)
+                if (block.toByteString(0, blockSize).sha256() != proof.chunks[blockIndex]) {
+                    reject("SOURCE_CHANGED", "Frozen source content changed")
+                }
+                val from = (position - blockStart).toInt()
+                val n = minOf(count - read, blockSize - from)
+                block.copyInto(bytes, read, from, from + n)
                 read += n
             }
             if (handle.size() != this.length) reject("SOURCE_CHANGED", "Frozen source size changed")

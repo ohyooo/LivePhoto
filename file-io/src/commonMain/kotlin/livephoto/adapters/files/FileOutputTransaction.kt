@@ -23,7 +23,7 @@ public class FileOutputTransaction(
     private var allocated = 0uL
     private val markerName = ".transaction-$token"
     private val entries = linkedMapOf<AssetId, Entry>()
-    private data class Entry(val name: String, val sink: FileSink, var digest: Digest? = null)
+    private data class Entry(val name: String, val sink: FileSink, var proof: FrozenFile? = null)
     private fun staging(): Path = checkNotNull(directory) / ".staging"
     private fun published(): Path = checkNotNull(directory) / "assets"
     override fun capabilities(): OutputCapabilities = OutputCapabilities(true, true, false, false, true)
@@ -72,8 +72,9 @@ public class FileOutputTransaction(
         checkTree(staging())
         entries.values.forEach { entry ->
             entry.sink.finish()
-            entry.digest = fileSystem.openReadOnly(staging() / entry.name).use {
-                digestFile(it, entry.sink.length.toLong(), context)
+            entry.proof = fileSystem.openReadOnly(staging() / entry.name).use {
+                val digest = digestFile(it, entry.sink.length.toLong(), context)
+                freezeFile(it, entry.sink.length.toLong(), digest, context)
             }
         }
         state = TransactionState.Prepared
@@ -85,8 +86,8 @@ public class FileOutputTransaction(
         }
         val entry = entries[id] ?: reject("INVALID_ARGUMENT", "Unknown asset")
         FileSnapshotSource(fileSystem, { (if (state == TransactionState.Committed) published() else staging()) / entry.name },
-            SourceId("$token:${id.value}"), GenerationToken("$token:${entry.digest!!.value}"),
-            entry.sink.length.toLong(), entry.digest!!, context)
+            SourceId("$token:${id.value}"), GenerationToken("$token:${entry.proof!!.digest.value}"),
+            entry.proof!!, context)
     }
     override suspend fun commit(): CoreResult<Receipt> = fileResult(Stage.Publish) {
         requireState(TransactionState.Prepared); poll(context)
@@ -120,7 +121,7 @@ public class FileOutputTransaction(
                 val digest = fileSystem.openReadOnly(published() / entry.name).use {
                     digestFile(it, entry.sink.length.toLong(), recoveryContext)
                 }
-                if (digest != entry.digest) reject("COMMIT_OUTCOME_UNKNOWN", "Published assets could not be verified")
+                if (digest != entry.proof!!.digest) reject("COMMIT_OUTCOME_UNKNOWN", "Published assets could not be verified")
             }
             state = TransactionState.Committed
         } else {
