@@ -6,7 +6,7 @@
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；Core 已提供 JVM 与三平台 Kotlin/Native 库，现有 CLI 便携应用仍是 JVM，尚未交付原生 CLI、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。macOS/Linux 真实 FFmpeg 与便携 CLI 验收已补齐；Native Core 三平台各 726 项测试通过，共享 CLI/无反射 JSON/日志各 34 项 Native 测试通过。原生文件 IO、媒体适配及 CLI 可执行发布尚未完成。当前只推进 Native 改造，其它业务 TODO 暂不实施；Apple 新功能暂停，已有能力和测试保留。桌面系统 API 历史代码保留停用，移动端及其系统媒体 API 排在最后。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。macOS/Linux 真实 FFmpeg 与便携 CLI 验收已补齐；Native 三平台分别通过 726 项 Core、34 项共享 CLI 和 33 项真实文件 IO 测试。原生进程/FFmpeg 适配及 CLI 可执行发布尚未完成。当前只推进 Native 改造，其它业务 TODO 暂不实施；Apple 新功能暂停，已有能力和测试保留。桌面系统 API 历史代码保留停用，移动端及其系统媒体 API 排在最后。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -479,7 +479,7 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 编译后的未打包主库位于 `core/build/classes/kotlin/<target>/main/`。[Native Core CI](https://github.com/ohyooo/LivePhoto/actions/workflows/native-core.yml) 将已核对 `NATIVE` 平台标识的主库打包为 `core.klib`，上传 `LivePhoto-native-core-<平台>-<run_id>-<attempt>`，另附编译器版本、目标、库 SHA-256 和新执行测试数；报告 artifact 为 `native-core-reports-<平台>-<run_id>-<attempt>`。
 
-Native 库当前可使用 `MemoryBinarySource` / `MemoryOutputTransaction` 或调用方注入的 IO/事务。原生文件 IO、CLI、进程调用和 FFmpeg 适配尚未交付；没有真实媒体后端时，需要解码/媒体处理的操作明确拒绝，不影响纯协议能力。下载 KLIB 不会使现有 JVM 便携包变成单文件原生程序。
+Native 库可使用 `MemoryBinarySource` / `MemoryOutputTransaction`、下述文件适配库或调用方注入的 IO/事务。原生 CLI 可执行入口、进程调用和 FFmpeg 适配尚未交付；没有真实媒体后端时，需要解码/媒体处理的操作明确拒绝，不影响纯协议能力。下载 KLIB 不会使现有 JVM 便携包变成单文件原生程序。
 
 ### Native 共享 CLI 层
 
@@ -496,7 +496,30 @@ Native 库当前可使用 `MemoryBinarySource` / `MemoryOutputTransaction` 或�
 .\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :cli-shared:mingwX64Test --rerun
 ```
 
-[本批 Native 验证](https://github.com/ohyooo/LivePhoto/actions/runs/38217562263) 每平台分别检查 Core 的 726 项和 CLI 的 34 项新执行测试，随现有库/报告 artifacts 附加 `shared-cli-evidence.json`。现有 JVM 便携包仍包含 Java 运行时；下一阶段接原生文件 IO/原子事务，然后进程及 FFmpeg 适配和原生应用发布。
+[共享 CLI 验证](https://github.com/ohyooo/LivePhoto/actions/runs/38217562263) 每平台分别检查 Core 的 726 项和 CLI 的 34 项新执行测试，随现有库/报告 artifacts 附加 `shared-cli-evidence.json`。现有 JVM 便携包仍包含 Java 运行时；文件适配已另行交付，下一阶段接进程及 FFmpeg 适配和原生应用发布。
+
+### Native 文件 IO 与整组输出
+
+`file-io` 使用 Okio 3.18.2 提供 JVM / Linux x64 / macOS ARM64 / Windows x64 文件适配，Core 仍不依赖具体路径或 Okio：
+
+- `FileInputSession.capture()` 将输入保存为有总字节、来源数量和校验证明预算限制的独立副本。两次读取核对原内容，再校验副本；后续读取验证固定 64 KiB 块的 SHA-256，不靠 mtime，也不因每次小读取查询身份而重复扫描整段视频。输入原文件不会被写入。
+- `FileOutputTransaction` 只接受新目录，暂存并冻结所有资产，Core 回读验证后用一次同目录原子移动发布到 `assets/`。不覆盖已有文件/目录，不使用跨卷复制降级；提交响应丢失时通过 `query()` 核对整组输出，禁止盲目重试或删除可能已提交的资产。
+- 只支持本地文件系统及调用方控制的可信父目录；调用方负责工作目录隐私和串行调用。拒绝符号链接及 Windows reparse points，不声称支持网络共享、恶意同账户并发修改、扁平 URI 输出或断电后的目录持久性。清理只删除记录的自有文件和空目录，遇到未知内容保留并报错。
+
+[文件适配验证](https://github.com/ohyooo/LivePhoto/actions/runs/38263179069) 三平台各 **33 项测试，零失败、零跳过**，包含真实文件/Unicode 路径、真实系统链接、预算/溢出、短读/零进度、失败清理、两资产发布及不确定提交恢复；使用 `reference/video.jpg + video.mp4` 实际 Create → Inspect/Validate → 字节精确 Extract，原素材未改变。不是 FFmpeg 媒体操作或真机认证。Windows 首轮一项用例遇到 IO 失败，同提交重跑通过，失败记录保留，未放宽断言。
+
+文件测试还需要真实链接素材；在有 PowerShell 及创建符号链接权限的环境先运行 `pwsh -File ./scripts/prepare-file-io-fixtures.ps1`，再执行对应宿主命令：
+
+```sh
+./gradlew -Plivephoto.nativeTarget=linux-x64 :file-io:linuxX64Test --rerun
+./gradlew -Plivephoto.nativeTarget=macos-arm64 :file-io:macosArm64Test --rerun
+```
+
+```powershell
+.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :file-io:mingwX64Test --rerun
+```
+
+Native 库 artifact 现在另附 `file-io.klib` 和 `file-io-evidence.json`（目标、依赖、SHA-256、字节数、执行测试数）。文件库依赖 Core、Okio 及目标平台库，不是单独可运行的应用；协议 Core 的 KLIB 仍只依赖 stdlib。
 
 ## CI 与产物
 
@@ -648,7 +671,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
 | 已完成批次 | macOS ARM64 便携包 | **已完成当前便携范围**，仍为 jpackage/JVM | ARM64 CI 构建、归档解压、smoke 与本机 13 个 CLI 检查通过；不是系统媒体后端或设备认证 |
-| 当前推进 | Kotlin/Native Core 与原生 CLI | **Core 库、共享 CLI/无反射 JSON/日志与三平台测试已完成；原生平台适配未完成** | 继续接原生文件 IO、原子事务、进程调用及 FFmpeg 后端与可执行发布；不把 Core KLIB 或内存测试当作原生 CLI |
+| 当前推进 | Kotlin/Native Core 与原生 CLI | **Core、共享 CLI/无反射 JSON/日志、本地文件 IO/整组原子事务及三平台测试已完成；媒体与可执行适配未完成** | 继续接原生进程及 FFmpeg 后端与完整 CLI 发布；不把 KLIB 或库测试当作原生 CLI |
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
 | 暂停 | Apple 新功能与复杂 HEIF Pair 写入 | **用户决定暂停；已有代码和测试保留** | 恢复时再补真实 iOS 证据，不计作已完成，也不占用当前桌面 FFmpeg 工作 |
 | 最后 | Android/iOS 接入与移动端系统媒体 API | **TODO：桌面与协议剩余任务之后；尚未配置移动 target 或产物** | 先编译与 common 测试，再接 Uri/文件 IO、事务与权限，最后移动端媒体后端及设备验收；不复用桌面进程假装移动端支持 |
@@ -711,7 +734,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
 - [x] Kotlin/Native Core 第一阶段：macOS ARM64、Windows x64、Linux x64 主库与各726项共享测试实际执行通过，库/报告独立上传；默认 JVM 构建不下载 Native 编译器。
 - [x] Kotlin/Native 共享 CLI 层：参数与命令分派、无反射 JSON、平台注入的日志/计时，三平台各 34 项真实 Native 测试通过；JVM 入口复用同一实现。
-- [ ] Kotlin/Native 后续阶段：原生文件 IO/资产集合原子事务、进程与 FFmpeg 后端、完整 CLI 入口和原生应用发布 CI；每个平台独立验证，不把现有 jpackage 包或 KLIB 称为原生 CLI，不提前引入 GUI。
+- [x] Kotlin/Native 文件 IO/资产集合原子事务：三个宿主各 33 项真实文件/原素材闭环测试通过，预算与内容证明、提交恢复、未知文件保全均有回归；仅新目录、本地可信文件系统、串行调用，目录持久性不保证。
+- [ ] Kotlin/Native 后续阶段：原生进程与 FFmpeg 后端、完整 CLI 入口和原生应用发布 CI；每个平台独立验证，不把现有 jpackage 包或 KLIB 称为原生 CLI，不提前引入 GUI。
 - [ ] **最后推进移动端 Android/iOS**：增加移动 targets 与真实构建/测试产物；适配文件/Android Uri、原子事务、权限与资源生命周期；系统媒体 API 仅在此阶段接入移动端，逐项验证 probe/抽帧/裁剪/remux/条件转码及设备行为。当前未实现，桌面 FFmpeg/803 项 JVM 测试不代替移动验收。
 - [ ] 未来 Compose UI：不属于当前 Core + CLI 交付范围，不提前引入 GUI 依赖。
 
