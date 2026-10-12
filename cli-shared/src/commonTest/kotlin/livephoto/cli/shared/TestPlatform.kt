@@ -10,7 +10,7 @@ internal open class TestPlatform : CliPlatform {
     val transactions = mutableListOf<MemoryOutputTransaction>()
     var environmentLevel: String? = null
     override fun openSource(path: String): BinarySource =
-        MemoryBinarySource(Bytes.copyOf(byteArrayOf()), SourceId(path), GenerationToken("test")).also { opened += it }
+        MemoryBinarySource(Bytes(byteArrayOf()), SourceId(path), GenerationToken("test")).also { opened += it }
     override fun output(path: String, context: Context): CliOutput {
         val transaction = MemoryOutputTransaction(context, "test-output")
         transactions += transaction

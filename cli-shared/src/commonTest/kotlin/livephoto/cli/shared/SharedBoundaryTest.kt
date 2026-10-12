@@ -19,7 +19,7 @@ class SharedBoundaryTest {
         val platform = TestPlatform()
         val source = platform.openSource("private-file")
         assertEquals("\"redacted\"", CliJson.encode(source))
-        assertEquals("{\"byteLength\":3}", CliJson.encode(Bytes.copyOf(byteArrayOf(1, 2, 3))))
+        assertEquals("{\"byteLength\":3}", CliJson.encode(Bytes(byteArrayOf(1, 2, 3))))
     }
 
     @Test fun outputPathsAreResolvedOnlyThroughTheCliAdapter() {
