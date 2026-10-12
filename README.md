@@ -6,7 +6,7 @@
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；Core 已提供 JVM 与三平台 Kotlin/Native 库，现有 CLI 便携应用仍是 JVM，尚未交付原生 CLI、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。macOS/Linux 真实 FFmpeg 与便携 CLI 验收已补齐；Native Core 三平台各执行 726 项共享测试通过，原生 CLI/IO/媒体适配尚未完成。当前只推进 Native 改造，其它业务 TODO 暂不实施；Apple 新功能暂停，已有能力和测试保留。桌面系统 API 历史代码保留停用，移动端及其系统媒体 API 排在最后。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 便携包已交付。macOS/Linux 真实 FFmpeg 与便携 CLI 验收已补齐；Native Core 三平台各 726 项测试通过，共享 CLI/无反射 JSON/日志各 34 项 Native 测试通过。原生文件 IO、媒体适配及 CLI 可执行发布尚未完成。当前只推进 Native 改造，其它业务 TODO 暂不实施；Apple 新功能暂停，已有能力和测试保留。桌面系统 API 历史代码保留停用，移动端及其系统媒体 API 排在最后。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -481,6 +481,23 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 Native 库当前可使用 `MemoryBinarySource` / `MemoryOutputTransaction` 或调用方注入的 IO/事务。原生文件 IO、CLI、进程调用和 FFmpeg 适配尚未交付；没有真实媒体后端时，需要解码/媒体处理的操作明确拒绝，不影响纯协议能力。下载 KLIB 不会使现有 JVM 便携包变成单文件原生程序。
 
+### Native 共享 CLI 层
+
+`cli-shared` 的 `commonMain` 负责参数解析、Request 构造、Core 调用、JSON 与日志格式化；现有 JVM CLI 已使用这一份实现。文件来源、输出事务、后端发现、环境、计时和异常帧由 `CliPlatform` 注入，不把平台 API 放进协议 Core。
+
+生产 JSON 已移除 Java 反射，显式映射结果 DTO，保留原命令、退出码、64 位十进制字符串及句柄/token 脱敏规则。三平台各实际执行 **34 项共享 CLI 测试，零失败、零跳过**，包括现有命令转发、嵌套结果图、日志隔离和失败后的资源清理；这些测试使用内存 IO，不是原生文件/FFmpeg 或完整原生程序的验收。
+
+```sh
+./gradlew -Plivephoto.nativeTarget=linux-x64 :cli-shared:linuxX64Test --rerun
+./gradlew -Plivephoto.nativeTarget=macos-arm64 :cli-shared:macosArm64Test --rerun
+```
+
+```powershell
+.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :cli-shared:mingwX64Test --rerun
+```
+
+[本批 Native 验证](https://github.com/ohyooo/LivePhoto/actions/runs/38217562263) 每平台分别检查 Core 的 726 项和 CLI 的 34 项新执行测试，随现有库/报告 artifacts 附加 `shared-cli-evidence.json`。现有 JVM 便携包仍包含 Java 运行时；下一阶段接原生文件 IO/原子事务，然后进程及 FFmpeg 适配和原生应用发布。
+
 ## CI 与产物
 
 [Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 / macOS ARM64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux/macOS 直接执行仓库中带可执行位的 `gradlew`。便携 smoke 启用 trace，日志随报告上传。
@@ -631,7 +648,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 | 4 | 复杂 HEIF/AVIF / metadata / 媒体 profile | 部分基础已有，其余持续扩展 | 图像/音轨/时间线/metadata 各自证明，无法保证时拒绝或明确 Partial |
 | 持续 | 每批新增 Core 能力的 CLI 与 conformance | 随上述工作包推进，不集中到最后才测 | 合成正负例、真实媒体、保留、原子性与便携 CLI 同步回归 |
 | 已完成批次 | macOS ARM64 便携包 | **已完成当前便携范围**，仍为 jpackage/JVM | ARM64 CI 构建、归档解压、smoke 与本机 13 个 CLI 检查通过；不是系统媒体后端或设备认证 |
-| 当前推进 | Kotlin/Native Core 与原生 CLI | **Core 库与三平台共享测试已完成；CLI/平台适配未完成** | 继续替换 JVM 文件 IO、原子事务、进程调用和 JSON/日志适配，接入原生 FFmpeg 后端；不把 Core KLIB 当作原生 CLI |
+| 当前推进 | Kotlin/Native Core 与原生 CLI | **Core 库、共享 CLI/无反射 JSON/日志与三平台测试已完成；原生平台适配未完成** | 继续接原生文件 IO、原子事务、进程调用及 FFmpeg 后端与可执行发布；不把 Core KLIB 或内存测试当作原生 CLI |
 | 补齐素材后 | L4 真机兼容 | **暂缓：待真实原片与设备证据** | 按厂商、设备/OS/相册、导入方式记录动态播放、声音、key 等证据 |
 | 暂停 | Apple 新功能与复杂 HEIF Pair 写入 | **用户决定暂停；已有代码和测试保留** | 恢复时再补真实 iOS 证据，不计作已完成，也不占用当前桌面 FFmpeg 工作 |
 | 最后 | Android/iOS 接入与移动端系统媒体 API | **TODO：桌面与协议剩余任务之后；尚未配置移动 target 或产物** | 先编译与 common 测试，再接 Uri/文件 IO、事务与权限，最后移动端媒体后端及设备验收；不复用桌面进程假装移动端支持 |
@@ -693,7 +710,8 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 - [ ] **L4 真机兼容验收（暂缓，待真实原片与设备证据）。** 后续补充未编辑厂商原片、设备型号、系统/相册版本、导入后的动态播放/声音/key 表现；不能由合成测试或自生成 round-trip 代替。
 - [ ] 扩展真实 upstream/厂商原片 conformance、更多完整媒体/保留证明与不支持变体回归；持续记录每项能力的证据和边界。
 - [x] Kotlin/Native Core 第一阶段：macOS ARM64、Windows x64、Linux x64 主库与各726项共享测试实际执行通过，库/报告独立上传；默认 JVM 构建不下载 Native 编译器。
-- [ ] Kotlin/Native 后续阶段：原生 CLI/文件 IO/事务/进程/无反射 JSON/日志、FFmpeg 后端和原生应用发布 CI；每个平台独立验证，不把现有 jpackage 包或 KLIB 称为原生 CLI，不提前引入 GUI。
+- [x] Kotlin/Native 共享 CLI 层：参数与命令分派、无反射 JSON、平台注入的日志/计时，三平台各 34 项真实 Native 测试通过；JVM 入口复用同一实现。
+- [ ] Kotlin/Native 后续阶段：原生文件 IO/资产集合原子事务、进程与 FFmpeg 后端、完整 CLI 入口和原生应用发布 CI；每个平台独立验证，不把现有 jpackage 包或 KLIB 称为原生 CLI，不提前引入 GUI。
 - [ ] **最后推进移动端 Android/iOS**：增加移动 targets 与真实构建/测试产物；适配文件/Android Uri、原子事务、权限与资源生命周期；系统媒体 API 仅在此阶段接入移动端，逐项验证 probe/抽帧/裁剪/remux/条件转码及设备行为。当前未实现，桌面 FFmpeg/803 项 JVM 测试不代替移动验收。
 - [ ] 未来 Compose UI：不属于当前 Core + CLI 交付范围，不提前引入 GUI 依赖。
 
