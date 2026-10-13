@@ -4,6 +4,7 @@ package livephoto.adapters.files
 import kotlinx.cinterop.toKString
 import kotlinx.coroutines.runBlocking
 import livephoto.core.*
+import livephoto.core.ffmpeg.*
 import livephoto.core.memory.MemoryOutputTransaction
 import okio.Path.Companion.toPath
 import kotlin.test.*
@@ -43,9 +44,18 @@ class NativeFfmpegTest {
             val before = box.contents(file)
             val source = result(session.capture(file.toString()))
             val ref = ResourceRef(SourceSet.Single(source))
-            val core = DefaultLivePhotoCore(assertNotNull(runtime.discover(executable(), "").backend))
+            var lastTrace = ""
+            val recording = object : FfmpegRuntime by runtime {
+                override suspend fun execute(arguments: List<String>, timeoutMillis: Long, context: Context): FfmpegProcessResult {
+                    val value = runtime.execute(arguments, timeoutMillis, context)
+                    lastTrace = value.output
+                    return value
+                }
+            }
+            val core = DefaultLivePhotoCore(FfmpegMediaBackend(executable(), recording))
             assertTrue(result(core.probe(ProbeRequest(ref, true, context))).issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
-            val frame = result(core.extractFrame(ExtractFrameRequest(ref, CoverPosition.FrameIndex(2uL), ImageEncoding(ImageFormat.Jpeg), MemoryOutputTransaction(context, "frame"), context)))
+            val frameRun = core.extractFrame(ExtractFrameRequest(ref, CoverPosition.FrameIndex(2uL), ImageEncoding(ImageFormat.Jpeg), MemoryOutputTransaction(context, "frame"), context))
+            val frame = assertIs<CoreResult.Success<FrameResult>>(frameRun, "Native frame verification: $frameRun\nBounded synthetic-fixture FFmpeg trace:\n$lastTrace").value
             assertEquals(2uL, frame.actualFrameIndex)
             frame.operation.output.assets.forEach { it.readableSource?.close() }
             val remux = result(core.remux(RemuxRequest(ref, VideoContainer.Mov, output = MemoryOutputTransaction(context, "remux"), context = context)))
