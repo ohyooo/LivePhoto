@@ -12,7 +12,7 @@ import okio.*
 public class FileOutputTransaction(
     root: String,
     private val context: Context,
-    private val fileSystem: FileSystem = FileSystem.SYSTEM,
+    private val fileSystem: FileSystem = localFileSystem,
 ) : OutputTransaction {
     private val requestedRoot = root
     private val token = newToken()
@@ -59,7 +59,7 @@ public class FileOutputTransaction(
     private fun checkTree(path: Path) {
         val metadata = fileSystem.metadata(path)
         if (!metadata.isDirectory || metadata.symlinkTarget != null ||
-            fileSystem === FileSystem.SYSTEM && systemPathIsLink(path)) {
+            isSystemProvider(fileSystem) && systemPathIsLink(path)) {
             reject("IO_WRITE_FAILED", "Reserved directory was modified")
         }
         val expected = entries.values.map { path / it.name }.toSet() + (path / markerName)
@@ -103,7 +103,7 @@ public class FileOutputTransaction(
         requireState(TransactionState.Prepared); poll(context)
         checkTree(staging())
         if (fileSystem.metadataOrNull(published()) != null ||
-            fileSystem === FileSystem.SYSTEM && systemPathIsLink(published())) {
+            isSystemProvider(fileSystem) && systemPathIsLink(published())) {
             reject("OUTPUT_EXISTS", "Reserved publication path already exists")
         }
         try {

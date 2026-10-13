@@ -4,7 +4,7 @@
 
 使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core 与命令行工具。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
-**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；Core 已提供 JVM 与三平台 Kotlin/Native 库，现有 CLI 便携应用仍是 JVM，尚未交付原生 CLI、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
+**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；Core 已提供 JVM 与三平台 Kotlin/Native 库，现有完整媒体 CLI 便携应用仍是 JVM，另有实验性原生纯协议 CLI；尚未交付 Native FFmpeg、Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
 **当前进度：有限 Core + CLI 闭环已可测试，Windows/Linux/macOS ARM64 的 JVM 便携包已交付，macOS/Linux 真实 FFmpeg 验收已补齐。另新增三平台 Native 纯协议 CLI、独立原生程序打包及验收；不是将原 JVM 包改名，Native 进程/FFmpeg 后端仍未完成。当前只推进 Native 改造，其它业务 TODO 暂不实施；Apple 新功能暂停，已有能力和测试保留。桌面系统 API 历史代码保留停用，移动端及其系统媒体 API 排在最后。** 具体阶段状态、后续顺序与验收条件见[进度与 TODO](#进度已完成与-todo)。
 
@@ -670,7 +670,7 @@ Windows 系统 remux 内部前置实验：新全量 **776 tests，0 failures / e
 
 | 阶段 / 工作包 | 当前状态 | 已完成 | 仍未完成 |
 | --- | --- | --- | --- |
-| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | JVM 与三平台 Native Core 库、统一模型/API、IO/后端契约、共享测试；本地 Native 文件适配与整组事务另行交付 | Native CLI/进程/媒体适配及移动 targets 尚未交付 |
+| Phase 1：工程与公共 Core 契约 | 已完成当前范围 | JVM 与三平台 Native Core 库、统一模型/API、IO/后端契约、共享测试；本地 Native 文件适配、整组事务及纯协议 CLI 另行交付 | Native 进程/媒体适配及移动 targets 尚未交付 |
 | Phase 2：解析与安全基础 | 已完成基础批次；复杂格式部分完成 | JPEG/XMP/EXIF/BMFF、范围/预算/身份检查、有限 HEIF 图 | 通用 HEIF/AVIF 与复杂 metadata 关联 |
 | Phase 3：Google 主流程 | 部分完成，有限闭环可用 | JPEG V1/V2 与有限 HEIC 的读取、创建、提取、拆分、转换、key/修复 | 未支持的资源图、HDR/GainMap 等变体 |
 | 厂商协议与 Legacy | 部分完成 | 已声明的 Oplus/Samsung/vivo/Huawei/Legacy 子集 | 未确认的尾挂、Honor 写入、复杂厂商变体及设备证明 |

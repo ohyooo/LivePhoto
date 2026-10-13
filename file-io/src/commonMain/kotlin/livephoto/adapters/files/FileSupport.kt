@@ -6,11 +6,16 @@ import okio.Path.Companion.toPath
 import kotlin.random.Random
 
 internal class FileFault(val code: String, val safeMessage: String) : Exception()
+internal class NativeFileIOException(val operation: String, val nativeCode: UInt, val write: Boolean) :
+    IOException("Native file $operation failed")
 internal fun reject(code: String, message: String): Nothing = throw FileFault(code, message)
 internal fun <T> fileResult(stage: Stage, operation: String = "File adapter operation", block: () -> T): CoreResult<T> = try {
     CoreResult.Success(block())
 } catch (failure: FileFault) {
     CoreResult.Failure(CoreError(IssueCode(failure.code), stage, failure.safeMessage))
+} catch (failure: NativeFileIOException) {
+    CoreResult.Failure(CoreError(IssueCode(if (failure.write) "IO_WRITE_FAILED" else "IO_READ_FAILED"), stage,
+        "Native file ${failure.operation} failed", details = mapOf("nativeCode" to Value.Number(failure.nativeCode.toString()))))
 } catch (failure: Exception) {
     // Provider exception messages can contain paths, credentials or metadata.
     CoreResult.Failure(CoreError(IssueCode(if (stage == Stage.Read) "IO_READ_FAILED" else "IO_WRITE_FAILED"),
@@ -37,7 +42,7 @@ internal fun reserve(fileSystem: FileSystem, root: Path) {
     }
 }
 internal fun regular(fileSystem: FileSystem, path: Path): FileMetadata {
-    if (fileSystem === FileSystem.SYSTEM && systemPathIsLink(path)) {
+    if (isSystemProvider(fileSystem) && systemPathIsLink(path)) {
         reject("INVALID_ARGUMENT", "Symbolic links and reparse points are not accepted")
     }
     val metadata = fileSystem.metadata(path)

@@ -14,7 +14,7 @@ import okio.Path.Companion.toPath
 public class FileInputSession(
     root: String,
     private val context: Context,
-    private val fileSystem: FileSystem = FileSystem.SYSTEM,
+    private val fileSystem: FileSystem = localFileSystem,
 ) {
     private val requestedRoot = root
     private var directory: Path? = null

@@ -21,7 +21,7 @@ internal fun <T> immediate(block: suspend () -> T): T {
     return checkNotNull(completion) { "File adapter test unexpectedly suspended" }.getOrThrow()
 }
 internal class Sandbox {
-    val fs = FileSystem.SYSTEM
+    val fs = localFileSystem
     val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-file-test-${newToken()}"
     init { fs.createDirectory(root, mustCreate = true) }
     fun file(name: String, bytes: ByteArray): Path = (root / name).also { path ->

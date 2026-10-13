@@ -2,6 +2,7 @@ package livephoto.cli.nativeapp
 
 import livephoto.cli.shared.*
 import livephoto.core.*
+import livephoto.adapters.files.localFileSystem
 import okio.*
 import kotlin.coroutines.*
 import kotlin.random.Random
@@ -33,7 +34,7 @@ class FileCliTest {
     }
 
     @Test fun realInputsShareBudgetAndCleanupLeavesOriginalUntouched(): Unit = immediate {
-        val fs = FileSystem.SYSTEM
+        val fs = localFileSystem
         val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-cli-test-${Random.nextLong().toULong()}"
         fs.createDirectory(root, mustCreate = true)
         val input = root / "输入 file.bin"
@@ -55,7 +56,7 @@ class FileCliTest {
     }
 
     @Test fun frozenSourceSessionClosesBeforeReuseWithDifferentBudget(): Unit = immediate {
-        val fs = FileSystem.SYSTEM
+        val fs = localFileSystem
         val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-cli-test-${Random.nextLong().toULong()}"
         fs.createDirectory(root, mustCreate = true)
         val input = root / "input"
