@@ -38,7 +38,7 @@ if (($Platform -eq 'windows-x64' -and $magic -notmatch '^4D5A') -or
 $destination = Join-Path $repository 'ci-output/native-cli'
 if (Test-Path $destination) { throw 'Use a fresh Native CLI output directory.' }
 New-Item -ItemType Directory $destination | Out-Null
-$archive = Join-Path $destination "LivePhoto-native-$Platform$(if ($IsWindows) { '.zip' } else { '.tar.gz' })"
+$archive = Join-Path $destination "LivePhoto-$Platform$(if ($IsWindows) { '.zip' } else { '.tar.gz' })"
 if ($IsWindows) { Compress-Archive $binary[0].FullName $archive }
 else {
     & tar -czf $archive -C $binary[0].Directory.FullName $binary[0].Name

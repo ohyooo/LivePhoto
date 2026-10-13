@@ -1,16 +1,20 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
-import livephoto.core.ffmpeg.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.memory.MemoryBinarySource
-import java.nio.file.Path
 import kotlin.test.*
 
 class FfmpegAacRemuxProfileTest {
     private val context = Context(Limits(8_000_000uL, 8_000_000uL))
+    private val noRuntime = object : FfmpegRuntime {
+        override suspend fun execute(arguments: List<String>, timeoutMillis: Long, context: Context): FfmpegProcessResult =
+            error("Preflight must never execute FFmpeg")
+        override suspend fun openFiles(source: BinarySource, context: Context, outputName: String,
+            producesOutput: Boolean): CoreResult<FfmpegFiles> = error("Preflight must never allocate storage")
+    }
     private fun groups(runs: List<Pair<UInt, UInt>>): ByteArray = GoogleFixtures.box("sgpd",
         GoogleFixtures.bytes(1, 0, 0, 0) + "roll".encodeToByteArray() + GoogleFixtures.u32(2u) + GoogleFixtures.u32(1u) + GoogleFixtures.bytes(255, 255)) +
         GoogleFixtures.fullBox("sbgp", "roll".encodeToByteArray() + GoogleFixtures.u32(runs.size.toUInt()) +
@@ -30,7 +34,7 @@ class FfmpegAacRemuxProfileTest {
             // Generic Core metadata proof remains available; this is an external muxer limitation only.
             RemuxVerification.metadata(reader, facts)
             val before = sha256Range(reader, facts.range).orThrow()
-            val result = FfmpegRemux.run("nonexistent-ffmpeg-preflight-must-not-execute.exe", JvmFfmpegRuntime, BackendJob(
+            val result = FfmpegRemux.run("nonexistent-ffmpeg-preflight-must-not-execute.exe", noRuntime, BackendJob(
                 Operation.Remux, listOf(ResourceRef(SourceSet.Single(source))), remuxContainer = VideoContainer.Mp4,
                 context = context, destination = noStaging))
             val error = assertIs<CoreResult.Failure>(result).error
@@ -60,7 +64,7 @@ class FfmpegAacRemuxProfileTest {
         val source = source()
         val reader = BinaryReader(source, context)
         val before = sha256Range(reader, ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
-        val result = FfmpegTranscode.run("nonexistent-ffmpeg-transcode-preflight-must-not-execute.exe", JvmFfmpegRuntime, BackendJob(
+        val result = FfmpegTranscode.run("nonexistent-ffmpeg-transcode-preflight-must-not-execute.exe", noRuntime, BackendJob(
             Operation.Transcode, listOf(ResourceRef(SourceSet.Single(source))), videoEncoding = VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4),
             policy = MutationPolicy(transcode = TranscodePolicy.Explicit), context = context, destination = noStaging))
         val error = assertIs<CoreResult.Failure>(result).error

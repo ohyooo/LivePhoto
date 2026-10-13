@@ -87,4 +87,69 @@ class FileFfmpegWorkspaceTest {
         result(files.close())
         assertTrue(box.fs.list(box.root).isEmpty())
     }
+    @Test fun shortReadsAreCopiedExactlyWithoutClosingBorrowedInput() = sandbox { box ->
+        val bytes = ByteArray(70_001) { (it % 251).toByte() }
+        val original = input(bytes)
+        var requests = 0
+        val source = object : BinarySource by original {
+            override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> {
+                requests++
+                assertTrue(length <= 65_536u)
+                return original.readAt(offset, minOf(length, 997u))
+            }
+        }
+        val files = result(FileFfmpegWorkspace.open(box.root.toString(), source, Context(Limits(200_000uL, 80_000uL)), "output.bin", true))
+        assertTrue(requests > 1)
+        assertEquals(80_000uL, files.outputLimit)
+        assertContentEquals(bytes, box.contents(files.input.toPath()))
+        result(files.close())
+        assertTrue(box.fs.list(box.root).isEmpty())
+        assertContentEquals(bytes, result(original.readAt(0uL, bytes.size.toUInt())).toByteArray())
+    }
+    @Test fun outputAllowanceSubtractsInputAndCapsUnsignedValues() = sandbox { box ->
+        for ((limits, expected) in listOf(Limits(8uL, 100uL) to 5uL,
+            Limits(ULong.MAX_VALUE, ULong.MAX_VALUE) to Long.MAX_VALUE.toULong())) {
+            val files = result(FileFfmpegWorkspace.open(box.root.toString(), input(), Context(limits), "output.bin", true))
+            assertEquals(expected, files.outputLimit)
+            result(files.close())
+            assertTrue(box.fs.list(box.root).isEmpty())
+        }
+    }
+    @Test fun cancellationAndZeroOutputBudgetAllocateNothing() = sandbox { box ->
+        failure(FileFfmpegWorkspace.open(box.root.toString(), input(),
+            testContext.copy(cancellation = Cancellation { true }), "output.bin", true), "CANCELLED")
+        failure(FileFfmpegWorkspace.open(box.root.toString(), input(), Context(Limits(10uL, 0uL)), "output.bin", true), "RESOURCE_LIMIT_EXCEEDED")
+        failure(FileFfmpegWorkspace.open(box.root.toString(), input(), Context(Limits(2uL, 0uL)), "output.bin", false), "RESOURCE_LIMIT_EXCEEDED")
+        assertTrue(box.fs.list(box.root).isEmpty())
+    }
+    @Test fun zeroOrExcessiveCopyProgressCannotLeakOwnedFiles() = sandbox { box ->
+        for (invalid in listOf(byteArrayOf(), byteArrayOf(1, 2, 3, 4))) {
+            val original = input()
+            val source = object : BinarySource by original {
+                override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> = CoreResult.Success(Bytes(invalid))
+            }
+            failure(FileFfmpegWorkspace.open(box.root.toString(), source, testContext, "output.bin", true), "SOURCE_CHANGED")
+            assertTrue(box.fs.list(box.root).isEmpty())
+            assertEquals(3uL, result(original.size()))
+        }
+    }
+    @Test fun cancellationAndIdentityChangesDuringCopyStillCleanUp() = sandbox { box ->
+        for (cancel in listOf(false, true)) {
+            val original = input(ByteArray(70_001) { 1 })
+            var changed = false
+            val source = object : BinarySource by original {
+                override suspend fun identity(): CoreResult<SourceIdentity> = CoreResult.Success(result(original.identity()).let {
+                    if (changed) it.copy(generation = GenerationToken("changed")) else it
+                })
+                override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> {
+                    changed = true
+                    return original.readAt(offset, length)
+                }
+            }
+            val context = testContext.copy(cancellation = Cancellation { cancel && changed })
+            failure(FileFfmpegWorkspace.open(box.root.toString(), source, context, "output.bin", true), if (cancel) "CANCELLED" else "SOURCE_CHANGED")
+            assertTrue(box.fs.list(box.root).isEmpty())
+            assertEquals(70_001uL, result(original.size()))
+        }
+    }
 }

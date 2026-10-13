@@ -31,6 +31,21 @@ class NativeFfmpegTest {
             assertTrue(box.fs.list(box.root).isEmpty())
         } finally { box.close() }
     }
+    @Test fun missingExecutableFailsAndOwnedWorkspaceCanStillBeReleased(): Unit = runBlocking<Unit> {
+        val box = Sandbox()
+        try {
+            val source = livephoto.core.memory.MemoryBinarySource(Bytes(byteArrayOf(1, 2, 3)), SourceId("missing-executable"))
+            val runtime = NativeFfmpeg({ box.root.toString() })
+            val files = result(runtime.openFiles(source, context, "frame.jpg", true))
+            try {
+                val process = runtime.execute(listOf((box.root / "definitely-missing-ffmpeg").toString()), 1000, context)
+                assertNotEquals(0, process.code)
+                failure(files.outputSize(), "FFMPEG_OUTPUT_MISSING")
+            } finally { result(files.close()) }
+            assertTrue(box.fs.list(box.root).isEmpty())
+            assertEquals(3uL, result(source.size()))
+        } finally { box.close() }
+    }
     @Test fun nativeVideoProbeFrameRemuxAndExplicitTranscodeUseActualFfmpeg(): Unit = runBlocking<Unit> {
         val box = Sandbox()
         val session = FileInputSession((box.root / "snapshots").toString(), context)

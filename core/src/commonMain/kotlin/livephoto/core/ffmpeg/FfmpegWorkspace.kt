@@ -28,7 +28,8 @@ internal class FfmpegWorkspace private constructor(
         when (val result = files.outputSize()) {
             is CoreResult.Success -> result.value
             is CoreResult.Failure -> if (result.error.code.value == "FFMPEG_OUTPUT_MISSING")
-                fail(errorCode, "$label produced no file", outputStage) else result.orThrow()
+                fail(errorCode, "$label produced no file", outputStage)
+            else throw CoreFault(result.error.copy(stage = outputStage))
         }
     suspend fun openOutput(): BinarySource = files.openOutput().orThrow()
     suspend fun patchOutput(patches: List<FfmpegPatch>) { files.patchOutput(patches).orThrow() }

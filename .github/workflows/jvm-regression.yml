@@ -1,0 +1,215 @@
+name: JVM Regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jvm-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Portable (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2025
+            architecture: x64
+            runner-architecture: X64
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            architecture: x64
+            runner-architecture: X64
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: aarch64
+            runner-architecture: ARM64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate environment
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -ne '${{ matrix.runner-architecture }}') {
+            throw 'Unexpected runner architecture.'
+          }
+
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
+            throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
+          }
+
+      - name: Setup JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          architecture: ${{ matrix.architecture }}
+          cache-jdk: true
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      - name: Require real FFmpeg on macOS and Linux
+        if: matrix.platform != 'windows-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          # Use the maintained stable formula on both hosts, not Ubuntu's older
+          # FFmpeg 6 build (which cannot decode the controlled HEIF fixtures).
+          brew update
+          if brew list --versions ffmpeg >/dev/null 2>&1; then
+            brew upgrade ffmpeg
+          else
+            brew install ffmpeg
+          fi
+          ffmpeg_path="$(brew --prefix ffmpeg)/bin/ffmpeg"
+          mkdir -p ci-output
+          "$ffmpeg_path" -version > ci-output/ffmpeg-version.txt
+          "$ffmpeg_path" -hide_banner -encoders > ci-output/ffmpeg-encoders.txt 2>&1
+          grep -q 'libx264' ci-output/ffmpeg-encoders.txt
+          grep -q ' aac ' ci-output/ffmpeg-encoders.txt
+          echo "LIVEPHOTO_FFMPEG=$ffmpeg_path" >> "$GITHUB_ENV"
+          echo "$(dirname "$ffmpeg_path")" >> "$GITHUB_PATH"
+
+      - name: Prepare real filesystem fixtures
+        shell: pwsh
+        run: |
+          ./scripts/prepare-file-io-fixtures.ps1
+          ./scripts/prepare-file-io-fixtures.ps1
+
+      - name: Build and test
+        shell: pwsh
+        env:
+          LIVEPHOTO_REQUIRE_REFERENCE: 'true'
+          LIVEPHOTO_REQUIRE_FFMPEG: ${{ matrix.platform != 'windows-x64' && 'true' || 'false' }}
+        run: |
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+
+          $gradleArgs = @(
+            'build'
+            ':core:jvmTest'
+            '--rerun'
+            ':cli-shared:jvmTest'
+            '--rerun'
+            ':cli:test'
+            '--rerun'
+            ':file-io:jvmTest'
+            '--rerun'
+            ':cli-native:jvmTest'
+            '--rerun'
+            ':cli:installDist'
+            '--console=plain'
+            '--warning-mode=all'
+            '--stacktrace'
+          )
+
+          if ($IsWindows) {
+            & .\gradlew.bat @gradleArgs 2>&1 |
+              Tee-Object -FilePath ci-output/gradle.log
+          } else {
+            & ./gradlew @gradleArgs 2>&1 |
+              Tee-Object -FilePath ci-output/gradle.log
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Gradle build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Package and smoke test
+        shell: pwsh
+        env:
+          LIVEPHOTO_LOG_LEVEL: trace
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Exercise packaging under a strict caller: its negative tests check exact exit codes locally.
+          $PSNativeCommandUseErrorActionPreference = $true
+          # Packaging changes the runspace's location while Tee-Object consumes output.
+          $logPath = Join-Path $env:GITHUB_WORKSPACE 'ci-output/portable.log'
+
+          try {
+            & ./scripts/package-portable.ps1 `
+              -Platform '${{ matrix.platform }}' *>&1 |
+              Tee-Object -FilePath $logPath
+
+            if (-not $?) {
+              throw 'Portable packaging failed.'
+            }
+            if (-not $PSNativeCommandUseErrorActionPreference) {
+              throw 'Packaging changed the caller native-error policy.'
+            }
+            if (-not (Select-String -LiteralPath $logPath `
+                -Pattern '^PORTABLE_SUCCESS=${{ matrix.platform }} ' -Quiet)) {
+              throw 'Portable packaging completion marker is missing.'
+            }
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $logPath
+            throw
+          }
+
+      - name: Verify real FFmpeg test and portable evidence
+        if: matrix.platform != 'windows-x64'
+        shell: pwsh
+        run: ./scripts/verify-ffmpeg-evidence.ps1 -Platform '${{ matrix.platform }}'
+
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhoto-jvm-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/portable/LivePhoto-*.zip
+            ci-output/portable/LivePhoto-*.tar.gz
+            ci-output/portable/LivePhoto-*.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload build outputs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-outputs-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            **/build/libs/
+            **/build/distributions/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload test reports and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-reports-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            core/build/portable-heic-fixtures/
+            core/build/portable-windows-fixtures/
+            core/build/portable-apple-heif-fixtures/
+            core/build/portable-apple-ordinary-exif-fixtures/
+            core/src/jvmTest/resources/protocol-compatibility/
+            ci-output/gradle.log
+            ci-output/portable.log
+            ci-output/ffmpeg-*.txt
+            ci-output/ffmpeg-evidence.json
+          if-no-files-found: warn
+          retention-days: 14

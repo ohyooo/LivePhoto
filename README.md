@@ -24,31 +24,49 @@
 
 进入 [GitHub Actions / Build](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)，选择成功的运行，在 **Artifacts** 下载对应平台的 `LivePhoto-<平台>-<run_id>-<attempt>`。
 
-Actions 的 artifact 是外层下载包；解压后再展开里面的 `.zip` / `.tar.gz`，得到完整应用目录。保留同包的 `.sha256` 以校验**内层应用归档**，不是校验外层 artifact。
+Actions 的 artifact 是外层下载包；解压后再展开里面的 `.zip` / `.tar.gz`，得到单文件程序。保留同包的 `native-cli-evidence.json`，其中 `archiveSha256` 校验**内层应用归档**，不是校验外层 artifact；程序本身也有独立哈希。
 
 | 平台 | 应用归档 | 解压后的入口 | 当前交付状态 |
 | --- | --- | --- | --- |
-| Windows x64 | `LivePhoto-windows-x64.zip` | `LivePhoto/LivePhoto.exe` | 已构建与便携验收 |
-| Linux x64 | `LivePhoto-linux-x64.tar.gz` | `LivePhoto/bin/LivePhoto` | 已通过 CI 构建与便携验收 |
-| macOS ARM64 | `LivePhoto-macos-arm64.tar.gz` | `LivePhoto.app/Contents/MacOS/LivePhoto` | 已通过 CI 构建、打包与本机成品验收 |
+| Windows x64 | `LivePhoto-windows-x64.zip` | `LivePhoto.exe` | Kotlin/Native 原生程序 |
+| Linux x64 | `LivePhoto-linux-x64.tar.gz` | `LivePhoto.kexe` | Kotlin/Native 原生程序 |
+| macOS ARM64 | `LivePhoto-macos-arm64.tar.gz` | `LivePhoto.kexe` | Kotlin/Native 原生程序 |
 
-不提供 Intel macOS、Windows ARM 或 Linux ARM 包。当前是便携应用目录，**不是单个独立 EXE，也不是 Kotlin/Native 二进制**：通过 `jpackage app-image` 携带精简 Java 运行时，无需在使用机器上另外安装 Java。不要只复制 EXE、删除 `runtime/`、应用 JAR 或 Windows 媒体 helper。暂不提供 MSI/DMG 安装器。
+不提供 Intel macOS、Windows ARM 或 Linux ARM 包。默认下载为 **Kotlin/Native 单文件程序，不携带 JVM/JRE，运行不需要 Java**。外部 FFmpeg 不在应用包内。暂不提供 MSI/DMG 安装器。历史 JVM 便携包移到 [JVM Regression](https://github.com/ohyooo/LivePhoto/actions/workflows/jvm-regression.yml)，以 `LivePhoto-jvm-...` 区分，仅供迁移期回归和对照；其内层仍为完整 jpackage 应用目录，不能只复制启动器。
 
 Windows PowerShell，在解压位置运行：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe --version
-.\LivePhoto\LivePhoto.exe --help
+.\LivePhoto.exe --version
+.\LivePhoto.exe --help
 ```
 
 Linux，在解压位置运行：
 
 ```sh
-./LivePhoto/bin/LivePhoto --version
-./LivePhoto/bin/LivePhoto --help
+./LivePhoto.kexe --version
+./LivePhoto.kexe --help
 ```
 
 ## 前提与推荐
+
+Native 对文件操作要求一个已存在的私有工作目录，用于冻结输入和释放临时副本。设置一次后再执行下面的示例；目录不能是公用临时目录，容量应覆盖 `--max-bytes` 预算。程序不会自动创建这个父目录。
+
+Windows PowerShell，在当前用户有独占访问权限的位置新建目录：
+
+```powershell
+New-Item -ItemType Directory '.\livephoto-workspace'
+$env:LIVEPHOTO_WORKSPACE = (Resolve-Path '.\livephoto-workspace').Path
+```
+
+Linux/macOS，Bash/Zsh：
+
+```sh
+mkdir -m 700 './livephoto-workspace'
+export LIVEPHOTO_WORKSPACE="$PWD/livephoto-workspace"
+```
+
+`--version` / `--help` 不需要工作目录。Unix 示例同样适用于 macOS ARM64。
 
 实现职责明确分为三部分：图片＋视频的 Live Photo 协议封装由 Core 代码完成；桌面裁剪、抽帧、重封装和转码直接调用 FFmpeg；未来移动端使用系统服务/API。Core 保留请求策略、协议解析、边界与实际输出验证，不自行替代 FFmpeg 编写桌面媒体剪切器或编码器。
 
@@ -66,15 +84,15 @@ Linux，在解压位置运行：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe media-capabilities --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
-.\LivePhoto\LivePhoto.exe probe --input '.\video.mp4' --decode-check --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
+.\LivePhoto.exe media-capabilities --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
+.\LivePhoto.exe probe --input '.\video.mp4' --decode-check --ffmpeg 'C:\Program Files\FFmpeg\bin\ffmpeg.exe'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto media-capabilities --ffmpeg '/usr/bin/ffmpeg'
-./LivePhoto/bin/LivePhoto probe --input './video.mp4' --decode-check --ffmpeg '/usr/bin/ffmpeg'
+./LivePhoto.kexe media-capabilities --ffmpeg '/usr/bin/ffmpeg'
+./LivePhoto.kexe probe --input './video.mp4' --decode-check --ffmpeg '/usr/bin/ffmpeg'
 ```
 
 ## 快速开始
@@ -86,21 +104,21 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe detect --input '.\reference\livephoto.jpg'
-.\LivePhoto\LivePhoto.exe inspect --input '.\reference\livephoto.jpg'
-.\LivePhoto\LivePhoto.exe analyze --input '.\reference\livephoto.jpg'
-.\LivePhoto\LivePhoto.exe validate --input '.\reference\livephoto.jpg' --layers Structure,Protocol
-.\LivePhoto\LivePhoto.exe get-key --input '.\reference\livephoto.jpg'
+.\LivePhoto.exe detect --input '.\reference\livephoto.jpg'
+.\LivePhoto.exe inspect --input '.\reference\livephoto.jpg'
+.\LivePhoto.exe analyze --input '.\reference\livephoto.jpg'
+.\LivePhoto.exe validate --input '.\reference\livephoto.jpg' --layers Structure,Protocol
+.\LivePhoto.exe get-key --input '.\reference\livephoto.jpg'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto detect --input './reference/livephoto.jpg'
-./LivePhoto/bin/LivePhoto inspect --input './reference/livephoto.jpg'
-./LivePhoto/bin/LivePhoto analyze --input './reference/livephoto.jpg'
-./LivePhoto/bin/LivePhoto validate --input './reference/livephoto.jpg' --layers Structure,Protocol
-./LivePhoto/bin/LivePhoto get-key --input './reference/livephoto.jpg'
+./LivePhoto.kexe detect --input './reference/livephoto.jpg'
+./LivePhoto.kexe inspect --input './reference/livephoto.jpg'
+./LivePhoto.kexe analyze --input './reference/livephoto.jpg'
+./LivePhoto.kexe validate --input './reference/livephoto.jpg' --layers Structure,Protocol
+./LivePhoto.kexe get-key --input './reference/livephoto.jpg'
 ```
 
 `detect` 按内容判断，可返回多个协议匹配；`inspect` 展示结构和 metadata，不等同于有效性结论。`validate` 默认检查 `Structure,Protocol,Media`，注意 `coverage`、各层 checks 以及 `NotRun` / `Partial`；退出码为 0 也不等于完整媒体或设备认证。
@@ -112,15 +130,15 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe capabilities --target google.motionphoto.v2 --profile jpeg
-.\LivePhoto\LivePhoto.exe create --image '.\reference\video.jpg' --video '.\reference\video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir '.\out-create'
+.\LivePhoto.exe capabilities --target google.motionphoto.v2 --profile jpeg
+.\LivePhoto.exe create --image '.\reference\video.jpg' --video '.\reference\video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir '.\out-create'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto capabilities --target google.motionphoto.v2 --profile jpeg
-./LivePhoto/bin/LivePhoto create --image './reference/video.jpg' --video './reference/video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir './out-create'
+./LivePhoto.kexe capabilities --target google.motionphoto.v2 --profile jpeg
+./LivePhoto.kexe create --image './reference/video.jpg' --video './reference/video.mp4' --target google.motionphoto.v2 --profile jpeg --output-dir './out-create'
 ```
 
 输入必须符合有限的 JPEG / 视频 profile；默认不转码。输出发布在 `out-create/assets/`，JSON 的 `result.output.assets[].path` 给出真实文件位置；**不要假设输出总叫 `livephoto.jpg`**。后续示例里的 `motion.jpg` 指你按 JSON 路径选取的结果或自己的输入文件。
@@ -130,17 +148,17 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe extract --input '.\motion.jpg' --output-dir '.\out-extract'
-.\LivePhoto\LivePhoto.exe split --input '.\motion.jpg' --output-dir '.\out-split'
-.\LivePhoto\LivePhoto.exe convert --input '.\motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir '.\out-convert'
+.\LivePhoto.exe extract --input '.\motion.jpg' --output-dir '.\out-extract'
+.\LivePhoto.exe split --input '.\motion.jpg' --output-dir '.\out-split'
+.\LivePhoto.exe convert --input '.\motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir '.\out-convert'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto extract --input './motion.jpg' --output-dir './out-extract'
-./LivePhoto/bin/LivePhoto split --input './motion.jpg' --output-dir './out-split'
-./LivePhoto/bin/LivePhoto convert --input './motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir './out-convert'
+./LivePhoto.kexe extract --input './motion.jpg' --output-dir './out-extract'
+./LivePhoto.kexe split --input './motion.jpg' --output-dir './out-split'
+./LivePhoto.kexe convert --input './motion.jpg' --target google.microvideo.v1 --profile jpeg --output-dir './out-convert'
 ```
 
 `extract` 原样提取已确认资源，默认资源选择由 Core 决定；`split` 输出普通媒体并清除已确认的动态照片专属 metadata。两者不是同一个操作，也不一定产出相同图片字节。
@@ -150,17 +168,17 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe inspect --input '.\IMG.jpg' --pair-video '.\IMG.mov'
-.\LivePhoto\LivePhoto.exe extract --input '.\IMG.jpg' --pair-video '.\IMG.mov' --output-dir '.\out-apple-raw'
-.\LivePhoto\LivePhoto.exe set-key --input '.\IMG.jpg' --pair-video '.\IMG.mov' --frame-index 1 --output-dir '.\out-apple-key'
+.\LivePhoto.exe inspect --input '.\IMG.jpg' --pair-video '.\IMG.mov'
+.\LivePhoto.exe extract --input '.\IMG.jpg' --pair-video '.\IMG.mov' --output-dir '.\out-apple-raw'
+.\LivePhoto.exe set-key --input '.\IMG.jpg' --pair-video '.\IMG.mov' --frame-index 1 --output-dir '.\out-apple-key'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto inspect --input './IMG.jpg' --pair-video './IMG.mov'
-./LivePhoto/bin/LivePhoto extract --input './IMG.jpg' --pair-video './IMG.mov' --output-dir './out-apple-raw'
-./LivePhoto/bin/LivePhoto set-key --input './IMG.jpg' --pair-video './IMG.mov' --frame-index 1 --output-dir './out-apple-key'
+./LivePhoto.kexe inspect --input './IMG.jpg' --pair-video './IMG.mov'
+./LivePhoto.kexe extract --input './IMG.jpg' --pair-video './IMG.mov' --output-dir './out-apple-raw'
+./LivePhoto.kexe set-key --input './IMG.jpg' --pair-video './IMG.mov' --frame-index 1 --output-dir './out-apple-key'
 ```
 
 `set-key` 修改协议意义的 key/presentation 位置，**不会重新生成封面图**。Apple 修改入口只接受已确认的有限结构，不能将任意相机原片视为可写。
@@ -170,13 +188,13 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe create --image '.\plain.jpg' --video '.\plain.mov' --target apple.livephoto --output-dir '.\out-apple-create'
+.\LivePhoto.exe create --image '.\plain.jpg' --video '.\plain.mov' --target apple.livephoto --output-dir '.\out-apple-create'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto create --image './plain.jpg' --video './plain.mov' --target apple.livephoto --output-dir './out-apple-create'
+./LivePhoto.kexe create --image './plain.jpg' --video './plain.mov' --target apple.livephoto --output-dir './out-apple-create'
 ```
 
 可显式指定 `--profile jpeg-mov`，效果相同。不需要媒体后端，也不会隐式把 MP4 改成 MOV；MP4 输入必须显式使用 `--profile jpeg-mp4`。默认 Create 为 `Experimental`，不代表任意相机 JPEG/MakerNote 的 Generic Create 已完成；默认 ConvertTo 仍为 `Planned`，转换须指定已实现的 profile，HEIC Create/ConvertTo 也未实现。
@@ -200,13 +218,13 @@ vivo 最小版本一 JPEG 的标准 EXIF 支持有限 `jpeg-mp4` 转换：要求
 Windows：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe convert --input '.\google-motion.jpg' --target apple.livephoto --profile jpeg-mp4 --output-dir '.\out-apple-convert'
+.\LivePhoto.exe convert --input '.\google-motion.jpg' --target apple.livephoto --profile jpeg-mp4 --output-dir '.\out-apple-convert'
 ```
 
 Linux：
 
 ```sh
-./LivePhoto/bin/LivePhoto convert --input './google-motion.jpg' --target apple.livephoto --profile jpeg-mp4 --output-dir './out-apple-convert'
+./LivePhoto.kexe convert --input './google-motion.jpg' --target apple.livephoto --profile jpeg-mp4 --output-dir './out-apple-convert'
 ```
 
 ### 修复：先预览，再明确写入
@@ -214,15 +232,15 @@ Linux：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe repair --input '.\damaged-motion.jpg'
-.\LivePhoto\LivePhoto.exe repair --input '.\damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir '.\out-repair'
+.\LivePhoto.exe repair --input '.\damaged-motion.jpg'
+.\LivePhoto.exe repair --input '.\damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir '.\out-repair'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto repair --input './damaged-motion.jpg'
-./LivePhoto/bin/LivePhoto repair --input './damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir './out-repair'
+./LivePhoto.kexe repair --input './damaged-motion.jpg'
+./LivePhoto.kexe repair --input './damaged-motion.jpg' --issues MOTION_VIDEO_LENGTH_MISMATCH --apply --output-dir './out-repair'
 ```
 
 当前仅修复能够唯一证明的有限问题，不猜协议、视频边界、ID 或单位。默认模式为 `SafeMetadataOnly`；预览不写入，不能传 `--output-dir`。
@@ -232,15 +250,15 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe repair --input '.\samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER
-.\LivePhoto\LivePhoto.exe repair --input '.\samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER --apply --strict --output-dir '.\out-remux-repair'
+.\LivePhoto.exe repair --input '.\samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER
+.\LivePhoto.exe repair --input '.\samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER --apply --strict --output-dir '.\out-remux-repair'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto repair --input './samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER
-./LivePhoto/bin/LivePhoto repair --input './samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER --apply --strict --output-dir './out-remux-repair'
+./LivePhoto.kexe repair --input './samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER
+./LivePhoto.kexe repair --input './samsung-motion.jpg' --mode ExplicitRemux --issues UNSUPPORTED_CONTAINER --apply --strict --output-dir './out-remux-repair'
 ```
 
 vivo 使用相同命令，换成自己的 vivo 输入路径即可。预览不执行媒体处理、不创建输出；CLI 的工具可用性探测可能运行只读版本检查。已是该有限 MP4 profile 时再次执行没有改动，也不需要媒体后端。Google 兼容基础层对 Samsung 整 SEF 后缀/纯视频长度，以及 vivo Motion `Padding=0` 的已有诊断仍保留；目标厂商方言与严格 Google 验证分开报告，不能据此宣称所有 profile 或设备通过。
@@ -252,17 +270,17 @@ Apple 有限 `ExplicitRePair` 支持明确选定的 JPEG/HEIC＋MOV/MP4：先单
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe inspect --input '.\primary.heic'
-.\LivePhoto\LivePhoto.exe repair --input '.\primary.heic' --pair-video '.\motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID'
-.\LivePhoto\LivePhoto.exe repair --input '.\primary.heic' --pair-video '.\motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID' --apply --output-dir '.\out-pair'
+.\LivePhoto.exe inspect --input '.\primary.heic'
+.\LivePhoto.exe repair --input '.\primary.heic' --pair-video '.\motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID'
+.\LivePhoto.exe repair --input '.\primary.heic' --pair-video '.\motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID' --apply --output-dir '.\out-pair'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto inspect --input './primary.heic'
-./LivePhoto/bin/LivePhoto repair --input './primary.heic' --pair-video './motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID'
-./LivePhoto/bin/LivePhoto repair --input './primary.heic' --pair-video './motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID' --apply --output-dir './out-pair'
+./LivePhoto.kexe inspect --input './primary.heic'
+./LivePhoto.kexe repair --input './primary.heic' --pair-video './motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID'
+./LivePhoto.kexe repair --input './primary.heic' --pair-video './motion.mov' --mode ExplicitRePair --authority 'EVIDENCE_ID' --apply --output-dir './out-pair'
 ```
 
 此功能为 Experimental：只接受已确认 ownership 的 CID-only MakerNote 和专用 movie metadata，改写一侧固定宽度 CID，整对共同发布。普通 MakerNote、混合私有 metadata 等未覆盖结构会拒绝；无法证明未知 ID 关联，因此保留报告明确 `MetadataPreserving=Unknown`，`--strict` 不可用于发生 CID 改写的请求。匹配成功不证明原始同次拍摄，也不证明相册兼容；默认不转码。
@@ -272,19 +290,19 @@ Linux（Bash/Zsh）：
 Windows（PowerShell）：
 
 ```powershell
-.\LivePhoto\LivePhoto.exe extract-frame --input '.\video.mp4' --frame-index 0 --format Jpeg --output-dir '.\out-frame'
-.\LivePhoto\LivePhoto.exe trim --input '.\video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir '.\out-trim'
-.\LivePhoto\LivePhoto.exe remux --input '.\video.mp4' --container Mov --output-dir '.\out-remux'
-.\LivePhoto\LivePhoto.exe transcode --input '.\video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir '.\out-transcode'
+.\LivePhoto.exe extract-frame --input '.\video.mp4' --frame-index 0 --format Jpeg --output-dir '.\out-frame'
+.\LivePhoto.exe trim --input '.\video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir '.\out-trim'
+.\LivePhoto.exe remux --input '.\video.mp4' --container Mov --output-dir '.\out-remux'
+.\LivePhoto.exe transcode --input '.\video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir '.\out-transcode'
 ```
 
 Linux（Bash/Zsh）：
 
 ```sh
-./LivePhoto/bin/LivePhoto extract-frame --input './video.mp4' --frame-index 0 --format Jpeg --output-dir './out-frame'
-./LivePhoto/bin/LivePhoto trim --input './video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir './out-trim'
-./LivePhoto/bin/LivePhoto remux --input './video.mp4' --container Mov --output-dir './out-remux'
-./LivePhoto/bin/LivePhoto transcode --input './video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir './out-transcode'
+./LivePhoto.kexe extract-frame --input './video.mp4' --frame-index 0 --format Jpeg --output-dir './out-frame'
+./LivePhoto.kexe trim --input './video.mp4' --start-us 0 --end-us 1000000 --mode LosslessPreferred --output-dir './out-trim'
+./LivePhoto.kexe remux --input './video.mp4' --container Mov --output-dir './out-remux'
+./LivePhoto.kexe transcode --input './video.mp4' --container Mp4 --codec Avc --allow-transcode --output-dir './out-transcode'
 ```
 
 这些示例假设可用 FFmpeg 在 PATH 中，也可追加 `--ffmpeg '完整路径'`。`LosslessPreferred` 是默认裁剪模式，应读取结果中请求与实际边界；`Exact` 必要时转码仍需 `--allow-transcode`。`--frame-index` 是 **zero-based presentation order**，不是 decode order。时间参数单位为微秒。
@@ -480,7 +498,7 @@ Linux x64 / macOS ARM64 分别使用同一脚本的 `-Platform linux-x64` / `-Pl
 
 构建仍使用现有 JDK 25 和项目 Wrapper；显式 Native 构建会由 Kotlin 插件准备编译器及平台依赖，但库产物不包含 JVM/JRE。普通 JVM 构建不启用这些 targets，也不因此下载 Native 工具链。保留 Gradle 9.8.1，三平台已实测；KGP 的内部 Gradle 10 deprecation 警告仍保留，不通过隐藏警告宣称未来兼容。
 
-编译后的未打包主库位于 `core/build/classes/kotlin/<target>/main/`。[Native Core CI](https://github.com/ohyooo/LivePhoto/actions/workflows/native-core.yml) 将已核对 `NATIVE` 平台标识的主库打包为 `core.klib`，上传 `LivePhoto-native-core-<平台>-<run_id>-<attempt>`，另附编译器版本、目标、库 SHA-256 和新执行测试数；报告 artifact 为 `native-core-reports-<平台>-<run_id>-<attempt>`。
+编译后的未打包主库位于 `core/build/classes/kotlin/<target>/main/`。[Native Core CI](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 将已核对 `NATIVE` 平台标识的主库打包为 `core.klib`，上传 `LivePhoto-native-core-<平台>-<run_id>-<attempt>`，另附编译器版本、目标、库 SHA-256 和新执行测试数；报告 artifact 为 `native-core-reports-<平台>-<run_id>-<attempt>`。
 
 Native 库可使用 `MemoryBinarySource` / `MemoryOutputTransaction`、下述文件适配库或调用方注入的 IO/事务。原生 CLI 另见下节；可选 FFmpeg 适配通过注入的文件/进程接口接入，协议解析不依赖 FFmpeg 或平台路径。下载 KLIB 不会使现有 JVM 便携包变成单文件原生程序。
 
@@ -490,7 +508,7 @@ Native 库可使用 `MemoryBinarySource` / `MemoryOutputTransaction`、下述文
 
 生产 JSON 已移除 Java 反射，显式映射结果 DTO，保留原命令、退出码、64 位十进制字符串及句柄/token 脱敏规则。三平台各实际执行 **34 项共享 CLI 测试，零失败、零跳过**，包括现有命令转发、嵌套结果图、日志隔离和失败后的资源清理；这些测试使用内存 IO，不是原生文件/FFmpeg 或完整原生程序的验收。
 
-CLI 输入适配现接收本次操作的 `Context`，使所有输入共享 `--max-bytes` 预算；命令结束先关闭借用来源、处理待提交事务，再调用平台会话清理。任一关闭失败仍继续清理其它资源；清理失败返回错误和退出码 3，不输出成功结果。Native FFmpeg 的输入副本与临时输出也扣除尚未释放的输入快照占用，不能另取一份完整预算。最新执行结果见 [Native CI](https://github.com/ohyooo/LivePhoto/actions/workflows/native-core.yml)。
+CLI 输入适配现接收本次操作的 `Context`，使所有输入共享 `--max-bytes` 预算；命令结束先关闭借用来源、处理待提交事务，再调用平台会话清理。任一关闭失败仍继续清理其它资源；清理失败返回错误和退出码 3，不输出成功结果。Native FFmpeg 的输入副本与临时输出也扣除尚未释放的输入快照占用，不能另取一份完整预算。最新执行结果见 [Native CI](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)。
 
 ```sh
 ./gradlew -Plivephoto.nativeTarget=linux-x64 :cli-shared:linuxX64Test --rerun
@@ -534,7 +552,7 @@ Native 与 JVM 共用同一套 FFmpeg 参数、媒体策略和结果验证，不
 
 本批 Native 检查点：各平台 840 项测试（Core 732、共享 CLI 38、文件/FFmpeg 49、原生入口 5、进程 16），零失败、零跳过；解压后的程序另有 20 项 CLI 检查，含 9 项真实媒体检查。没有把历史 JVM 测试或纯协议检查当作 Native FFmpeg 验证。源码 `aca363c` 的 [Native 验收](https://github.com/ohyooo/LivePhoto/actions/runs/38345371733) 与 [JVM 回归](https://github.com/ohyooo/LivePhoto/actions/runs/38345371709) 均成功；最新提交结果见 Actions。
 
-[Native workflow](.github/workflows/native-core.yml) 按宿主构建 release executable，上传 `LivePhoto-native-<平台>-<run_id>-<attempt>`，包含单文件归档和 `native-cli-evidence.json`；Windows x64 为 `LivePhoto.exe`，Linux x64 / macOS ARM64 为 `LivePhoto.kexe`，Unix tar 归档保留可执行权限。不要将 Native KLIB artifact 当作这个程序。
+[Build workflow](.github/workflows/build.yml) 现在默认按宿主构建 Native release executable，上传 `LivePhoto-<平台>-<run_id>-<attempt>`，包含单文件归档和 `native-cli-evidence.json`；Windows x64 为 `LivePhoto.exe`，Linux x64 / macOS ARM64 为 `LivePhoto.kexe`，Unix tar 归档保留可执行权限。证据 JSON 给出内层归档和原生程序的 SHA-256；不要将 Native KLIB artifact 当作程序。
 
 编译仍需现有 JDK 25 和 Wrapper；**运行原生程序不需要 Java**。入口、原生进程及 FFmpeg 适配使用 [kotlinx.coroutines 1.11.0](https://github.com/Kotlin/kotlinx.coroutines/releases/tag/1.11.0) 的正式协程等待挂起操作；该依赖不进入协议 Core。
 
@@ -572,15 +590,17 @@ Native 迁移新增独立 `process` 适配模块：协程等待、非阻塞管�
 
 ## CI 与产物
 
-[Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 / macOS ARM64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux/macOS 直接执行仓库中带可执行位的 `gradlew`。便携 smoke 启用 trace，日志随报告上传。
+[Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 / macOS ARM64 的 **Native-only** 构建、共用与原生测试、单文件打包及成品 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25，仅供 Gradle 构建工具；发行应用不携带 Java。Linux/macOS 直接执行仓库的 `gradlew`。smoke 启用 trace，日志随报告上传。
 
 每个平台上传三类 artifacts，默认保留 **14 天**：
 
-- `LivePhoto-...`：应用归档与 SHA-256；打包成功后上传，下载运行选这个。
-- `build-outputs-...`：JAR 与 JVM 分发包。
-- `build-reports-...`：测试报告、XML、合成 fixture、兼容回归素材包及哈希清单、Gradle 和便携日志；构建失败时也尝试上传已有报告。
+- `LivePhoto-<平台>-...`：原生程序归档及哈希证据；打包成功后上传，下载运行选这个。
+- `LivePhoto-native-core-...`：Core / 文件 / 进程 KLIB、系统 SDK 绑定与库证据；供库开发使用，不是可执行程序。
+- `native-core-reports-...`：五个模块的测试报告、XML、Gradle 与成品日志及证据；失败时也尝试上传已有报告。
 
-Build workflow 三平台成功通常共 9 个 artifacts。macOS/Linux 已要求维护中的稳定 FFmpeg，20 项媒体集成测试必须零跳过，打包后 CLI 媒体成功标记必须完整；最近验收使用 FFmpeg 9.0.2。Windows JVM CI 仍不要求 FFmpeg，不能用它的跳过项代替媒体验证。Native Core workflow 另有 9 个 artifacts：每个平台各一份 Core/适配库 KLIB、一份原生程序、一份测试报告；三平台均要求真实 FFmpeg 和归档程序媒体检查，不混同于 JVM 便携应用。CI 安装 FFmpeg 仅用于验证，不会打入应用或由应用自动安装。
+Build 三平台成功通常共 9 个 artifacts，全部要求真实 FFmpeg 和解压后程序的 20 项 CLI 检查，其中 9 项为真实媒体检查，不能因没有工具而跳过。CI 安装 FFmpeg 仅用于验证，不会打入应用或由应用自动安装。
+
+[JVM Regression](.github/workflows/jvm-regression.yml) 同样在 push / pull request / 手动触发时保留三平台回归，另上传 `LivePhoto-jvm-...`、`build-outputs-...`、`build-reports-...` 共 9 份。JVM 的 macOS/Linux 要求 20 项媒体集成测试零跳过；Windows JVM 仍不强制 FFmpeg，其历史跳过项不能代替 Native 媒体验证。保留这条回归流水线是为了逐项迁移剩余专项测试，不代表默认发行程序还依赖 JVM。
 
 所有 Action 引用均使用最新稳定主版本 `@vN`。CI 复用 JDK 缓存与 Gradle 开源 basic 缓存；Native 另按 OS/架构/工具链缓存编译器依赖。编译任务允许缓存命中，但验收用 `jvmTest --rerun` 或对应 Native test `--rerun` 重新执行，不把旧报告计为新测试。Native 测试成功后保存工具链缓存，即使后续产物检查失败也不重复下载已验证的工具链。
 
