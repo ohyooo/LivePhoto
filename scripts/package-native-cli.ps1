@@ -159,8 +159,11 @@ $heicValidate = (Invoke-Native @('validate', '--input', $heicPath, '--layers', '
 if ($heicValidate.verdict -eq 'Invalid') { throw 'Native HEIC protocol validation failed.' }
 $heicRaw = (Invoke-Native @('extract', '--input', $heicPath, '--output-dir', (Join-Path $verify 'HEIC raw'))).result
 if ((Get-FileHash $heicRaw.output.assets[0].path).Hash.ToLowerInvariant() -ne $googleHashes['motion.mp4']) { throw 'Native HEIC extraction changed video bytes.' }
-$heicRepair = (Invoke-Native @('repair', '--input', (Join-Path $googleHeic 'damaged.heic'), '--apply', '--output-dir', (Join-Path $verify 'HEIC repaired'))).result
-if ((Get-FileHash $heicRepair.output.assets[0].path).Hash.ToLowerInvariant() -ne $googleHashes['motion.heic']) { throw 'Native HEIC repair differs from verified fixture.' }
+$heicRepair = (Invoke-Native @('repair', '--input', (Join-Path $googleHeic 'damaged.heic'), '--apply', '--strict', '--output-dir', (Join-Path $verify 'HEIC repaired'))).result
+if ((Get-FileHash $heicRepair.operation.output.assets[0].path).Hash.ToLowerInvariant() -ne $googleHashes['motion.heic']) { throw 'Native HEIC repair differs from verified fixture.' }
+foreach ($name in @('primary.heic','motion.mp4','motion.heic','damaged.heic')) {
+    if ((Get-FileHash (Join-Path $googleHeic $name)).Hash.ToLowerInvariant() -ne $googleHashes[$name]) { throw 'Native HEIC command changed a fixture input.' }
+}
 $huaweiHeic = Join-Path $repository 'core/build/reports/huawei-heic-fixtures'
 $huaweiHashes = Read-SyntheticManifest $huaweiHeic @('carrier.heic','movie.mp4')
 $misleading = Join-Path $verify 'Huawei HEIC image.jpg'
