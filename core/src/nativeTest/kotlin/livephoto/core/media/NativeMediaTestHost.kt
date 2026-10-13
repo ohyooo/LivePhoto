@@ -22,10 +22,10 @@ internal actual fun runMediaTest(block: suspend (MediaTestHost) -> Unit): Unit =
     try {
         val runtime = NativeFfmpeg({ root.toString() }, { session.spoolBytes })
         val supplied = assertNotNull(platform.posix.getenv("LIVEPHOTO_FFMPEG")?.toKString(), "Native CI must supply FFmpeg")
-        val executable = fs.canonicalize(supplied.toPath()).toString()
-        val discovery = runtime.discover(executable, "")
+        val chosenExecutable = fs.canonicalize(supplied.toPath()).toString()
+        val discovery = runtime.discover(chosenExecutable, "")
         val host = object : MediaTestHost {
-            override val executable = executable
+            override val executable = chosenExecutable
             override val backend = assertNotNull(discovery.backend, "Required real Native FFmpeg backend missing")
             override fun path(name: String): String {
                 require(name.isNotBlank() && '/' !in name && '\\' !in name && name !in setOf(".", ".."))
