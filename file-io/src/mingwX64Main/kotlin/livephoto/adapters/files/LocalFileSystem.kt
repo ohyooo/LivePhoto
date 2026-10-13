@@ -18,7 +18,7 @@ private fun ioFault(operation: String, write: Boolean): Nothing {
 
 private fun open(path: Path, write: Boolean, mustCreate: Boolean, mustExist: Boolean): FileHandle = memScoped {
     require(!mustCreate || !mustExist)
-    val access = if (write) GENERIC_READ or GENERIC_WRITE else GENERIC_READ
+    val access = GENERIC_READ.toUInt() or (if (write) GENERIC_WRITE.toUInt() else 0u)
     val creation = when { mustCreate -> CREATE_NEW; mustExist -> OPEN_EXISTING; else -> OPEN_ALWAYS }
     val handle = CreateFileW(path.toString().wcstr.ptr, access.toUInt(),
         (FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE).toUInt(), null,
