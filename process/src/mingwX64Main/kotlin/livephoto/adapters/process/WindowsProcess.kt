@@ -20,8 +20,8 @@ internal actual fun startProcess(arguments: List<String>): ChildProcess? = memSc
     }
     val read = alloc<HANDLEVar>().apply { value = null }
     val write = alloc<HANDLEVar>().apply { value = null }
-    var input: HANDLE = null
-    var job: HANDLE = null
+    var input: HANDLE? = null
+    var job: HANDLE? = null
     val process = alloc<PROCESS_INFORMATION>()
     memset(process.ptr, 0, sizeOf<PROCESS_INFORMATION>().convert())
     var spawned = false

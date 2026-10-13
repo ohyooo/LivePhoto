@@ -9,6 +9,7 @@
 #include <fcntl.h>
 static void hold(void) { Sleep(5000); }
 #else
+#include <sys/types.h>
 #include <unistd.h>
 static void hold(void) { sleep(5); }
 #endif

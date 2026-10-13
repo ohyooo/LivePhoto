@@ -12,6 +12,10 @@ kotlin {
     // default hierarchy intact; this is a shared source directory, not a JVM target.
     if (host.name != "mingwX64") {
         sourceSets.getByName("${host.name}Main").kotlin.srcDir("src/posixMain/kotlin")
+        host.compilations.getByName("main").cinterops.create("posix") {
+            definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/posix.def"))
+            includeDirs("src/nativeInterop/cinterop")
+        }
     }
     sourceSets {
         commonMain.dependencies { implementation(libs.kotlinx.coroutines) }

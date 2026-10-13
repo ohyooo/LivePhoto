@@ -1,0 +1,3 @@
+headers = livephoto_posix.h
+headerFilter = livephoto_posix.h
+package = livephoto.adapters.process.posix
