@@ -42,7 +42,7 @@ public object FileFfmpegWorkspace {
                     }
                     if (bytes.size == 0 || bytes.size.toUInt() > requested)
                         reject("SOURCE_CHANGED", "FFmpeg input copy made invalid progress")
-                    handle.write(offset.toLong(), bytes.toByteArray())
+                    handle.write(offset.toLong(), bytes.toByteArray(), 0, bytes.size)
                     offset += bytes.size.toULong()
                 }
                 handle.flush()
@@ -107,7 +107,7 @@ private class LocalFfmpegFiles(private val root: Path, outputName: String,
             end = patch.range.offset + patch.range.length
         }
         fs.openReadWrite(outputPath, mustExist = true).use { handle ->
-            for (patch in patches) { poll(context); handle.write(patch.range.offset.toLong(), patch.bytes.toByteArray()) }
+            for (patch in patches) { poll(context); handle.write(patch.range.offset.toLong(), patch.bytes.toByteArray(), 0, patch.bytes.size) }
             handle.flush()
             if (handle.size().toULong() != size) reject("SOURCE_CHANGED", "AAC hint patch changed output extent")
         }

@@ -34,11 +34,11 @@ class FileFfmpegWorkspaceTest {
     @Test fun frozenOutputDetectsContentChangesAndPatchRequiresClosedReaders() = sandbox { box ->
         val files = result(FileFfmpegWorkspace.open(box.root.toString(), input(), testContext, "output.bin", true))
         val output = files.output.toPath()
-        box.fs.openReadWrite(output, mustCreate = true).use { it.write(0, byteArrayOf(4, 5, 6)) }
+        box.fs.openReadWrite(output, mustCreate = true).use { it.write(0, byteArrayOf(4, 5, 6), 0, 3) }
         val source = result(files.openOutput())
         val patch = FfmpegPatch(ByteRange(1uL, 1uL), Bytes(byteArrayOf(9)))
         failure(files.patchOutput(listOf(patch)), "INVALID_ARGUMENT")
-        box.fs.openReadWrite(output, mustExist = true).use { it.write(1, byteArrayOf(7)) }
+        box.fs.openReadWrite(output, mustExist = true).use { it.write(1, byteArrayOf(7), 0, 1) }
         failure(source.readAt(0uL, 3u), "SOURCE_CHANGED")
         source.close()
         result(files.patchOutput(listOf(patch)))
@@ -49,7 +49,7 @@ class FileFfmpegWorkspaceTest {
     @Test fun invalidAndOverlappingPatchesAreRejectedBeforeWriting() = sandbox { box ->
         val files = result(FileFfmpegWorkspace.open(box.root.toString(), input(), testContext, "output.bin", true))
         val path = files.output.toPath()
-        box.fs.openReadWrite(path, mustCreate = true).use { it.write(0, byteArrayOf(4, 5, 6)) }
+        box.fs.openReadWrite(path, mustCreate = true).use { it.write(0, byteArrayOf(4, 5, 6), 0, 3) }
         val invalid = listOf(
             listOf(FfmpegPatch(ByteRange(ULong.MAX_VALUE - 1uL, 1uL), Bytes(byteArrayOf(9)))),
             listOf(FfmpegPatch(ByteRange(0uL, 2uL), Bytes(byteArrayOf(9)))),
@@ -62,7 +62,7 @@ class FileFfmpegWorkspaceTest {
     }
     @Test fun oversizeOutputIsNotOpenedOrPatched() = sandbox { box ->
         val files = result(FileFfmpegWorkspace.open(box.root.toString(), input(), Context(Limits(4uL, 100uL)), "output.bin", true))
-        box.fs.openReadWrite(files.output.toPath(), mustCreate = true).use { it.write(0, byteArrayOf(4, 5)) }
+        box.fs.openReadWrite(files.output.toPath(), mustCreate = true).use { it.write(0, byteArrayOf(4, 5), 0, 2) }
         failure(files.openOutput(), "RESOURCE_LIMIT_EXCEEDED")
         failure(files.patchOutput(emptyList()), "RESOURCE_LIMIT_EXCEEDED")
         result(files.close())
@@ -79,7 +79,7 @@ class FileFfmpegWorkspaceTest {
     @Test fun cleanupPreservesUnknownFilesAndCanBeRetried() = sandbox { box ->
         val files = result(FileFfmpegWorkspace.open(box.root.toString(), input(), testContext, "output.bin", true))
         val unknown = files.input.toPath().parent!! / "unknown"
-        box.fs.openReadWrite(unknown, mustCreate = true).use { it.write(0, byteArrayOf(8)) }
+        box.fs.openReadWrite(unknown, mustCreate = true).use { it.write(0, byteArrayOf(8), 0, 1) }
         assertIs<CoreResult.Failure>(files.close())
         assertContentEquals(byteArrayOf(8), box.contents(unknown))
         box.fs.delete(unknown)

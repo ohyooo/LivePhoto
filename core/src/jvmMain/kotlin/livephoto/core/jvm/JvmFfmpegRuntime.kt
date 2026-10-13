@@ -25,7 +25,8 @@ internal object JvmFfmpegRuntime : FfmpegRuntime {
         val limit = if (producesOutput) minOf(context.limits.maxOutputBytes, context.limits.maxSpoolBytes - size, Long.MAX_VALUE.toULong()) else 0uL
         if (producesOutput && limit == 0uL) fail("RESOURCE_LIMIT_EXCEEDED", "FFmpeg has no output storage budget", Stage.Plan)
         checkCancelled(context)
-        val directory = Files.createTempDirectory("livephoto-ffmpeg-")
+        val directory = try { Files.createTempDirectory("livephoto-ffmpeg-") }
+        catch (_: Exception) { fail("IO_WRITE_FAILED", "FFmpeg workspace creation failed", Stage.Read) }
         val files = JvmFfmpegFiles(directory, limit, producesOutput, context)
         try {
             Files.newOutputStream(directory.resolve("input.bin")).use { stream ->
