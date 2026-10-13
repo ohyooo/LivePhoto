@@ -26,7 +26,7 @@ Get-ChildItem file-io/src/commonTest,file-io/src/nativeTest -Recurse -File -Filt
 if ($expected -le 0 -or $tests -ne $expected) {
     throw "Incomplete file IO tests: $tests executed, $expected declared."
 }
-if ($mediaTests -ne 3) { throw 'Mandatory real Native FFmpeg tests did not all execute.' }
+if ($mediaTests -ne 4) { throw 'Mandatory real Native FFmpeg tests did not all execute.' }
 $log = Get-Content ci-output/native-core.log -Raw
 if ($log -notmatch ":file-io:${Target}Test(?:\s|$)" -or
     $log -match ":file-io:${Target}Test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)") {

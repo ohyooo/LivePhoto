@@ -38,6 +38,7 @@ class NativeFfmpegTest {
             val runtime = NativeFfmpeg({ box.root.toString() }, { session.spoolBytes })
             val file = box.root / "sdr video 输入.mp4"
             generate(runtime, listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "8",
+                "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709",
                 "-c:v", "libx264", "-preset", "medium", "-bf", "0", "-g", "3", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                 "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                 "-use_editlist", "0", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", file.toString()))
@@ -98,6 +99,26 @@ class NativeFfmpegTest {
             assertTrue(result(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(copied)), true, context))).issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
             copied.close()
             assertContentEquals(before, box.contents(file))
+        } finally { result(session.close()); box.close() }
+    }
+    @Test fun unknownDecodedColorIsRefusedWithoutPublishingOrLeakingTemporaryFiles(): Unit = runBlocking<Unit> {
+        val box = Sandbox()
+        val session = FileInputSession((box.root / "snapshots").toString(), context)
+        try {
+            val runtime = NativeFfmpeg({ box.root.toString() }, { session.spoolBytes })
+            val file = box.root / "unknown color.mp4"
+            generate(runtime, listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "8",
+                "-c:v", "libx264", "-bf", "0", "-g", "3", "-pix_fmt", "yuv420p", "-use_editlist", "0",
+                "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", file.toString()))
+            val before = box.contents(file)
+            val source = result(session.capture(file.toString()))
+            val transaction = MemoryOutputTransaction(context, "unknown-color")
+            val core = DefaultLivePhotoCore(assertNotNull(runtime.discover(executable(), "").backend))
+            val frame = core.extractFrame(ExtractFrameRequest(ResourceRef(SourceSet.Single(source)), CoverPosition.FrameIndex(2uL), ImageEncoding(ImageFormat.Jpeg), transaction, context))
+            failure(frame, "HDR_PRESERVATION_UNAVAILABLE")
+            assertTrue(transaction.committedAssets().isEmpty())
+            assertContentEquals(before, box.contents(file))
+            assertEquals(setOf("snapshots", file.name), box.fs.list(box.root).map { it.name }.toSet())
         } finally { result(session.close()); box.close() }
     }
 }

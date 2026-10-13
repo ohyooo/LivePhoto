@@ -133,6 +133,7 @@ function Invoke-Fixture([string[]]$arguments) {
 }
 $sdr = Join-Path $verify 'sdr video 输入.mp4'
 Invoke-Fixture @('-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=25', '-frames:v', '40', '-c:v', 'libx264', '-preset', 'medium',
+    '-vf', 'setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
     '-bf', '0', '-g', '3', '-sc_threshold', '0', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-colorspace', 'bt709',
     '-color_primaries', 'bt709', '-color_trc', 'bt709', '-use_editlist', '0', '-map_metadata', '-1', '-metadata:s:v', 'encoder=',
     '-fflags', '+bitexact', '-flags:v', '+bitexact', '-write_btrt', '0', $sdr)
