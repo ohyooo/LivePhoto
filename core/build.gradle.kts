@@ -23,6 +23,14 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
+        if (providers.gradleProperty("livephoto.nativeTarget").isPresent) {
+            // Test compilation only: Core main remains stdlib-only. The dependency
+            // is on adapter main -> Core main, not another module's tests/build task.
+            nativeTest.dependencies {
+                implementation(project(":file-io"))
+                implementation(libs.kotlinx.coroutines)
+            }
+        }
     }
 }
 

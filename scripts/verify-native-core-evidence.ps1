@@ -30,6 +30,7 @@ $reports = @(Get-ChildItem "core/build/test-results/${Target}Test" -File -Filter
 if ($reports.Count -eq 0) { throw 'Missing executed Native test reports.' }
 $tests = 0
 $fixtureTests = 0
+$mediaTests = 0
 foreach ($file in $reports) {
     [xml]$report = Get-Content -LiteralPath $file.FullName -Raw
     $suite = $report.testsuite
@@ -39,7 +40,9 @@ foreach ($file in $reports) {
     }
     $tests += [int]$suite.tests
     if ($file.Name -match 'ProtocolCompatibilityFixtureTest') { $fixtureTests += [int]$suite.tests }
+    if ($file.Name -match 'livephoto\.core\.media\.Ffmpeg(Frame|Replace)?IntegrationTest') { $mediaTests += [int]$suite.tests }
 }
+if ($mediaTests -ne 5) { throw 'Mandatory common real media regressions must all execute on Native.' }
 if ($fixtureTests -ne 20) { throw 'Fixed protocol fixture regressions must all execute on Native.' }
 $fixtureEvidence = 'core/build/reports/protocol-compatibility/verified-captures.tsv'
 if (-not (Test-Path $fixtureEvidence) -or @(Get-Content $fixtureEvidence | Where-Object { $_.Trim() }).Count -ne 19) {
