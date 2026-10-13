@@ -59,7 +59,11 @@ class NativeFfmpegTest {
             val frame = assertIs<CoreResult.Success<FrameResult>>(frameRun, "Native frame verification: $frameRun\nBounded synthetic-fixture FFmpeg trace:\n$lastTrace").value
             assertEquals(2uL, frame.actualFrameIndex)
             frame.operation.output.assets.forEach { it.readableSource?.close() }
-            val remux = result(core.remux(RemuxRequest(ref, VideoContainer.Mov, output = MemoryOutputTransaction(context, "remux"), context = context)))
+            // MP4->MOV rewrites this fixture's nclx declaration. Keep the fidelity rejection.
+            val movOutput = MemoryOutputTransaction(context, "color-mov-refused")
+            failure(core.remux(RemuxRequest(ref, VideoContainer.Mov, output = movOutput, context = context)), "POSTCONDITION_FAILED")
+            assertTrue(movOutput.committedAssets().isEmpty())
+            val remux = result(core.remux(RemuxRequest(ref, VideoContainer.Mp4, output = MemoryOutputTransaction(context, "remux"), context = context)))
             assertTrue(remux.execution.none { it.transcoded })
             remux.output.assets.forEach { it.readableSource?.close() }
             val transcode = result(core.transcode(TranscodeRequest(ref, VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4),
@@ -117,6 +121,16 @@ class NativeFfmpegTest {
             val frame = core.extractFrame(ExtractFrameRequest(ResourceRef(SourceSet.Single(source)), CoverPosition.FrameIndex(2uL), ImageEncoding(ImageFormat.Jpeg), transaction, context))
             failure(frame, "HDR_PRESERVATION_UNAVAILABLE")
             assertTrue(transaction.committedAssets().isEmpty())
+            // Unknown color is not permission to encode, but a plain streamcopy may preserve it.
+            // This color-declaration-free finite fixture can round-trip through MOV without rewriting colr.
+            val mov = result(core.remux(RemuxRequest(ResourceRef(SourceSet.Single(source)), VideoContainer.Mov,
+                output = MemoryOutputTransaction(context, "plain-mov"), context = context)))
+            val movSource = assertNotNull(mov.output.assets.single().readableSource)
+            try {
+                val back = result(core.remux(RemuxRequest(ResourceRef(SourceSet.Single(movSource)), VideoContainer.Mp4,
+                    output = MemoryOutputTransaction(context, "plain-mp4"), context = context)))
+                back.output.assets.forEach { it.readableSource?.close() }
+            } finally { movSource.close() }
             assertContentEquals(before, box.contents(file))
             assertEquals(setOf("snapshots", file.name), box.fs.list(box.root).map { it.name }.toSet())
         } finally { result(session.close()); box.close() }
