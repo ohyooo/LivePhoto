@@ -8,6 +8,7 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 $reports = @(Get-ChildItem "file-io/build/test-results/${Target}Test" -File -Filter 'TEST-*.xml')
 if ($reports.Count -eq 0) { throw 'Missing file IO Native test reports.' }
 $tests = 0
+$mediaTests = 0
 foreach ($file in $reports) {
     [xml]$report = Get-Content -LiteralPath $file.FullName -Raw
     $suite = $report.testsuite
@@ -16,6 +17,7 @@ foreach ($file in $reports) {
         throw "File IO tests failed or skipped: $($file.Name)"
     }
     $tests += [int]$suite.tests
+    if ($file.Name -match 'NativeFfmpegTest') { $mediaTests += [int]$suite.tests }
 }
 $expected = 0
 Get-ChildItem file-io/src/commonTest,file-io/src/nativeTest -Recurse -File -Filter '*.kt' | ForEach-Object {
@@ -24,6 +26,7 @@ Get-ChildItem file-io/src/commonTest,file-io/src/nativeTest -Recurse -File -Filt
 if ($expected -le 0 -or $tests -ne $expected) {
     throw "Incomplete file IO tests: $tests executed, $expected declared."
 }
+if ($mediaTests -ne 3) { throw 'Mandatory real Native FFmpeg tests did not all execute.' }
 $log = Get-Content ci-output/native-core.log -Raw
 if ($log -notmatch ":file-io:${Target}Test(?:\s|$)" -or
     $log -match ":file-io:${Target}Test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)") {
@@ -66,6 +69,7 @@ if ($Target -eq 'mingwX64') {
     commit = $env:GITHUB_SHA
     run = $env:GITHUB_RUN_ID
     tests = $tests
+    mediaTests = $mediaTests
     failures = 0
     errors = 0
     skipped = 0
@@ -76,6 +80,6 @@ if ($Target -eq 'mingwX64') {
     compilerVersion = $manifest['compiler_version']
     nativeTarget = $konanTarget
     dependencies = $manifest['depends']
-    scope = 'real-native-local-files-snapshots-atomic-asset-sets-and-reference-core-not-native-cli-or-media'
+    scope = 'real-native-local-files-snapshots-atomic-asset-sets-and-finite-ffmpeg-no-device-compatibility-claim'
 } | ConvertTo-Json | Set-Content ci-output/file-io-evidence.json -Encoding utf8
 Write-Host "FILE_IO_EVIDENCE=SUCCESS target=$Target tests=$tests"

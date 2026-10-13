@@ -170,4 +170,4 @@ if ((Get-FileHash $image).Hash -ne $imageHash -or (Get-FileHash $video).Hash -ne
     archiveSha256 = (Get-FileHash $archive).Hash.ToLowerInvariant()
     scope = 'native-protocol-and-finite-ffmpeg-cli-no-jvm-no-device-compatibility-claim'
 } | ConvertTo-Json | Set-Content ci-output/native-cli-evidence.json -Encoding utf8
-Write-Host "NATIVE_CLI_EVIDENCE=SUCCESS target=$Target tests=$tests smoke=$script:checks scope=protocol-only"
+Write-Host "NATIVE_CLI_EVIDENCE=SUCCESS target=$Target tests=$tests smoke=$script:checks media=$nativeMediaChecks scope=protocol-and-finite-ffmpeg"

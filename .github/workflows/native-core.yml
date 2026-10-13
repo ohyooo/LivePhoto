@@ -155,11 +155,11 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-process-evidence.ps1 -Target '${{ matrix.target }}'
 
-      - name: Package and verify Native protocol CLI
+      - name: Package and verify Native CLI and real FFmpeg media
         shell: pwsh
         run: ./scripts/package-native-cli.ps1 -Platform '${{ matrix.platform }}' -Target '${{ matrix.target }}'
 
-      - name: Upload Native protocol CLI
+      - name: Upload Native CLI
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-native-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}

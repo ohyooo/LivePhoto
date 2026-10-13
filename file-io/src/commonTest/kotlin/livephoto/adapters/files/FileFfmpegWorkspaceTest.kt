@@ -4,6 +4,7 @@ import livephoto.core.*
 import livephoto.core.ffmpeg.*
 import livephoto.core.memory.MemoryBinarySource
 import okio.Path.Companion.toPath
+import okio.use
 import kotlin.test.*
 
 class FileFfmpegWorkspaceTest {
