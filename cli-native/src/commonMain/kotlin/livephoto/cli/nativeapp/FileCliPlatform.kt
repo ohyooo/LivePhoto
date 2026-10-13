@@ -12,6 +12,7 @@ import kotlin.random.Random
 internal abstract class FileCliPlatform(private val workspace: () -> String) : CliPlatform {
     private var session: FileInputSession? = null
     private var operation: Context? = null
+    protected fun retainedSpoolBytes(): ULong = session?.spoolBytes ?: 0uL
 
     override fun openSource(path: String, context: Context): BinarySource {
         val inputs = session ?: run {
@@ -42,7 +43,7 @@ internal abstract class FileCliPlatform(private val workspace: () -> String) : C
         return result // On failure retain ownership so cleanup can be retried, never scan/delete unknown files.
     }
 
-    override fun discover(ffmpegPath: String?): CliDiscovery = CliDiscovery(null, null, listOf(Issue(
+    override suspend fun discover(ffmpegPath: String?): CliDiscovery = CliDiscovery(null, null, listOf(Issue(
         IssueCode("CAPABILITY_UNSUPPORTED"), Severity.Warning, Layer.Media,
         observed = Value.Text("Native FFmpeg adapter is not implemented; no executable was invoked"))))
 }

@@ -18,6 +18,7 @@ internal class FileSnapshotSource(
     private val context: Context,
 ) : BinarySource {
     private var closed = false
+    internal val isReleased: Boolean get() = closed
     private val length: Long get() = proof.length
     private fun checkFile(): Path {
         if (closed) reject("IO_READ_FAILED", "Source is closed")

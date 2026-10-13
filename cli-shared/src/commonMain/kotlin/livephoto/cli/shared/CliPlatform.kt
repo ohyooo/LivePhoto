@@ -9,7 +9,7 @@ public interface CliPlatform {
      * Called once per run, including acquisition failures. Implementations must be reusable. */
     public fun finish(): CoreResult<Unit> = CoreResult.Success(Unit)
     public fun output(path: String, context: Context): CliOutput
-    public fun discover(ffmpegPath: String?): CliDiscovery
+    public suspend fun discover(ffmpegPath: String?): CliDiscovery
     public fun environment(name: String): String?
     public fun nanoTime(): Long
     public fun error(message: String): Unit

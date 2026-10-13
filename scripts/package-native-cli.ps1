@@ -70,6 +70,7 @@ function Invoke-Native([string[]]$arguments, [int]$expectedExit = 0, [bool]$with
     foreach ($argument in $arguments) { $start.ArgumentList.Add($argument) }
     $start.Environment['JAVA_HOME'] = Join-Path $verify 'no-java-runtime'
     $start.Environment['LIVEPHOTO_LOG_LEVEL'] = 'trace'
+    $start.Environment['PATH'] = ''
     $null = $start.Environment.Remove('LIVEPHOTO_WORKSPACE')
     if ($withWorkspace) { $start.Environment['LIVEPHOTO_WORKSPACE'] = $workspace }
     $process = [Diagnostics.Process]::Start($start)
@@ -118,17 +119,55 @@ if ((Get-FileHash $extracted.result.output.assets[0].path).Hash -ne $videoHash) 
 $capabilities = Invoke-Native @('capabilities', '--target', 'oplus.olive', '--profile', 'jpeg-no-tail')
 if (-not $capabilities.result) { throw 'Native protocol capabilities missing.' }
 $media = Invoke-Native @('media-capabilities', '--ffmpeg', (Join-Path $verify 'not-invoked-ffmpeg'))
-if ($media.result.capabilities.backendIds.Count -ne 0 -or -not ($media.result.discoveryIssues | Where-Object { $_.code.value -eq 'CAPABILITY_UNSUPPORTED' })) {
-    throw 'Unimplemented Native backend must not claim support.'
+if ($media.result.capabilities.backendIds.Count -ne 0 -or -not ($media.result.discoveryIssues | Where-Object { $_.code.value -eq 'MEDIA_BACKEND_UNAVAILABLE' })) {
+    throw 'Native backend without an executable must not claim support.'
 }
 $decode = Invoke-Native @('probe', '--input', $video, '--decode-check') 3
 if ($decode.error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Native decode without backend must fail.' }
+
+$ffmpeg = $env:LIVEPHOTO_FFMPEG
+if (-not $ffmpeg -or !(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) { throw 'Mandatory Native FFmpeg missing.' }
+function Invoke-Fixture([string[]]$arguments) {
+    & $ffmpeg -nostdin -n -hide_banner -loglevel error -xerror @arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Native media fixture generation failed.' }
+}
+$sdr = Join-Path $verify 'sdr video 输入.mp4'
+Invoke-Fixture @('-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=25', '-frames:v', '40', '-c:v', 'libx264', '-preset', 'medium',
+    '-bf', '0', '-g', '3', '-sc_threshold', '0', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-colorspace', 'bt709',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-use_editlist', '0', '-map_metadata', '-1', '-metadata:s:v', 'encoder=',
+    '-fflags', '+bitexact', '-flags:v', '+bitexact', '-write_btrt', '0', $sdr)
+$aac = Join-Path $verify 'mono.aac'
+Invoke-Fixture @('-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=1.6', '-c:a', 'aac', '-b:a', '64k', '-ac', '1', '-flags:a', '+bitexact', '-f', 'adts', $aac)
+$withAudio = Join-Path $verify 'video audio copy.mp4'
+Invoke-Fixture @('-i', $sdr, '-i', $aac, '-map', '0:v', '-map', '1:a', '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-use_editlist', '0',
+    '-map_metadata', '-1', '-metadata:s:v', 'encoder=', '-fflags', '+bitexact', '-write_btrt', '0', $withAudio)
+$mediaChecks = $script:checks
+$available = Invoke-Native @('media-capabilities', '--ffmpeg', $ffmpeg)
+if ($available.result.capabilities.backendIds -notcontains 'ffmpeg-external') { throw 'Native FFmpeg not discovered.' }
+foreach ($inputFile in @($image, $video, $withAudio)) {
+    $probe = Invoke-Native @('probe', '--input', $inputFile, '--decode-check', '--ffmpeg', $ffmpeg)
+    if (-not ($probe.result.issues | Where-Object { $_.code.value -eq 'MEDIA_DECODE_COMPLETED' })) { throw 'Native real decode missing.' }
+}
+$frame = Invoke-Native @('extract-frame', '--input', $sdr, '--frame-index', '2', '--format', 'Jpeg', '--ffmpeg', $ffmpeg, '--output-dir', (Join-Path $verify 'frame'))
+if ($frame.result.actualFrameIndex -ne '2' -or $frame.result.operation.output.receipt.state -ne 'Committed') { throw 'Native exact frame failed.' }
+$remux = Invoke-Native @('remux', '--input', $withAudio, '--container', 'Mp4', '--ffmpeg', $ffmpeg, '--output-dir', (Join-Path $verify 'remux'))
+if ($remux.result.output.receipt.state -ne 'Committed' -or ($remux.result.execution | Where-Object { $_.transcoded })) { throw 'Native AAC copy remux failed.' }
+$trim = Invoke-Native @('trim', '--input', $withAudio, '--start-us', '130000', '--end-us', '270000', '--ffmpeg', $ffmpeg, '--output-dir', (Join-Path $verify 'trim'))
+if ($trim.result.wasTranscoded -or -not $trim.result.wasBitstreamPreserved -or @($trim.result.tracks).Count -ne 2) { throw 'Native audio copy trim failed.' }
+$encoded = Invoke-Native @('transcode', '--input', $sdr, '--container', 'Mp4', '--codec', 'Avc', '--allow-transcode', '--ffmpeg', $ffmpeg, '--output-dir', (Join-Path $verify 'transcode'))
+if ($encoded.result.output.receipt.state -ne 'Committed' -or -not ($encoded.result.execution | Where-Object { $_.transcoded })) { throw 'Native explicit video encode failed.' }
+$edited = Invoke-Native @('create', '--image', $image, '--video', $withAudio, '--target', 'oplus.olive', '--profile', 'jpeg-no-tail',
+    '--start-us', '130000', '--end-us', '270000', '--ffmpeg', $ffmpeg, '--output-dir', (Join-Path $verify 'edited live'))
+if ($edited.result.output.receipt.state -ne 'Committed') { throw 'Native composed create/trim failed.' }
+$nativeMediaChecks = $script:checks - $mediaChecks
+if ($nativeMediaChecks -ne 9) { throw 'Incomplete Native media CLI evidence.' }
 if ((Get-FileHash $image).Hash -ne $imageHash -or (Get-FileHash $video).Hash -ne $videoHash) { throw 'Native CLI changed an original.' }
 [ordered]@{
     commit = $env:GITHUB_SHA; run = $env:GITHUB_RUN_ID; target = $Target; platform = $Platform
     tests = $tests; skipped = 0; failures = 0; errors = 0; smokeChecks = $script:checks
+    mediaChecks = $nativeMediaChecks; ffmpegVersion = (Get-Content ci-output/native-ffmpeg-version.txt -First 1)
     binary = $binary[0].Name; binaryBytes = $binary[0].Length; binarySha256 = (Get-FileHash $launcher).Hash.ToLowerInvariant()
     archiveSha256 = (Get-FileHash $archive).Hash.ToLowerInvariant()
-    scope = 'native-protocol-cli-no-jvm-no-ffmpeg-no-device-compatibility-claim'
+    scope = 'native-protocol-and-finite-ffmpeg-cli-no-jvm-no-device-compatibility-claim'
 } | ConvertTo-Json | Set-Content ci-output/native-cli-evidence.json -Encoding utf8
 Write-Host "NATIVE_CLI_EVIDENCE=SUCCESS target=$Target tests=$tests smoke=$script:checks scope=protocol-only"

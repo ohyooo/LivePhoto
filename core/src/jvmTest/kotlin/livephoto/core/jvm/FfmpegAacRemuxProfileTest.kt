@@ -1,6 +1,7 @@
 package livephoto.core.jvm
 
 import livephoto.core.*
+import livephoto.core.ffmpeg.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.google.GoogleFixtures
@@ -29,7 +30,7 @@ class FfmpegAacRemuxProfileTest {
             // Generic Core metadata proof remains available; this is an external muxer limitation only.
             RemuxVerification.metadata(reader, facts)
             val before = sha256Range(reader, facts.range).orThrow()
-            val result = FfmpegRemux.run(Path.of("nonexistent-ffmpeg-preflight-must-not-execute.exe"), BackendJob(
+            val result = FfmpegRemux.run("nonexistent-ffmpeg-preflight-must-not-execute.exe", JvmFfmpegRuntime, BackendJob(
                 Operation.Remux, listOf(ResourceRef(SourceSet.Single(source))), remuxContainer = VideoContainer.Mp4,
                 context = context, destination = noStaging))
             val error = assertIs<CoreResult.Failure>(result).error
@@ -59,7 +60,7 @@ class FfmpegAacRemuxProfileTest {
         val source = source()
         val reader = BinaryReader(source, context)
         val before = sha256Range(reader, ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
-        val result = FfmpegTranscode.run(Path.of("nonexistent-ffmpeg-transcode-preflight-must-not-execute.exe"), BackendJob(
+        val result = FfmpegTranscode.run("nonexistent-ffmpeg-transcode-preflight-must-not-execute.exe", JvmFfmpegRuntime, BackendJob(
             Operation.Transcode, listOf(ResourceRef(SourceSet.Single(source))), videoEncoding = VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4),
             policy = MutationPolicy(transcode = TranscodePolicy.Explicit), context = context, destination = noStaging))
         val error = assertIs<CoreResult.Failure>(result).error

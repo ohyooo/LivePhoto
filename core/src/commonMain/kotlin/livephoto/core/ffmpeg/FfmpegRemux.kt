@@ -1,14 +1,13 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.implementation.videoFacts
-import java.nio.file.Path
 
 /** Restricted external streamcopy. Temporary outputs are verified before touching Core staging. */
 internal object FfmpegRemux {
-    suspend fun run(executable: Path, job: BackendJob): CoreResult<BackendResult> = attempt {
+    suspend fun run(executable: String, runtime: FfmpegRuntime, job: BackendJob): CoreResult<BackendResult> = attempt {
         if (job.operation != Operation.Remux) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
         job.validate().orThrow()
         if (job.remuxContainer !in setOf(VideoContainer.Mp4, VideoContainer.Mov)) fail("CAPABILITY_UNSUPPORTED", "FFmpeg remux target is not implemented", Stage.Plan)
@@ -31,7 +30,7 @@ internal object FfmpegRemux {
         FfmpegAacRemuxProfile.validate(before, metadata)
         for (track in audio) if (validateEsds(track.codecConfiguration, ParseBudget(job.context)).esDescriptorFlags != 0)
             fail("CAPABILITY_UNSUPPORTED", "AAC remux cannot rewrite referenced/URL/OCR ES descriptors", Stage.Plan)
-        FfmpegWorkspace.use(reader, Stage.Remux, "Remux") {
+        FfmpegWorkspace.use(runtime, source, reader, Stage.Remux, "Remux") {
             run(listOf(executable.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror",
                 "-copyts", "-protocol_whitelist", "file", "-f", "mov", "-i", input.toString(),
                 "-map", "0", "-c", "copy", "-copytb", "1", "-avoid_negative_ts", "disabled", "-map_metadata", "0", "-map_chapters", "0",
@@ -43,9 +42,9 @@ internal object FfmpegRemux {
                 listOf("-f", if (job.remuxContainer == VideoContainer.Mov) "mov" else "mp4", output.toString()), "REMUX_FAILED")
             val size = outputSize("REMUX_FAILED")
             reader.validateIdentity().orThrow()
-            val hintsRestored = AacRemuxMetadata.restore(before, output, job.context)
+            val hintsRestored = AacRemuxMetadata.restore(before, this, job.context)
             reader.validateIdentity().orThrow()
-            val staged = FileBinarySource(output)
+            val staged = openOutput()
             try {
                 val outputReader = BinaryReader(staged, job.context)
                 val actual = BmffVideoProbe(outputReader).probe(ByteRange(0uL, size)).orThrow()

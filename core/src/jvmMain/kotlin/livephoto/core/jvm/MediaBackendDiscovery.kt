@@ -1,6 +1,7 @@
 package livephoto.core.jvm
 
 import livephoto.core.*
+import livephoto.core.ffmpeg.FfmpegMediaBackend
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -49,7 +50,7 @@ public object JvmMediaBackends {
             if (explicit != null && candidate == explicit.toAbsolutePath().normalize()) issues += Issue(
                 IssueCode("FFMPEG_EXPLICIT_PATH_UNAVAILABLE"), Severity.Warning, Layer.Compatibility)
         }
-        val backends = listOfNotNull(selected?.let { FfmpegMediaBackend(it) }) + systems
+        val backends = listOfNotNull(selected?.let { FfmpegMediaBackend(it.toString(), JvmFfmpegRuntime) }) + systems
         if (backends.isEmpty()) issues += Issue(IssueCode("MEDIA_BACKEND_UNAVAILABLE"), Severity.Warning, Layer.Compatibility)
         return BackendDiscovery(backends.takeIf { it.isNotEmpty() }?.let(::FallbackMediaBackend), selected, issues.toList())
     }

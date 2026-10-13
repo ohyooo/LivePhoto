@@ -1,4 +1,4 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*
@@ -7,12 +7,10 @@ import livephoto.core.implementation.selectFrame
 import livephoto.core.implementation.videoFacts
 import livephoto.core.implementation.jpegFacts
 import livephoto.core.jpeg.*
-import java.nio.file.Path
-import javax.imageio.ImageIO
 
 /** Finite SDR profile. No keyframe seek, average FPS, autorotation, HDR downgrade, or video encoder. */
 internal object FfmpegFrame {
-    suspend fun run(executable: Path, job: BackendJob): CoreResult<BackendResult> = attempt {
+    suspend fun run(executable: String, runtime: FfmpegRuntime, job: BackendJob): CoreResult<BackendResult> = attempt {
         if (job.operation != Operation.ExtractFrame) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
         job.validate().orThrow()
         val encoding = job.imageEncoding ?: fail("INVALID_ARGUMENT", "Missing image encoding", Stage.Plan)
@@ -51,7 +49,7 @@ internal object FfmpegFrame {
             fail("VALUE_NOT_REPRESENTABLE", "Frame PTS cannot be selected exactly by this filter profile", Stage.Plan)
         val pixels = checkedMultiply(track.width.toULong(), track.height.toULong())
         if (checkedMultiply(pixels, 4uL) > job.context.limits.maxMetadataBytes) fail("RESOURCE_LIMIT_EXCEEDED", "Decoded frame exceeds the bounded image verification budget", Stage.Plan)
-        FfmpegWorkspace.use(reader, Stage.DecodeFrame, "Frame", "frame.jpg", cleanupStage = Stage.EncodeImage) {
+        FfmpegWorkspace.use(runtime, source, reader, Stage.DecodeFrame, "Frame", "frame.jpg", cleanupStage = Stage.EncodeImage) {
             val common = listOf(executable.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "info", "-nostats", "-xerror", "-copyts",
                 "-protocol_whitelist", "file", "-err_detect", "explode", "-f", "mov", "-ignore_editlist", "1", "-threads", "1", "-noautorotate", "-i", input.toString(),
                 "-map", "0:i:${track.trackId}", "-an", "-sn", "-dn")
@@ -65,16 +63,23 @@ internal object FfmpegFrame {
                 "-fs", outputLimit.toString(), "-f", "image2", "-update", "1", output.toString()), "ENCODE_FAILED", Stage.EncodeImage)
             verifyTrace(encoded.output, mediaPts, track, encoded = true)
             val size = outputSize("ENCODE_FAILED", Stage.EncodeImage)
-            val staged = FileBinarySource(output)
+            val staged = openOutput()
             try {
                 val outputReader = BinaryReader(staged, job.context)
                 val jpeg = JpegParser.parse(outputReader).orThrow()
                 val facts = jpegFacts(outputReader, jpeg)
                 if (jpeg.trailing.length != 0uL || facts.width != track.width || facts.height != track.height || facts.issues.any { it.severity == Severity.Error })
                     fail("POSTCONDITION_FAILED", "Frame encoder changed dimensions or produced malformed JPEG", Stage.Verify)
-                // Independent existing-JDK image decoder, not a second invocation of the producing encoder.
-                val image = ImageIO.read(output.toFile()) ?: fail("DECODE_FAILED", "Encoded frame failed independent JPEG decoding", Stage.Verify)
-                if (image.width.toUInt() != track.width || image.height.toUInt() != track.height) fail("POSTCONDITION_FAILED", "Independent frame dimensions differ", Stage.Verify)
+                // Separate FFmpeg JPEG decode plus Core structural/dimension proof.
+                // This does not claim verification by a different decoder engine.
+                val decodedJpeg = run(listOf(executable, "-nostdin", "-hide_banner", "-loglevel", "info", "-nostats", "-xerror",
+                    "-abort_on", "empty_output+empty_output_stream", "-protocol_whitelist", "file", "-err_detect", "explode",
+                    "-f", "mjpeg", "-threads", "1", "-noautorotate", "-i", output, "-map", "0:v",
+                    "-vf", "showinfo=checksum=0", "-fps_mode", "passthrough", "-f", "null", "-"), "DECODE_FAILED", Stage.Verify)
+                val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$")
+                    .findAll(decodedJpeg.output).map { it.value }.toList()
+                if (frames.size != 1 || !frames.single().contains("s:${track.width}x${track.height}"))
+                    fail("POSTCONDITION_FAILED", "Encoded JPEG must decode to exactly one frame with the selected dimensions", Stage.Verify)
                 reader.validateIdentity().orThrow()
                 val handle = job.destination.create(OutputAssetSpec(AssetRole.PrimaryImage, mime = "image/jpeg")).orThrow()
                 try { copyRange(outputReader, handle.sink, ByteRange(0uL, size), job.context).orThrow(); handle.sink.flush().orThrow() }

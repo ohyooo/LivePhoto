@@ -16,7 +16,7 @@ internal open class TestPlatform : CliPlatform {
         transactions += transaction
         return CliOutput(transaction) { "$path/${it.value}" }
     }
-    override fun discover(ffmpegPath: String?): CliDiscovery = CliDiscovery(null, null, emptyList())
+    override suspend fun discover(ffmpegPath: String?): CliDiscovery = CliDiscovery(null, null, emptyList())
     override fun environment(name: String): String? = environmentLevel
     override fun nanoTime(): Long = 0L
     override fun error(message: String) {}
@@ -36,7 +36,7 @@ internal class TestCli(
 ) {
     private val discoverBackend = discover
     private val engine = CliEngine(object : TestPlatform() {
-        override fun discover(ffmpegPath: String?): CliDiscovery = discoverBackend(ffmpegPath)
+        override suspend fun discover(ffmpegPath: String?): CliDiscovery = discoverBackend(ffmpegPath)
     }, providedCore, diagnostic)
     suspend fun run(args: List<String>, emit: (String) -> Unit): Int = engine.run(args, emit)
 }

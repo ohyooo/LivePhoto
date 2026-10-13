@@ -3,6 +3,7 @@
 package livephoto.cli.nativeapp
 
 import kotlinx.coroutines.runBlocking
+import livephoto.adapters.files.NativeFfmpeg
 import livephoto.cli.shared.*
 import livephoto.core.*
 import platform.posix.fputs
@@ -14,6 +15,11 @@ internal expect fun hostEnvironment(name: String): String?
 internal expect fun hostArguments(fallback: Array<String>): CoreResult<List<String>>
 
 private class NativePlatform : FileCliPlatform({ hostEnvironment("LIVEPHOTO_WORKSPACE") ?: "" }) {
+    private val ffmpeg = NativeFfmpeg({ hostEnvironment("LIVEPHOTO_WORKSPACE") ?: "" }, ::retainedSpoolBytes)
+    override suspend fun discover(ffmpegPath: String?): CliDiscovery {
+        val discovered = ffmpeg.discover(ffmpegPath, hostEnvironment("PATH") ?: "")
+        return CliDiscovery(discovered.backend, discovered.executable, discovered.issues)
+    }
     private val start = TimeSource.Monotonic.markNow()
     override fun environment(name: String): String? = hostEnvironment(name)
     override fun nanoTime(): Long = start.elapsedNow().inWholeNanoseconds

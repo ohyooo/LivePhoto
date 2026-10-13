@@ -1,19 +1,15 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
-import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
-import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 
 /** Restores only proved original ESDS hint bytes in backend-owned temporary output, before Core staging. */
 internal object AacRemuxMetadata {
-    suspend fun restore(before: VideoStructure, path: Path, context: Context): Boolean {
+    suspend fun restore(before: VideoStructure, workspace: FfmpegWorkspace, context: Context): Boolean {
         val originals = before.tracks.filter { it.handler == "soun" }
         if (originals.isEmpty()) return false
-        val source = FileBinarySource(path)
+        val source = workspace.openOutput()
         val patches = mutableListOf<Pair<ByteRange, Bytes>>()
         try {
             val reader = BinaryReader(source, context)
@@ -48,21 +44,7 @@ internal object AacRemuxMetadata {
             reader.validateIdentity().orThrow()
         } finally { source.close() }
         if (patches.isEmpty()) return false
-        try {
-            FileChannel.open(path, StandardOpenOption.WRITE).use { channel ->
-                for ((range, bytes) in patches) {
-                    val buffer = ByteBuffer.wrap(bytes.toByteArray()); var offset = range.offset.toLong()
-                    while (buffer.hasRemaining()) {
-                        checkCancelled(context)
-                        val written = channel.write(buffer, offset)
-                        if (written <= 0) fail("IO_WRITE_FAILED", "AAC metadata hint restoration made no progress", Stage.Remux)
-                        offset += written
-                    }
-                }
-                channel.force(true)
-            }
-        } catch (fault: CoreFault) { throw fault }
-        catch (_: Exception) { fail("IO_WRITE_FAILED", "AAC temporary metadata hint restoration failed", Stage.Remux) }
+        workspace.patchOutput(patches.map { (range, bytes) -> FfmpegPatch(range, bytes) })
         return patches.isNotEmpty()
     }
 }

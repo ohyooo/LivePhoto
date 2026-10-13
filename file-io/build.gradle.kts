@@ -5,7 +5,8 @@ kotlin {
         jvm()
         jvmToolchain(25)
     }
-    when (val target = providers.gradleProperty("livephoto.nativeTarget").orNull) {
+    val nativeTarget = providers.gradleProperty("livephoto.nativeTarget").orNull
+    when (val target = nativeTarget) {
         null -> Unit
         "linux-x64" -> linuxX64()
         "macos-arm64" -> macosArm64()
@@ -23,5 +24,11 @@ kotlin {
             api(libs.okio)
         }
         commonTest.dependencies { implementation(libs.kotlin.test) }
+        if (nativeTarget != null) {
+            nativeMain.dependencies {
+                implementation(project(":process"))
+                implementation(libs.kotlinx.coroutines)
+            }
+        }
     }
 }

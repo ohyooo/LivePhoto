@@ -90,6 +90,10 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-process-fixture.ps1
 
+      - name: Require real FFmpeg for Native media validation
+        shell: pwsh
+        run: ./scripts/prepare-native-ffmpeg.ps1
+
       - name: Compile Native Core and run shared tests
         id: native-test
         shell: pwsh
@@ -181,6 +185,7 @@ jobs:
             ci-output/shared-cli-evidence.json
             ci-output/file-io-evidence.json
             ci-output/process-evidence.json
+            ci-output/native-ffmpeg-version.txt
           if-no-files-found: error
           retention-days: 14
 

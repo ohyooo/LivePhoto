@@ -34,7 +34,7 @@ internal class Cli(
             val transaction = DirectoryOutputTransaction(Path.of(path), context)
             return CliOutput(transaction) { transaction.assetPath(it).toString() }
         }
-        override fun discover(ffmpegPath: String?): CliDiscovery {
+        override suspend fun discover(ffmpegPath: String?): CliDiscovery {
             val result = discoverBackend(ffmpegPath?.let(Path::of))
             return CliDiscovery(result.backend, result.ffmpegPath?.toString(), result.issues)
         }

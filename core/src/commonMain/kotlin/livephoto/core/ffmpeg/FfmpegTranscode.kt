@@ -1,15 +1,14 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.StagedAsset
 import livephoto.core.binary.*
 import livephoto.core.bmff.*
 import livephoto.core.implementation.*
-import java.nio.file.Path
 
 /** Explicit software AVC profile. No automatic install, hidden stream loss, HDR/CFR/resize or fallback. */
 internal object FfmpegTranscode {
-    suspend fun run(executable: Path, job: BackendJob): CoreResult<BackendResult> = attempt {
+    suspend fun run(executable: String, runtime: FfmpegRuntime, job: BackendJob): CoreResult<BackendResult> = attempt {
         if (job.operation !in setOf(Operation.Transcode, Operation.Trim)) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
         job.validate().orThrow()
         val encoding = if (job.operation == Operation.Trim) VideoEncoding(VideoCodec.Avc, VideoContainer.Mp4)
@@ -28,8 +27,8 @@ internal object FfmpegTranscode {
             fail("CAPABILITY_UNSUPPORTED", "Audio copy cannot rewrite referenced/URL/OCR ES descriptors", Stage.Plan)
         if (checkedMultiply(checkedMultiply(track.width!!.toULong(), track.height!!.toULong()), 4uL) > job.context.limits.maxMetadataBytes)
             fail("RESOURCE_LIMIT_EXCEEDED", "Decoded frame exceeds bounded verification budget", Stage.Plan)
-        FfmpegWorkspace.use(reader, Stage.Transcode, "Transcode") {
-            fun decode(path: Path): List<String> = listOf(executable.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "info", "-nostats", "-xerror", "-copyts",
+        FfmpegWorkspace.use(runtime, source, reader, Stage.Transcode, "Transcode") {
+            fun decode(path: String): List<String> = listOf(executable.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "info", "-nostats", "-xerror", "-copyts",
                 "-protocol_whitelist", "file", "-err_detect", "explode", "-f", "mov", "-ignore_editlist", "1", "-threads", "1", "-noautorotate", "-i", path.toString(), "-map", "0", "-sn", "-dn")
             val filter = "settb=expr=1/${track.timescale},showinfo=checksum=0"
             // Refuse unknown source pixel semantics BEFORE invoking any encoder.
@@ -44,9 +43,9 @@ internal object FfmpegTranscode {
                 video.tracks.flatMapIndexed { index, entry -> listOf("-streamid", "$index:${entry.trackId}") } + listOf("-use_stream_ids_as_track_ids", "1",
                 "-fs", outputLimit.toString(), "-f", "mp4", output.toString()), "ENCODE_FAILED")
             val size = outputSize("ENCODE_FAILED")
-            AacRemuxMetadata.restore(video, output, job.context)
+            AacRemuxMetadata.restore(video, this, job.context)
             reader.validateIdentity().orThrow()
-            val staged = FileBinarySource(output)
+            val staged = openOutput()
             try {
                 val outputReader = BinaryReader(staged, job.context); val actual = BmffVideoProbe(outputReader).probe(ByteRange(0uL, size)).orThrow()
                 if (trim == null) verifyTranscode(reader, video, outputReader, actual, encoding)

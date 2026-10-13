@@ -18,7 +18,7 @@ foreach ($file in $reports) {
     $tests += [int]$suite.tests
 }
 $expected = 0
-Get-ChildItem file-io/src/commonTest -Recurse -File -Filter '*.kt' | ForEach-Object {
+Get-ChildItem file-io/src/commonTest,file-io/src/nativeTest -Recurse -File -Filter '*.kt' | ForEach-Object {
     $expected += [regex]::Matches((Get-Content $_.FullName -Raw), '@Test\b').Count
 }
 if ($expected -le 0 -or $tests -ne $expected) {

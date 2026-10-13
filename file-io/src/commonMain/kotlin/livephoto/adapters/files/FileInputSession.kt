@@ -20,6 +20,8 @@ public class FileInputSession(
     private var directory: Path? = null
     private var closed = false
     private var allocated = 0uL
+    /** Retained bytes remain reserved until successful cleanup, even if readers close. */
+    public val spoolBytes: ULong get() = allocated
     private var proofItems = 0uL
     private val token = newToken()
     private val files = mutableListOf<Path>()

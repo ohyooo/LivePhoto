@@ -1,4 +1,4 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*

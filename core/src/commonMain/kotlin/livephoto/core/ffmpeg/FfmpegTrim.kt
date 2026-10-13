@@ -1,4 +1,4 @@
-package livephoto.core.jvm
+package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*
@@ -8,11 +8,10 @@ import livephoto.core.implementation.microseconds
 import livephoto.core.implementation.videoFacts
 import livephoto.core.implementation.verifyTrimDurationHeaders
 import livephoto.core.implementation.trimTicks
-import java.nio.file.Path
 
 /** Lossless-first trim; exact encoding only with independently selected and authorized source boundaries. */
 internal object FfmpegTrim {
-    suspend fun run(executable: Path, job: BackendJob): CoreResult<BackendResult> = attempt {
+    suspend fun run(executable: String, runtime: FfmpegRuntime, job: BackendJob): CoreResult<BackendResult> = attempt {
         if (job.operation != Operation.Trim) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
         job.validate().orThrow()
         val ref = job.inputs.single()
@@ -22,13 +21,13 @@ internal object FfmpegTrim {
         val identity = reader.identity().orThrow()
         val video = BmffVideoProbe(reader).probe(ByteRange(0uL, identity.size)).orThrow()
         val selected = planTrim(reader, video, job.trim ?: fail("INVALID_ARGUMENT", "Missing trim specification"), job.policy)
-        if (selected.encoded) return@attempt FfmpegTranscode.run(executable, job).orThrow()
+        if (selected.encoded) return@attempt FfmpegTranscode.run(executable, runtime, job).orThrow()
         val plan = selected.boundaries
         val metadata = RemuxVerification.metadata(reader, video, trimDurationsVerifiedSeparately = true, trimAudioSampleCountsVerifiedSeparately = plan.audio.isNotEmpty())
         if (video.container != VideoContainer.Mp4 || plan.movieTimescale > Int.MAX_VALUE.toUInt() || video.tracks.any { it.timescale > Int.MAX_VALUE.toUInt() || it.trackId > Int.MAX_VALUE.toUInt() })
             fail("LOSSLESS_TRIM_UNAVAILABLE", "FFmpeg trim currently requires a bounded MP4 source", Stage.Plan)
         val start = seconds(microseconds(plan.start)); val duration = seconds(microseconds(plan.duration))
-        FfmpegWorkspace.use(reader, Stage.Trim, "Trim") {
+        FfmpegWorkspace.use(runtime, source, reader, Stage.Trim, "Trim") {
             run(listOf(executable.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror",
                 "-protocol_whitelist", "file", "-f", "mov", "-ignore_editlist", "1", "-ss", start, "-noaccurate_seek", "-i", input.toString(),
                 "-t", duration, "-map", "0", "-c", "copy", "-copytb", "1", "-avoid_negative_ts", "disabled", "-use_editlist", if (plan.audio.isEmpty()) "0" else "1", "-map_metadata", "0", "-map_chapters", "0",
@@ -42,9 +41,9 @@ internal object FfmpegTrim {
                     listOf("-bsf:$index", "noise=amount=0:drop='lt(pts,0)+gt(pts+duration,$end)'")
                 } + listOf("-use_stream_ids_as_track_ids", "1", "-fs", outputLimit.toString(), "-f", "mp4", output.toString()), "REMUX_FAILED")
             val size = outputSize("REMUX_FAILED")
-            AacRemuxMetadata.restore(video, output, job.context)
+            AacRemuxMetadata.restore(video, this, job.context)
             reader.validateIdentity().orThrow()
-            val staged = FileBinarySource(output)
+            val staged = openOutput()
             try {
                 val outputReader = BinaryReader(staged, job.context)
                 val actual = BmffVideoProbe(outputReader).probe(ByteRange(0uL, size)).orThrow()
