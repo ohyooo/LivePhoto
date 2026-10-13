@@ -29,6 +29,7 @@ if ($libraries[0].Length -le 0) { throw 'Empty packed Native library.' }
 $reports = @(Get-ChildItem "core/build/test-results/${Target}Test" -File -Filter 'TEST-*.xml')
 if ($reports.Count -eq 0) { throw 'Missing executed Native test reports.' }
 $tests = 0
+$fixtureTests = 0
 foreach ($file in $reports) {
     [xml]$report = Get-Content -LiteralPath $file.FullName -Raw
     $suite = $report.testsuite
@@ -37,6 +38,12 @@ foreach ($file in $reports) {
         throw "Native shared tests failed or skipped: $($file.Name)"
     }
     $tests += [int]$suite.tests
+    if ($file.Name -match 'ProtocolCompatibilityFixtureTest') { $fixtureTests += [int]$suite.tests }
+}
+if ($fixtureTests -ne 20) { throw 'Fixed protocol fixture regressions must all execute on Native.' }
+$fixtureEvidence = 'core/build/reports/protocol-compatibility/verified-captures.tsv'
+if (-not (Test-Path $fixtureEvidence) -or @(Get-Content $fixtureEvidence | Where-Object { $_.Trim() }).Count -ne 19) {
+    throw 'Missing whole-asset verification manifest.'
 }
 # All existing shared tests must execute, not a tiny Native-only smoke subset.
 $expected = 0

@@ -455,7 +455,7 @@ $env:LIVEPHOTO_REQUIRE_REFERENCE = 'true'
 
 reference 测试使用仓库中的 `reference/video.jpg`、`reference/video.mp4` 和 `reference/livephoto.jpg`，检查封装、提取及保留结果；不会要求参考成品中的 embedded MOV 必须与独立原 MP4 相同。用户报告可识别不等于本项目已完成所有设备验收。
 
-协议兼容回归包含 **12 个单文件组合、1 个更新的 vivo 单文件样本及 3 组配对，共 19 个资产**。`core/src/jvmTest/resources/protocol-compatibility/v1/` 保存无损字节差分、完整 SHA-256 和资产清单；测试还原并校验整文件，再检查多重匹配、非规范字段与原样视频提取。差分只引用参考视频或其它已校验资产中完全相同的字节，不重写协议字段。包含 **19 个回归测试**，无需网络或额外工具运行，不增加产品运行时依赖。
+协议兼容回归包含 **12 个单文件组合、1 个更新的 vivo 单文件样本及 3 组配对，共 19 个资产**。`core/src/jvmTest/resources/protocol-compatibility/v1/` 保存无损字节差分、完整 SHA-256 和资产清单；20 项回归已迁到 `commonTest`，由 JVM 与三平台 Native 执行相同断言。测试还原并校验整文件，再检查多重匹配、非规范字段与原样视频提取。差分只引用参考视频或其它已校验资产中完全相同的字节，不重写协议字段。Native 测试前执行 `scripts/prepare-protocol-fixtures.ps1`，仅用构建环境解压原有 gzip；Core 主库不增加文件 IO、gzip、Java 或第三方依赖。CI 要求全部素材回归实际执行并上传已核验资产清单；不是设备认证。
 
 `user-photos.tsv` 对应用户补充的 11 个导出成品：10 个与原固定资产字节一致，更新的 vivo 文件独立保存，旧样本不删除。OPPO Create 额外使用原封面＋原视频，与固定成品对照协议 RDF、EXIF UserComment 的类型/长度/字节、XMP 第一 APP 段位置，并逐块检查视频和原图保留；不复制生成工具署名或伪造相机参数。输入没有 XMP 时使用已核对的 OPPO 模板；已有普通 XMP/EXIF 仍走保留门禁，不宣称所有 metadata 布局均与对照工具相同。
 

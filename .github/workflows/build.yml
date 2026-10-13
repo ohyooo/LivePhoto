@@ -90,6 +90,10 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-process-fixture.ps1
 
+      - name: Prepare fixed protocol fixtures for Native tests
+        shell: pwsh
+        run: ./scripts/prepare-protocol-fixtures.ps1
+
       - name: Require real FFmpeg for Native media validation
         shell: pwsh
         run: ./scripts/prepare-native-ffmpeg.ps1
@@ -196,6 +200,7 @@ jobs:
           path: |
             core/build/test-results/${{ matrix.target }}Test/
             core/build/reports/tests/${{ matrix.target }}Test/
+            core/build/reports/protocol-compatibility/
             cli-shared/build/test-results/${{ matrix.target }}Test/
             cli-shared/build/reports/tests/${{ matrix.target }}Test/
             file-io/build/test-results/${{ matrix.target }}Test/

@@ -1,20 +1,14 @@
-package livephoto.core.jvm
+package livephoto.core.compatibility
 
-import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
-import java.nio.file.Files
-import java.nio.file.Path
-import java.security.MessageDigest
-import java.util.zip.GZIPInputStream
 import livephoto.core.*
 import livephoto.core.binary.orThrow
 import livephoto.core.binary.BinaryReader
 import livephoto.core.bmff.BmffVideoProbe
 import livephoto.core.binary.ParseBudget
+import livephoto.core.binary.Sha256
 import livephoto.core.implementation.SourceSession
 import livephoto.core.jpeg.AppPayloadKind
 import livephoto.core.memory.*
-import org.junit.Assume.assumeTrue
 import kotlin.test.*
 
 /** Fixed compatibility samples; not device certification.
@@ -22,7 +16,6 @@ import kotlin.test.*
  * SHA256 of every whole reconstructed asset must match its manifest digest. */
 class ProtocolCompatibilityFixtureTest {
     private val context = Context(Limits(32_000_000uL, 32_000_000uL, maxMetadataBytes = 8_000_000uL))
-    private val resourceRoot = "/protocol-compatibility/v1/"
     private val originalHash = "d334d2c36a821dfa82c2d0f1bb09948125596bf77fd8eff7034ae6c53b739b64"
     private val movHash = "233e954e8b53e8b707b6e38fcdea554ef987a0bfb7d4bc8413c68a4d3d69d0e7"
     private val huaweiHash = "b1da3aef46cf6014cfc647f6b62bffa30eb900592092b069a21ef43530b863ba"
@@ -38,11 +31,7 @@ class ProtocolCompatibilityFixtureTest {
         // Its label is not a codec assertion: the untouched input is HEVC + AAC.
         val expectedBytes = captured("video_OPPO_OLive_JPEG+MP4.jpg")
         assertEquals("3308749b84e583bd4b4f008b20e1dd475939d6a758b45d3981c456404ed4ec5b", sha(expectedBytes))
-        val reference = generateSequence(Path.of(System.getProperty("user.dir"))) { it.parent }
-            .map { it.resolve("reference/video.jpg") }.firstOrNull(Files::isRegularFile)
-        if (System.getenv("LIVEPHOTO_REQUIRE_REFERENCE") == "true") assertNotNull(reference)
-        else assumeTrue("Required input cover missing; not device certification", reference != null)
-        val imageBytes = Files.readAllBytes(requireNotNull(reference))
+        val imageBytes = assertNotNull(referenceFixtureData("video.jpg"), "Required reference cover missing")
         assertEquals("18d7fe28bff459d41fb75fe8358bb6df0f7c5164c04158e8b120789af7da76a9", sha(imageBytes))
         val movieBytes = referenceVideo()
         val image = MemoryBinarySource(Bytes(imageBytes), SourceId("reference-oplus-image"))
@@ -97,22 +86,17 @@ class ProtocolCompatibilityFixtureTest {
     @Test fun vivoReadsVendorAndCompatibleBaseWithExactVideo() = check("video_vivo_LivePhoto_JPEG+MP4.jpg", ProtocolIds.VivoModern, Verdict.Warning, emptySet(), 295793, 8121397, originalHash)
     @Test fun updatedUserVivoReadsAndExtractsExactVideo() = check("user-vivo-20261009.jpg", ProtocolIds.VivoModern, Verdict.Warning, emptySet(), 295793, 8121397, originalHash)
     @Test fun allElevenUserPhotoOutputsHaveWholeFileOracles() {
-        val entries = javaClass.getResourceAsStream(resourceRoot + "user-photos.tsv").use {
-            requireNotNull(it).reader().readText().lineSequence().filter(String::isNotBlank).map { line -> line.split('\t') }.toList()
-        }
+        val entries = protocolFixtureData("user-photos.tsv").decodeToString().lineSequence()
+            .filter(String::isNotBlank).map { line -> line.split('\t') }.toList()
         assertEquals(11, entries.size)
         assertEquals(11, entries.map { it[0] }.toSet().size)
-        val directory = generateSequence(Path.of(System.getProperty("user.dir"))) { it.parent }
-            .map { it.resolve("reference/photos") }.firstOrNull(Files::isDirectory)
         for (entry in entries) {
             assertEquals(3, entry.size)
             assertEquals(entry[2], sha(captured(entry[1])), "Fixed oracle for ${entry[0]}")
-            if (directory != null) assertEquals(entry[2], sha(Files.readAllBytes(directory.resolve(entry[0]))), "Supplied file changed: ${entry[0]}")
+            referenceFixtureData("photos/${entry[0]}")?.let { assertEquals(entry[2], sha(it), "Supplied file changed: ${entry[0]}") }
         }
-        if (directory != null) {
-            assertEquals(originalHash, sha(Files.readAllBytes(directory.resolve("video.mp4"))))
-            assertEquals("18d7fe28bff459d41fb75fe8358bb6df0f7c5164c04158e8b120789af7da76a9", sha(Files.readAllBytes(directory.resolve("video.jpg"))))
-        }
+        referenceFixtureData("photos/video.mp4")?.let { assertEquals(originalHash, sha(it)) }
+        referenceFixtureData("photos/video.jpg")?.let { assertEquals("18d7fe28bff459d41fb75fe8358bb6df0f7c5164c04158e8b120789af7da76a9", sha(it)) }
     }
     @Test fun samsungJpegReportsLegacyFooterAndUsesPureVideoNotSefSuffix() = check("video_Samsung_MotionPhoto_JPEG+MP4.jpg", ProtocolIds.Samsung, Verdict.Invalid, setOf("MALFORMED_XMP", "MOTION_VIDEO_LENGTH_MISMATCH", "SEF_DIRECTORY_INVALID"), 294956, 8121397, originalHash)
     @Test fun samsungHeicReportsLegacyFooterAndKeepsDistinctVideoExtents() = check("video_Samsung_MotionPhoto_HEIC+MP4.heic", ProtocolIds.Samsung, Verdict.Invalid, setOf("CORRUPTED_CONTAINER", "MOTION_VIDEO_LENGTH_MISMATCH", "SEF_DIRECTORY_INVALID"), 1065745, 8121397, originalHash)
@@ -143,10 +127,10 @@ class ProtocolCompatibilityFixtureTest {
         val image = captured("vivo-legacy.image.jpg")
         val movie = captured("vivo-legacy.video.mp4")
         // Independently measured video-track fields: mdhd=9009, stts=8*1001=8008.
-        assertEquals("mdhd", movie.copyOfRange(296, 300).toString(Charsets.US_ASCII))
+        assertEquals("mdhd", movie.copyOfRange(296, 300).decodeToString())
         assertEquals(30_000, word(movie, 312))
         assertEquals(9_009, word(movie, 316))
-        assertEquals("stts", movie.copyOfRange(657, 661).toString(Charsets.US_ASCII))
+        assertEquals("stts", movie.copyOfRange(657, 661).decodeToString())
         assertEquals(1, word(movie, 665))
         assertEquals(8, word(movie, 669))
         assertEquals(1_001, word(movie, 673))
@@ -159,63 +143,61 @@ class ProtocolCompatibilityFixtureTest {
     }
 
     @Test fun allNineteenAssetsRestoreExactlyAndExportVerifiedManifest() {
-        val manifestBytes = javaClass.getResourceAsStream(resourceRoot + "captures.tsv").use { requireNotNull(it).readBytes() }
-        val names = manifestBytes.toString(Charsets.UTF_8).lineSequence().filter(String::isNotBlank).map { it.substringBefore('\t') }.toList()
+        val manifestBytes = protocolFixtureData("captures.tsv")
+        val names = manifestBytes.decodeToString().lineSequence().filter(String::isNotBlank).map { it.substringBefore('\t') }.toList()
         assertEquals(19, names.size)
         assertEquals(19, names.toSet().size)
         names.forEach { captured(it) }
-        val directory = Path.of("build", "reports", "protocol-compatibility")
-        Files.createDirectories(directory)
-        Files.write(directory.resolve("verified-captures.tsv"), manifestBytes)
-        javaClass.getResourceAsStream(resourceRoot + "asset-manifest.json").use { Files.write(directory.resolve("asset-manifest.json"), requireNotNull(it).readBytes()) }
+        exportFixtureEvidence("verified-captures.tsv", manifestBytes)
+        exportFixtureEvidence("asset-manifest.json", protocolFixtureData("asset-manifest.json"))
     }
 
     private fun referenceVideo(): ByteArray {
-        val path = generateSequence(Path.of(System.getProperty("user.dir"))) { it.parent }
-            .map { it.resolve("reference/video.mp4") }.firstOrNull(Files::isRegularFile)
-        if (System.getenv("LIVEPHOTO_REQUIRE_REFERENCE") == "true") assertNotNull(path, "Required reference is missing")
-        else assumeTrue("Skipped(missing-fixture): approved reference video missing; no device claim", path != null)
-        return Files.readAllBytes(requireNotNull(path)).also { assertEquals(originalHash, sha(it)) }
+        return assertNotNull(referenceFixtureData("video.mp4"), "Required reference missing")
+            .also { assertEquals(originalHash, sha(it)) }
     }
 
     private fun captured(name: String, depth: Int = 0): ByteArray {
         assertTrue(depth <= 1, "Captured-byte base must not recurse or form a cycle")
-        val manifest = javaClass.getResourceAsStream(resourceRoot + "captures.tsv").use {
-            requireNotNull(it).reader().readText().lineSequence().filter(String::isNotBlank).map { line -> line.split('\t') }.toList()
-        }
+        val manifest = protocolFixtureData("captures.tsv").decodeToString().lineSequence()
+            .filter(String::isNotBlank).map { line -> line.split('\t') }.toList()
         val entry = manifest.single { it[0] == name }
         assertEquals(5, entry.size)
         val expectedSize = entry[1].toInt()
         assertTrue(expectedSize in 1..32_000_000)
         val base = if (entry[4] == "reference/video.mp4") referenceVideo() else captured(entry[4], depth + 1)
-        val bytes = javaClass.getResourceAsStream(resourceRoot + entry[3]).use { stream ->
-            DataInputStream(GZIPInputStream(requireNotNull(stream))).use { input ->
-                val magic = ByteArray(8).also(input::readFully)
-                assertContentEquals("LPBFIX01".toByteArray(Charsets.US_ASCII), magic)
-                assertEquals(expectedSize, input.readInt())
-                val output = ByteArrayOutputStream(expectedSize)
-                while (true) {
-                    when (val record = input.readUnsignedByte()) {
-                        0 -> {
-                            val length = input.readInt()
-                            assertTrue(length in 1..(expectedSize - output.size()))
-                            output.write(ByteArray(length).also(input::readFully))
-                        }
-                        1 -> {
-                            val offset = input.readInt(); val length = input.readInt()
-                            assertTrue(length in 1..(expectedSize - output.size()))
-                            assertTrue(offset >= 0 && offset.toLong() + length <= base.size)
-                            output.write(base, offset, length)
-                        }
-                        255 -> break
-                        else -> fail("Unknown captured-byte record $record")
-                    }
+        val input = protocolFixtureData(entry[3].removeSuffix(".gz"))
+        var position = 0
+        fun take(length: Int): ByteArray {
+            assertTrue(length >= 0 && length <= input.size - position, "Truncated fixture record")
+            return input.copyOfRange(position, position + length).also { position += length }
+        }
+        fun int(): Int = word(take(4), 0)
+        assertContentEquals("LPBFIX01".encodeToByteArray(), take(8))
+        assertEquals(expectedSize, int())
+        val bytes = ByteArray(expectedSize)
+        var written = 0
+        while (true) {
+            when (val record = take(1)[0].toInt() and 255) {
+                0 -> {
+                    val length = int()
+                    assertTrue(length in 1..(expectedSize - written))
+                    take(length).copyInto(bytes, written)
+                    written += length
                 }
-                assertEquals(expectedSize, output.size())
-                assertEquals(-1, input.read(), "Unexpected trailing captured-byte records")
-                output.toByteArray()
+                1 -> {
+                    val offset = int(); val length = int()
+                    assertTrue(length in 1..(expectedSize - written))
+                    assertTrue(offset >= 0 && offset.toLong() + length <= base.size)
+                    base.copyInto(bytes, written, offset, offset + length)
+                    written += length
+                }
+                255 -> break
+                else -> fail("Unknown captured-byte record $record")
             }
         }
+        assertEquals(expectedSize, written)
+        assertEquals(input.size, position, "Unexpected trailing captured-byte records")
         assertEquals(entry[2], sha(bytes), "Whole fixture changed: $name")
         return bytes
     }
@@ -229,10 +211,10 @@ class ProtocolCompatibilityFixtureTest {
             // These literal offsets are measured in the captured media, not produced
             // by our reader/writer. The mdhd/stts disagreement needs CTS/edit review;
             // successful independent decode does not alone prove table validity.
-            assertEquals("mdhd", expectedMovie.copyOfRange(8114709, 8114713).toString(Charsets.US_ASCII))
+            assertEquals("mdhd", expectedMovie.copyOfRange(8114709, 8114713).decodeToString())
             assertEquals(30_000, word(expectedMovie, 8114725))
             assertEquals(152_152, word(expectedMovie, 8114729))
-            assertEquals("stts", expectedMovie.copyOfRange(8115189, 8115193).toString(Charsets.US_ASCII))
+            assertEquals("stts", expectedMovie.copyOfRange(8115189, 8115193).decodeToString())
             assertEquals(1, word(expectedMovie, 8115197))
             assertEquals(150, word(expectedMovie, 8115201))
             assertEquals(1_001, word(expectedMovie, 8115205))
@@ -289,13 +271,13 @@ class ProtocolCompatibilityFixtureTest {
         val imageHash = sha(image); val movieHash = sha(movie)
         // Independent fixed bytes in these captures: MakerNote header,
         // tag 0x11, 37-byte UUID+NUL. Do not use a Core writer/parser as the oracle.
-        val note = image.toString(Charsets.ISO_8859_1).indexOf("Apple iOS\u0000")
+        val note = image.latin1().indexOf("Apple iOS\u0000")
         assertTrue(note >= 0)
         assertContentEquals(byteArrayOf(0, 1, 0, 17, 0, 2, 0, 0, 0, 37, 0, 0, 0, 32), image.copyOfRange(note + 14, note + 28))
-        val cid = image.copyOfRange(note + 32, note + 68).toString(Charsets.US_ASCII)
+        val cid = image.copyOfRange(note + 32, note + 68).decodeToString()
         assertTrue(Regex("[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}").matches(cid))
         assertEquals(0, image[note + 68].toInt())
-        assertTrue(movie.toString(Charsets.ISO_8859_1).contains(cid), "Paired movie must carry this image's identifier")
+        assertTrue(movie.latin1().contains(cid), "Paired movie must carry this image's identifier")
         val input = SourceSet.Pair(MemoryBinarySource(Bytes(image), SourceId("fixture-apple-image:$profile")), MemoryBinarySource(Bytes(movie), SourceId("fixture-apple-movie:$profile")))
         val result = assertIs<CoreResult.Failure>(DefaultLivePhotoCore().inspect(ReadRequest(input, context)))
         assertEquals("CONFLICTING_METADATA", result.error.code.value)
@@ -311,7 +293,7 @@ class ProtocolCompatibilityFixtureTest {
                 assertTrue(end - offset >= 8)
                 val size = word(bytes, offset)
                 assertTrue(size in 8..(end - offset), "Only measured complete 32-bit fixture boxes")
-                if (bytes.copyOfRange(offset + 4, offset + 8).toString(Charsets.US_ASCII) == type)
+                if (bytes.copyOfRange(offset + 4, offset + 8).decodeToString() == type)
                     return (offset + 8) to (offset + size)
                 offset += size
             }
@@ -337,7 +319,7 @@ class ProtocolCompatibilityFixtureTest {
         val track = (0 to bytes.size).child("moov").child("trak")
         val media = track.child("mdia")
         val handler = media.child("hdlr").first + 8
-        assertEquals("vide", bytes.copyOfRange(handler, handler + 4).toString(Charsets.US_ASCII))
+        assertEquals("vide", bytes.copyOfRange(handler, handler + 4).decodeToString())
         val header = media.child("mdhd").first
         assertEquals(0, word(bytes, header)); assertEquals(30000, word(bytes, header + 12))
         val samples = media.child("minf").child("stbl")
@@ -350,6 +332,7 @@ class ProtocolCompatibilityFixtureTest {
             pts.indices.maxOf { pts[it] + deltas[it] }, word(bytes, edits + 12).toLong())
     }
 
-    private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+    private fun sha(bytes: ByteArray): String = Sha256().apply { update(Bytes(bytes)) }.finish().value
+    private fun ByteArray.latin1(): String = buildString(size) { for (byte in this@latin1) append((byte.toInt() and 255).toChar()) }
     private fun word(bytes: ByteArray, offset: Int): Int = (0..3).fold(0) { value, index -> (value shl 8) or (bytes[offset + index].toInt() and 255) }
 }
