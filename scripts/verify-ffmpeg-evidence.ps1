@@ -14,7 +14,7 @@ $expected = @(
 )
 $results = @()
 foreach ($name in $expected) {
-    $package = if ($name -in @('FfmpegIntegrationTest','FfmpegFrameIntegrationTest','FfmpegReplaceIntegrationTest')) {
+    $package = if ($name -in @('FfmpegIntegrationTest','FfmpegFrameIntegrationTest','FfmpegReplaceIntegrationTest','FfmpegCreateTrimIntegrationTest','FfmpegCreateReplacementIntegrationTest')) {
         'livephoto.core.media'
     } else { 'livephoto.core.jvm' }
     $file = "core/build/test-results/jvmTest/TEST-$package.$name.xml"
