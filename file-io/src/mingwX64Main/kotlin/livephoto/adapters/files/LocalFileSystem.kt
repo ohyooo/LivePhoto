@@ -11,8 +11,7 @@ public actual val localFileSystem: FileSystem = object : ForwardingFileSystem(Fi
         open(file, true, mustCreate, mustExist)
 }
 
-private fun ioFault(operation: String, write: Boolean): Nothing {
-    val number = GetLastError()
+private fun ioFault(operation: String, write: Boolean, number: UInt = GetLastError()): Nothing {
     throw NativeFileIOException(operation, number, write)
 }
 
@@ -49,12 +48,16 @@ private class LocalWindowsHandle(write: Boolean, private val handle: HANDLE) : F
         return memScoped {
             val count = alloc<UIntVar> { value = 0u }
             val overlapped = offset(fileOffset)
+            var error = 0u
             val succeeded = array.usePinned {
-                ReadFile(handle, it.addressOf(arrayOffset), byteCount.toUInt(), count.ptr, overlapped)
+                val result = ReadFile(handle, it.addressOf(arrayOffset), byteCount.toUInt(), count.ptr, overlapped)
+                // Capture before unpinning/runtime cleanup can overwrite thread-local LastError.
+                if (result == 0) error = GetLastError()
+                result
             }
             if (succeeded == 0) {
-                if (GetLastError().toInt() == ERROR_HANDLE_EOF) return@memScoped -1
-                ioFault("read", false)
+                if (error.toInt() == ERROR_HANDLE_EOF) return@memScoped -1
+                ioFault("read", false, error)
             }
             if (count.value == 0u) -1 else count.value.toInt()
         }
@@ -65,10 +68,13 @@ private class LocalWindowsHandle(write: Boolean, private val handle: HANDLE) : F
         while (completed < byteCount) memScoped {
             val count = alloc<UIntVar> { value = 0u }
             val overlapped = offset(fileOffset + completed)
+            var error = 0u
             val succeeded = array.usePinned {
-                WriteFile(handle, it.addressOf(arrayOffset + completed), (byteCount - completed).toUInt(), count.ptr, overlapped)
+                val result = WriteFile(handle, it.addressOf(arrayOffset + completed), (byteCount - completed).toUInt(), count.ptr, overlapped)
+                if (result == 0) error = GetLastError()
+                result
             }
-            if (succeeded == 0) ioFault("write", true)
+            if (succeeded == 0) ioFault("write", true, error)
             if (count.value == 0u || count.value > (byteCount - completed).toUInt()) {
                 throw NativeFileIOException("write-progress", 0u, true)
             }

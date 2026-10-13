@@ -3,6 +3,19 @@ import okio.use
 import kotlin.test.*
 
 class LocalHandleTest {
+    @Test fun repeatedEofAndOffsetReadsRemainStableUnderAllocationPressure() = sandbox { box ->
+        val file = box.file("eof", byteArrayOf(4))
+        box.fs.openReadOnly(file).use { handle ->
+            repeat(1000) {
+                // Allocate/pin repeatedly: Native cleanup must not destroy an EOF error code.
+                val buffer = ByteArray(65536)
+                assertEquals(-1, handle.read(1, buffer, 0, 1))
+                assertEquals(1, handle.read(0, buffer, 0, 1))
+                assertEquals(4.toByte(), buffer[0])
+            }
+        }
+        assertContentEquals(byteArrayOf(4), box.contents(file))
+    }
     @Test fun zeroResizeAndExplicitOffsetReadsDoNotDependOnSharedCursor() = sandbox { box ->
         val file = box.file("handle", byteArrayOf(1, 2, 3))
         box.fs.openReadWrite(file, mustExist = true).use { handle ->
