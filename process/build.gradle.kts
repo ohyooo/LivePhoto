@@ -16,6 +16,11 @@ kotlin {
             definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/posix.def"))
             includeDirs("src/nativeInterop/cinterop")
         }
+    } else {
+        host.compilations.getByName("main").cinterops.create("winio") {
+            definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/winio.def"))
+            includeDirs(rootProject.file("native-interop/windows"))
+        }
     }
     sourceSets {
         commonMain.dependencies { implementation(libs.kotlinx.coroutines) }

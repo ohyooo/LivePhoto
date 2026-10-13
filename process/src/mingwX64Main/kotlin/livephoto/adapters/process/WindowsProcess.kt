@@ -5,6 +5,8 @@ package livephoto.adapters.process
 import kotlinx.cinterop.*
 import platform.posix.memset
 import platform.windows.*
+import livephoto.adapters.process.winio.lp_win32_read
+import livephoto.adapters.process.winio.lp_win32_peek
 
 internal actual fun isAbsoluteExecutable(path: String): Boolean =
     '"' !in path && path.endsWith(".exe", ignoreCase = true) &&
@@ -96,17 +98,15 @@ private class WindowsChild(private val process: HANDLE, private val job: HANDLE,
     private var terminated = false
     override fun read(buffer: ByteArray): Int = memScoped {
         val available = alloc<DWORDVar>()
-        if (PeekNamedPipe(pipe, null, 0u, null, available.ptr, null) == 0)
-            return if (GetLastError() == ERROR_BROKEN_PIPE.toUInt()) -1 else -2
+        val error = alloc<UIntVar>()
+        if (lp_win32_peek(pipe, available.ptr, error.ptr) == 0)
+            return if (error.value == ERROR_BROKEN_PIPE.toUInt()) -1 else -2
         if (available.value == 0u) return 0
         val count = alloc<DWORDVar>()
-        var error = 0u
         val success = buffer.usePinned {
-            val result = ReadFile(pipe, it.addressOf(0), minOf(available.value, buffer.size.toUInt()), count.ptr, null)
-            if (result == 0) error = GetLastError()
-            result
+            lp_win32_read(pipe, it.addressOf(0), minOf(available.value, buffer.size.toUInt()), count.ptr, null, error.ptr)
         }
-        if (success == 0) return if (error == ERROR_BROKEN_PIPE.toUInt()) -1 else -2
+        if (success == 0) return if (error.value == ERROR_BROKEN_PIPE.toUInt()) -1 else -2
         if (count.value == 0u) -2 else count.value.toInt()
     }
     override fun exitCode(): Int? = memScoped {

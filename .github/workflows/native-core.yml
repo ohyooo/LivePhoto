@@ -173,8 +173,10 @@ jobs:
           path: |
             ci-output/native-core/core.klib
             ci-output/native-core/file-io.klib
+            ci-output/native-core/file-io-win32.klib
             ci-output/native-core/process.klib
             ci-output/native-core/process-posix.klib
+            ci-output/native-core/process-win32.klib
             ci-output/native-core-evidence.json
             ci-output/shared-cli-evidence.json
             ci-output/file-io-evidence.json
@@ -199,6 +201,7 @@ jobs:
             process/build/test-results/${{ matrix.target }}Test/
             process/build/reports/tests/${{ matrix.target }}Test/
             process/build/classes/kotlin/${{ matrix.target }}/main/
+            file-io/build/classes/kotlin/${{ matrix.target }}/main/
             core/build/libs/
             core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log

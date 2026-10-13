@@ -29,11 +29,10 @@ if ($log -notmatch ":file-io:${Target}Test(?:\s|$)" -or
     $log -match ":file-io:${Target}Test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)") {
     throw 'File IO Native tests were not freshly executed.'
 }
-$manifests = @(Get-ChildItem "file-io/build/classes/kotlin/$Target/main" -Recurse -File -Filter manifest |
-    Where-Object { $_.Directory.Name -eq 'default' })
-if ($manifests.Count -ne 1) { throw 'Expected one compiled file IO main library.' }
+$mainRoot = "file-io/build/classes/kotlin/$Target/main/klib/file-io"
+$mainManifest = Get-Item "$mainRoot/default/manifest"
 $manifest = @{}
-Get-Content $manifests[0].FullName | ForEach-Object {
+Get-Content $mainManifest.FullName | ForEach-Object {
     $parts = $_.Split('=', 2)
     if ($parts.Count -eq 2) { $manifest[$parts[0]] = $parts[1] }
 }
@@ -42,10 +41,26 @@ if ($manifest['builtins_platform'] -ne 'NATIVE' -or $manifest['native_targets'] 
     throw 'File IO library is not the requested Native target.'
 }
 $archive = Join-Path (Get-Location) 'ci-output/native-core/file-io.klib'
-[IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $archive,
+[IO.Compression.ZipFile]::CreateFromDirectory((Join-Path (Get-Location) $mainRoot), $archive,
     [IO.Compression.CompressionLevel]::Optimal, $false)
 $library = Get-Item $archive
 if ($library.Length -le 0) { throw 'Empty Native file IO library.' }
+$interopSha256 = $null
+if ($Target -eq 'mingwX64') {
+    $root = "file-io/build/classes/kotlin/$Target/main/cinterop"
+    $manifests = @(Get-ChildItem $root -Recurse -File -Filter manifest |
+        Where-Object { $_.Directory.Name -eq 'default' })
+    $interopArchive = Join-Path (Get-Location) 'ci-output/native-core/file-io-win32.klib'
+    if ($manifests.Count -eq 1) {
+        [IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $interopArchive,
+            [IO.Compression.CompressionLevel]::Optimal, $false)
+    } else {
+        $packed = @(Get-ChildItem $root -File -Filter '*.klib')
+        if ($manifests.Count -ne 0 -or $packed.Count -ne 1) { throw 'Missing or ambiguous file IO interop dependency.' }
+        Copy-Item -LiteralPath $packed[0].FullName -Destination $interopArchive
+    }
+    $interopSha256 = (Get-FileHash $interopArchive).Hash.ToLowerInvariant()
+}
 [ordered]@{
     target = $Target
     commit = $env:GITHUB_SHA
@@ -57,6 +72,7 @@ if ($library.Length -le 0) { throw 'Empty Native file IO library.' }
     library = $library.Name
     librarySha256 = (Get-FileHash $archive).Hash.ToLowerInvariant()
     libraryBytes = $library.Length
+    interopSha256 = $interopSha256
     compilerVersion = $manifest['compiler_version']
     nativeTarget = $konanTarget
     dependencies = $manifest['depends']

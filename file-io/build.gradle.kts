@@ -9,7 +9,12 @@ kotlin {
         null -> Unit
         "linux-x64" -> linuxX64()
         "macos-arm64" -> macosArm64()
-        "windows-x64" -> mingwX64()
+        "windows-x64" -> mingwX64().apply {
+            compilations.getByName("main").cinterops.create("winio") {
+                definitionFile.set(layout.projectDirectory.file("src/nativeInterop/cinterop/winio.def"))
+                includeDirs(rootProject.file("native-interop/windows"))
+            }
+        }
         else -> error("Unsupported livephoto.nativeTarget: $target")
     }
     sourceSets {

@@ -29,22 +29,20 @@ if ($manifest -notmatch '(?m)^builtins_platform=NATIVE\r?$' -or
 $archive = Join-Path (Get-Location) 'ci-output/native-core/process.klib'
 [IO.Compression.ZipFile]::CreateFromDirectory((Join-Path (Get-Location) $mainRoot), $archive,
     [IO.Compression.CompressionLevel]::Optimal, $false)
-$interopSha256 = $null
-if ($Target -ne 'mingwX64') {
-    $interopRoot = "process/build/classes/kotlin/$Target/main/cinterop"
-    $manifests = @(Get-ChildItem $interopRoot -Recurse -File -Filter manifest |
-        Where-Object { $_.Directory.Name -eq 'default' })
-    $interopArchive = Join-Path (Get-Location) 'ci-output/native-core/process-posix.klib'
-    if ($manifests.Count -eq 1) {
-        [IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $interopArchive,
-            [IO.Compression.CompressionLevel]::Optimal, $false)
-    } else {
-        $packed = @(Get-ChildItem $interopRoot -File -Filter '*.klib')
-        if ($manifests.Count -ne 0 -or $packed.Count -ne 1) { throw 'Missing or ambiguous owned POSIX interop dependency.' }
-        Copy-Item -LiteralPath $packed[0].FullName -Destination $interopArchive
-    }
-    $interopSha256 = (Get-FileHash $interopArchive).Hash.ToLowerInvariant()
+$interopRoot = "process/build/classes/kotlin/$Target/main/cinterop"
+$manifests = @(Get-ChildItem $interopRoot -Recurse -File -Filter manifest |
+    Where-Object { $_.Directory.Name -eq 'default' })
+$name = $(if ($Target -eq 'mingwX64') { 'process-win32.klib' } else { 'process-posix.klib' })
+$interopArchive = Join-Path (Get-Location) "ci-output/native-core/$name"
+if ($manifests.Count -eq 1) {
+    [IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $interopArchive,
+        [IO.Compression.CompressionLevel]::Optimal, $false)
+} else {
+    $packed = @(Get-ChildItem $interopRoot -File -Filter '*.klib')
+    if ($manifests.Count -ne 0 -or $packed.Count -ne 1) { throw 'Missing or ambiguous owned process interop dependency.' }
+    Copy-Item -LiteralPath $packed[0].FullName -Destination $interopArchive
 }
+$interopSha256 = (Get-FileHash $interopArchive).Hash.ToLowerInvariant()
 [ordered]@{
     target = $Target
     commit = $env:GITHUB_SHA

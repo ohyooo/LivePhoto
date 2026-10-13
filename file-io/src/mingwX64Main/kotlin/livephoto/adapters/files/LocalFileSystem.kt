@@ -4,6 +4,8 @@ package livephoto.adapters.files
 import kotlinx.cinterop.*
 import okio.*
 import platform.windows.*
+import livephoto.adapters.files.winio.lp_win32_read
+import livephoto.adapters.files.winio.lp_win32_write
 
 public actual val localFileSystem: FileSystem = object : ForwardingFileSystem(FileSystem.SYSTEM) {
     override fun openReadOnly(file: Path): FileHandle = open(file, false, false, true)
@@ -48,16 +50,13 @@ private class LocalWindowsHandle(write: Boolean, private val handle: HANDLE) : F
         return memScoped {
             val count = alloc<UIntVar> { value = 0u }
             val overlapped = offset(fileOffset)
-            var error = 0u
+            val error = alloc<UIntVar>()
             val succeeded = array.usePinned {
-                val result = ReadFile(handle, it.addressOf(arrayOffset), byteCount.toUInt(), count.ptr, overlapped)
-                // Capture before unpinning/runtime cleanup can overwrite thread-local LastError.
-                if (result == 0) error = GetLastError()
-                result
+                lp_win32_read(handle, it.addressOf(arrayOffset), byteCount.toUInt(), count.ptr, overlapped, error.ptr)
             }
             if (succeeded == 0) {
-                if (error.toInt() == ERROR_HANDLE_EOF) return@memScoped -1
-                ioFault("read", false, error)
+                if (error.value.toInt() == ERROR_HANDLE_EOF) return@memScoped -1
+                ioFault("read", false, error.value)
             }
             if (count.value == 0u) -1 else count.value.toInt()
         }
@@ -68,13 +67,11 @@ private class LocalWindowsHandle(write: Boolean, private val handle: HANDLE) : F
         while (completed < byteCount) memScoped {
             val count = alloc<UIntVar> { value = 0u }
             val overlapped = offset(fileOffset + completed)
-            var error = 0u
+            val error = alloc<UIntVar>()
             val succeeded = array.usePinned {
-                val result = WriteFile(handle, it.addressOf(arrayOffset + completed), (byteCount - completed).toUInt(), count.ptr, overlapped)
-                if (result == 0) error = GetLastError()
-                result
+                lp_win32_write(handle, it.addressOf(arrayOffset + completed), (byteCount - completed).toUInt(), count.ptr, overlapped, error.ptr)
             }
-            if (succeeded == 0) ioFault("write", true, error)
+            if (succeeded == 0) ioFault("write", true, error.value)
             if (count.value == 0u || count.value > (byteCount - completed).toUInt()) {
                 throw NativeFileIOException("write-progress", 0u, true)
             }
