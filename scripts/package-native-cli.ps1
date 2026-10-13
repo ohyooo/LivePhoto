@@ -125,6 +125,56 @@ if ($media.result.capabilities.backendIds.Count -ne 0 -or -not ($media.result.di
 $decode = Invoke-Native @('probe', '--input', $video, '--decode-check') 3
 if ($decode.error.code.value -ne 'CAPABILITY_UNSUPPORTED') { throw 'Native decode without backend must fail.' }
 
+# Existing synthetic protocol framing only. No HEVC decoder/device claim.
+$heicChecks = $script:checks
+function Read-SyntheticManifest([string]$directory, [string[]]$files) {
+    $manifest = @{}
+    foreach ($line in Get-Content (Join-Path $directory 'manifest.txt')) {
+        $parts = $line.Split('=', 2)
+        if ($parts.Count -ne 2 -or $manifest.ContainsKey($parts[0])) { throw 'Invalid synthetic fixture manifest.' }
+        $manifest[$parts[0]] = $parts[1]
+    }
+    if ($manifest['scope'] -ne 'synthetic-protocol-framing-not-decoder-or-device-proof' -or -not $manifest['runId']) {
+        throw 'Missing synthetic fixture scope or fresh run ID.'
+    }
+    foreach ($name in $files) {
+        if ($manifest[$name] -notmatch '^[0-9a-f]{64}$' -or
+            (Get-FileHash (Join-Path $directory $name)).Hash.ToLowerInvariant() -ne $manifest[$name]) {
+            throw 'Synthetic fixture hash mismatch.'
+        }
+    }
+    return $manifest
+}
+$googleHeic = Join-Path $repository 'core/build/portable-heic-fixtures'
+$googleHashes = Read-SyntheticManifest $googleHeic @('primary.heic','motion.mp4','motion.heic','damaged.heic')
+$heic = (Invoke-Native @('create', '--image', (Join-Path $googleHeic 'primary.heic'), '--video', (Join-Path $googleHeic 'motion.mp4'),
+    '--target', 'google.motionphoto.v2', '--profile', 'heic', '--frame-index', '0', '--strict', '--output-dir', (Join-Path $verify 'created HEIC'))).result
+$heicPath = $heic.output.assets[0].path
+if ($heic.output.assets[0].imageFormat -ne 'Heic' -or (Get-FileHash $heicPath).Hash.ToLowerInvariant() -ne $googleHashes['motion.heic']) {
+    throw 'Native HEIC Create differs from the independently verified Core fixture.'
+}
+$heicInspect = (Invoke-Native @('inspect', '--input', $heicPath)).result
+if ($heicInspect.detection.primaryProtocol.profile.value -ne 'heic') { throw 'Native HEIC inspection failed.' }
+$heicValidate = (Invoke-Native @('validate', '--input', $heicPath, '--layers', 'Structure,Protocol')).result
+if ($heicValidate.verdict -eq 'Invalid') { throw 'Native HEIC protocol validation failed.' }
+$heicRaw = (Invoke-Native @('extract', '--input', $heicPath, '--output-dir', (Join-Path $verify 'HEIC raw'))).result
+if ((Get-FileHash $heicRaw.output.assets[0].path).Hash.ToLowerInvariant() -ne $googleHashes['motion.mp4']) { throw 'Native HEIC extraction changed video bytes.' }
+$heicRepair = (Invoke-Native @('repair', '--input', (Join-Path $googleHeic 'damaged.heic'), '--apply', '--output-dir', (Join-Path $verify 'HEIC repaired'))).result
+if ((Get-FileHash $heicRepair.output.assets[0].path).Hash.ToLowerInvariant() -ne $googleHashes['motion.heic']) { throw 'Native HEIC repair differs from verified fixture.' }
+$huaweiHeic = Join-Path $repository 'core/build/reports/huawei-heic-fixtures'
+$huaweiHashes = Read-SyntheticManifest $huaweiHeic @('carrier.heic','movie.mp4')
+$misleading = Join-Path $verify 'Huawei HEIC image.jpg'
+Copy-Item (Join-Path $huaweiHeic 'carrier.heic') $misleading
+$huaweiInspect = (Invoke-Native @('inspect', '--input', $misleading)).result
+if ($huaweiInspect.detection.primaryProtocol.protocol.value -ne 'huawei.movingphoto' -or
+    $huaweiInspect.detection.disposition -ne 'Candidate' -or $huaweiInspect.media[0].imageFormat -ne 'Heic' -or
+    $huaweiInspect.media[0].coverage -ne 'Partial' -or $null -ne $huaweiInspect.keyPhoto.position) { throw 'Native Huawei HEIC scope was overstated.' }
+$huaweiRaw = (Invoke-Native @('extract', '--input', $misleading, '--output-dir', (Join-Path $verify 'Huawei HEIC raw'))).result
+if ($huaweiRaw.output.assets.Count -ne 1 -or (Get-FileHash $huaweiRaw.output.assets[0].path).Hash.ToLowerInvariant() -ne $huaweiHashes['movie.mp4'] -or
+    (Get-FileHash $misleading).Hash.ToLowerInvariant() -ne $huaweiHashes['carrier.heic']) { throw 'Native Huawei HEIC extraction changed input/output bytes.' }
+$syntheticHeicChecks = $script:checks - $heicChecks
+if ($syntheticHeicChecks -ne 7) { throw 'Incomplete synthetic HEIC protocol checks.' }
+
 $ffmpeg = $env:LIVEPHOTO_FFMPEG
 if (-not $ffmpeg -or !(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) { throw 'Mandatory Native FFmpeg missing.' }
 function Invoke-Fixture([string[]]$arguments) {
@@ -167,6 +217,7 @@ if ((Get-FileHash $image).Hash -ne $imageHash -or (Get-FileHash $video).Hash -ne
     commit = $env:GITHUB_SHA; run = $env:GITHUB_RUN_ID; target = $Target; platform = $Platform
     tests = $tests; skipped = 0; failures = 0; errors = 0; smokeChecks = $script:checks
     mediaChecks = $nativeMediaChecks; ffmpegVersion = (Get-Content ci-output/native-ffmpeg-version.txt -First 1)
+    syntheticHeicChecks = $syntheticHeicChecks
     binary = $binary[0].Name; binaryBytes = $binary[0].Length; binarySha256 = (Get-FileHash $launcher).Hash.ToLowerInvariant()
     archiveSha256 = (Get-FileHash $archive).Hash.ToLowerInvariant()
     scope = 'native-protocol-and-finite-ffmpeg-cli-no-jvm-no-device-compatibility-claim'

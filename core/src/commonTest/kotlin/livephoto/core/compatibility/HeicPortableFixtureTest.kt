@@ -1,4 +1,4 @@
-package livephoto.core.jvm
+package livephoto.core.compatibility
 
 import livephoto.core.*
 import livephoto.core.binary.*
@@ -6,9 +6,6 @@ import livephoto.core.bmff.*
 import livephoto.core.google.*
 import livephoto.core.heif.*
 import livephoto.core.memory.*
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.UUID
 import kotlin.test.*
 
 /** Export only synthetic framing fixtures into test build outputs for packaged CLI conformance.
@@ -36,16 +33,14 @@ class HeicPortableFixtureTest {
         core.repair(RepairRequest(SourceSet.Single(source(Bytes(damaged), "fixture-negative")), dryRun = false,
             output = repairTx, context = context)).orThrow()
         assertEquals(motion, repairTx.committedAssets().values.single())
-        val directory = Path.of("build", "portable-heic-fixtures")
-        Files.createDirectories(directory)
         val fixtures = linkedMapOf("primary.heic" to image, "motion.mp4" to video, "motion.heic" to motion, "damaged.heic" to Bytes(damaged))
-        val manifest = StringBuilder("scope=synthetic-protocol-framing-not-decoder-or-device-proof\nrunId=${UUID.randomUUID()}\n")
+        val manifest = StringBuilder("scope=synthetic-protocol-framing-not-decoder-or-device-proof\nrunId=${fixtureRunId()}\n")
         for ((name, bytes) in fixtures) {
-            Files.write(directory.resolve(name), bytes.toByteArray())
+            exportSyntheticFixture("google-heic", name, bytes.toByteArray())
             val hash = Sha256().also { it.update(bytes) }.finish().value
             manifest.append("$name=$hash\n")
         }
         // Last: consumers must check all file hashes rather than trusting stale/mixed files.
-        Files.writeString(directory.resolve("manifest.txt"), manifest.toString())
+        exportSyntheticFixture("google-heic", "manifest.txt", manifest.toString().encodeToByteArray())
     }
 }

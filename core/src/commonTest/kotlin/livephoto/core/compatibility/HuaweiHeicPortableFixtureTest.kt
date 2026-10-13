@@ -1,8 +1,5 @@
-package livephoto.core.jvm
+package livephoto.core.compatibility
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.UUID
 import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.google.GoogleFixtures
@@ -23,13 +20,11 @@ class HuaweiHeicPortableFixtureTest {
         val output = MemoryOutputTransaction(context, "portable-huawei-proof")
         core.extract(ExtractRequest(input, emptyList(), inspection.snapshot, output = output, context = context)).orThrow()
         assertEquals(Bytes(f.video), output.committedAssets().values.single())
-        val directory = Path.of("build", "reports", "huawei-heic-fixtures")
-        Files.createDirectories(directory)
-        val manifest = StringBuilder("scope=synthetic-protocol-framing-not-decoder-or-device-proof\nrunId=${UUID.randomUUID()}\n")
+        val manifest = StringBuilder("scope=synthetic-protocol-framing-not-decoder-or-device-proof\nrunId=${fixtureRunId()}\n")
         for ((name, bytes) in linkedMapOf("carrier.heic" to f.bytes, "movie.mp4" to f.video)) {
-            Files.write(directory.resolve(name), bytes)
+            exportSyntheticFixture("huawei-heic", name, bytes)
             manifest.append("$name=${Sha256().also { it.update(Bytes(bytes)) }.finish().value}\n")
         }
-        Files.writeString(directory.resolve("manifest.txt"), manifest.toString())
+        exportSyntheticFixture("huawei-heic", "manifest.txt", manifest.toString().encodeToByteArray())
     }
 }

@@ -31,3 +31,8 @@ internal actual fun exportFixtureEvidence(name: String, bytes: ByteArray) {
     Files.createDirectories(directory)
     Files.write(directory.resolve(name), bytes)
 }
+internal actual fun exportSyntheticFixture(group: String, name: String, bytes: ByteArray) {
+    val directory = Path.of("build", syntheticFixtureDirectory(group, name))
+    Files.createDirectories(directory)
+    Files.write(directory.resolve(name), bytes)
+}

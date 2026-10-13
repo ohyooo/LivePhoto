@@ -550,7 +550,7 @@ Native 库 artifact 现在另附 `file-io.klib` 和 `file-io-evidence.json`（�
 
 Native 与 JVM 共用同一套 FFmpeg 参数、媒体策略和结果验证，不扩大格式支持。抽帧后的 JPEG 由 Core 检查结构/尺寸，再单独调用 FFmpeg 完整解码；不使用 Java ImageIO，也不声称由不同解码器交叉验证。临时输出冻结后才读回，AAC hint 修复只允许已解析证明的等长字节范围，最终资产仍由 Core 验证并原子发布。已通过三平台有限媒体及成品验收；保留 JVM 版用于回归和迁移期对照。未知帧色彩仍拒绝；会改变已分类色彩 metadata 的 MOV remux 仍拒绝，不因迁移放宽。
 
-本批 Native 检查点：各平台 840 项测试（Core 732、共享 CLI 38、文件/FFmpeg 49、原生入口 5、进程 16），零失败、零跳过；解压后的程序另有 20 项 CLI 检查，含 9 项真实媒体检查。没有把历史 JVM 测试或纯协议检查当作 Native FFmpeg 验证。源码 `aca363c` 的 [Native 验收](https://github.com/ohyooo/LivePhoto/actions/runs/38345371733) 与 [JVM 回归](https://github.com/ohyooo/LivePhoto/actions/runs/38345371709) 均成功；最新提交结果见 Actions。
+已验证 Native 检查点 `b697bf5`：各平台 878 项测试（Core 761、共享 CLI 38、文件/FFmpeg 58、原生入口 5、进程 16），零失败、零跳过；解压后的程序另有 20 项 CLI 检查，含 9 项真实媒体检查。[Native 验收](https://github.com/ohyooo/LivePhoto/actions/runs/38360538649) 与 [JVM 回归](https://github.com/ohyooo/LivePhoto/actions/runs/38360538636) 均成功，18 份产物已核验。当前再迁移两个现有 HEIC 合成素材测试，并增加 7 项 Native 成品纯协议检查；不把这些合成检查当作 HEVC 解码或设备兼容证明，最新提交结果见 Actions。
 
 [Build workflow](.github/workflows/build.yml) 现在默认按宿主构建 Native release executable，上传 `LivePhoto-<平台>-<run_id>-<attempt>`，包含单文件归档和 `native-cli-evidence.json`；Windows x64 为 `LivePhoto.exe`，Linux x64 / macOS ARM64 为 `LivePhoto.kexe`，Unix tar 归档保留可执行权限。证据 JSON 给出内层归档和原生程序的 SHA-256；不要将 Native KLIB artifact 当作程序。
 

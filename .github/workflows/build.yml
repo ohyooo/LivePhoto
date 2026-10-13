@@ -201,6 +201,8 @@ jobs:
             core/build/test-results/${{ matrix.target }}Test/
             core/build/reports/tests/${{ matrix.target }}Test/
             core/build/reports/protocol-compatibility/
+            core/build/portable-heic-fixtures/
+            core/build/reports/huawei-heic-fixtures/
             cli-shared/build/test-results/${{ matrix.target }}Test/
             cli-shared/build/reports/tests/${{ matrix.target }}Test/
             file-io/build/test-results/${{ matrix.target }}Test/

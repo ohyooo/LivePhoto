@@ -4,6 +4,7 @@ $source = Join-Path (Get-Location) 'core/src/jvmTest/resources/protocol-compatib
 $destination = Join-Path (Get-Location) 'core/build/protocol-fixtures/v1'
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 New-Item -ItemType Directory -Path 'core/build/reports/protocol-compatibility' -Force | Out-Null
+New-Item -ItemType Directory -Path 'core/build/portable-heic-fixtures','core/build/reports/huawei-heic-fixtures' -Force | Out-Null
 foreach ($file in Get-ChildItem -LiteralPath $source -File) {
     $name = $file.Name
     $bytes = $null

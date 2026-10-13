@@ -38,7 +38,13 @@ internal actual fun referenceFixtureData(name: String): ByteArray? {
 }
 internal actual fun exportFixtureEvidence(name: String, bytes: ByteArray) {
     require(name in setOf("verified-captures.tsv", "asset-manifest.json"))
-    val file = listOf("build/reports/protocol-compatibility/$name", "core/build/reports/protocol-compatibility/$name")
+    writeFixture("reports/protocol-compatibility/$name", bytes)
+}
+internal actual fun exportSyntheticFixture(group: String, name: String, bytes: ByteArray) {
+    writeFixture("${syntheticFixtureDirectory(group, name)}/$name", bytes)
+}
+private fun writeFixture(relative: String, bytes: ByteArray) {
+    val file = listOf("build/$relative", "core/build/$relative")
         .firstNotNullOfOrNull { fopen(it, "wb") } ?: error("Prepared fixture evidence directory missing")
     try {
         if (bytes.isNotEmpty()) bytes.usePinned { pinned ->
