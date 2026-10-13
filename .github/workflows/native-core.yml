@@ -86,6 +86,10 @@ jobs:
           ./scripts/prepare-file-io-fixtures.ps1
           ./scripts/prepare-file-io-fixtures.ps1
 
+      - name: Prepare real Native process fixture
+        shell: pwsh
+        run: ./scripts/prepare-process-fixture.ps1
+
       - name: Compile Native Core and run shared tests
         id: native-test
         shell: pwsh
@@ -105,6 +109,9 @@ jobs:
             ':file-io:${{ matrix.target }}Test'
             '--rerun'
             ':cli-native:${{ matrix.target }}Test'
+            '--rerun'
+            ':process:${{ matrix.target }}MainKlibrary'
+            ':process:${{ matrix.target }}Test'
             '--rerun'
             ":cli-native:linkReleaseExecutable$binaryTarget"
             '--max-workers=1'
@@ -140,6 +147,10 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-file-io-evidence.ps1 -Target '${{ matrix.target }}'
 
+      - name: Verify Native process test evidence
+        shell: pwsh
+        run: ./scripts/verify-process-evidence.ps1 -Target '${{ matrix.target }}'
+
       - name: Package and verify Native protocol CLI
         shell: pwsh
         run: ./scripts/package-native-cli.ps1 -Platform '${{ matrix.platform }}' -Target '${{ matrix.target }}'
@@ -162,9 +173,11 @@ jobs:
           path: |
             ci-output/native-core/core.klib
             ci-output/native-core/file-io.klib
+            ci-output/native-core/process.klib
             ci-output/native-core-evidence.json
             ci-output/shared-cli-evidence.json
             ci-output/file-io-evidence.json
+            ci-output/process-evidence.json
           if-no-files-found: error
           retention-days: 14
 
@@ -182,6 +195,8 @@ jobs:
             file-io/build/reports/tests/${{ matrix.target }}Test/
             cli-native/build/test-results/${{ matrix.target }}Test/
             cli-native/build/reports/tests/${{ matrix.target }}Test/
+            process/build/test-results/${{ matrix.target }}Test/
+            process/build/reports/tests/${{ matrix.target }}Test/
             core/build/libs/
             core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log
@@ -190,5 +205,6 @@ jobs:
             ci-output/file-io-evidence.json
             ci-output/native-cli-evidence.json
             ci-output/native-cli-smoke.log
+            ci-output/process-evidence.json
           if-no-files-found: warn
           retention-days: 14

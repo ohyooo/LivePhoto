@@ -21,8 +21,8 @@ gradle.projectsEvaluated {
             check(platformTargets.none { it.endsWith(":jvm") || it.endsWith(":androidJvm") }) {
                 "JVM targets remain: $platformTargets"
             }
-            check(platformTargets.count { it.endsWith(":native") } == 4) {
-                "Expected four host Native targets: $platformTargets"
+            check(platformTargets.count { it.endsWith(":native") } == 5) {
+                "Expected five host Native targets: $platformTargets"
             }
             println("Native-only projects: $projectPaths")
             println("Native-only targets: $platformTargets")
