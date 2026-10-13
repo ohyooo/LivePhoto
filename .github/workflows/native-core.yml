@@ -94,7 +94,9 @@ jobs:
           $binaryTarget = '${{ matrix.target }}'
           $binaryTarget = $binaryTarget.Substring(0, 1).ToUpperInvariant() + $binaryTarget.Substring(1)
           $gradleArgs = @(
+            '-Plivephoto.jvm=false'
             '-Plivephoto.nativeTarget=${{ matrix.platform }}'
+            ':verifyNativeOnlyBuild'
             ':core:${{ matrix.target }}MainKlibrary'
             ':core:${{ matrix.target }}Test'
             '--rerun'

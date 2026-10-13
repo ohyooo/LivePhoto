@@ -534,14 +534,16 @@ Native 库 artifact 现在另附 `file-io.klib` 和 `file-io-evidence.json`（�
 
 编译仍需现有 JDK 25 和 Wrapper；**运行原生程序不需要 Java**。入口使用 [kotlinx.coroutines 1.11.0](https://github.com/Kotlin/kotlinx.coroutines/releases/tag/1.11.0) 的正式 `runBlocking` 等待挂起操作；该依赖只用于原生应用模块，不进入协议 Core。
 
+`-Plivephoto.jvm=false` 从构建图移除 JVM targets 和 JVM CLI 模块，必须同时指定宿主 `livephoto.nativeTarget`。Native CI 使用此模式，并通过 `verifyNativeOnlyBuild` 检查实际 targets；未指定时仍保留 JVM 构建，以免丢失尚未迁移的 FFmpeg 功能。这不代表 Java 已从 Gradle 构建工具中移除，也不代表已删除历史 JVM 源码。
+
 ```sh
 # 在对应宿主构建；不交叉执行其它平台程序
-./gradlew -Plivephoto.nativeTarget=linux-x64 :cli-native:linkReleaseExecutableLinuxX64
-./gradlew -Plivephoto.nativeTarget=macos-arm64 :cli-native:linkReleaseExecutableMacosArm64
+./gradlew -Plivephoto.jvm=false -Plivephoto.nativeTarget=linux-x64 :verifyNativeOnlyBuild :cli-native:linkReleaseExecutableLinuxX64
+./gradlew -Plivephoto.jvm=false -Plivephoto.nativeTarget=macos-arm64 :verifyNativeOnlyBuild :cli-native:linkReleaseExecutableMacosArm64
 ```
 
 ```powershell
-.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :cli-native:linkReleaseExecutableMingwX64
+.\gradlew.bat -Plivephoto.jvm=false -Plivephoto.nativeTarget=windows-x64 :verifyNativeOnlyBuild :cli-native:linkReleaseExecutableMingwX64
 ```
 
 产物位于 `cli-native/build/bin/<target>/releaseExecutable/`。每个需要读取输入的命令必须设置 `LIVEPHOTO_WORKSPACE`，指向**已存在、自己控制的私有本地目录**；不要选共享临时目录或网络共享。目录只用于有总预算限制的冻结输入副本，命令结束清理自有副本，不删除工作目录或未知文件。缺少设置返回结构化错误；`--help`、`--version` 和协议 capabilities 不要求这个目录。

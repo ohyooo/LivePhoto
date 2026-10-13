@@ -1,8 +1,10 @@
 plugins { alias(libs.plugins.kotlin.multiplatform) }
 
 kotlin {
-    jvm()
-    jvmToolchain(25)
+    if (providers.gradleProperty("livephoto.jvm").orNull != "false") {
+        jvm()
+        jvmToolchain(25)
+    }
     val host = when (val target = providers.gradleProperty("livephoto.nativeTarget").orNull) {
         null -> null
         "linux-x64" -> linuxX64()
