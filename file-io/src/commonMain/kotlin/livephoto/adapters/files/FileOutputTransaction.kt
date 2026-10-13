@@ -33,7 +33,7 @@ public class FileOutputTransaction(
     private fun requireState(expected: TransactionState) {
         if (state != expected) reject("INVALID_ARGUMENT", "Transaction is not in the required state")
     }
-    override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> = fileResult(Stage.WriteProtocol) {
+    override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> = fileResult(Stage.WriteProtocol, "Output asset acquisition") {
         requireState(TransactionState.Open); poll(context)
         if (entries.size.toULong() >= context.limits.maxItems) reject("RESOURCE_LIMIT_EXCEEDED", "Asset count budget exceeded")
         if (directory == null) {
@@ -169,7 +169,7 @@ public class FileOutputTransaction(
         fun finish() {
             handle?.let { it.flush(); it.close(); handle = null }
         }
-        override suspend fun write(bytes: Bytes): CoreResult<UInt> = fileResult(Stage.WriteProtocol) {
+        override suspend fun write(bytes: Bytes): CoreResult<UInt> = fileResult(Stage.WriteProtocol, "Output asset write") {
             val file = writer()
             if (bytes.size == 0) return@fileResult 0u
             if (bytes.size.toULong() > Long.MAX_VALUE.toULong() - position) reject("INTEGER_OVERFLOW", "Write range exceeds file offsets")
@@ -182,19 +182,19 @@ public class FileOutputTransaction(
             position = end
             bytes.size.toUInt()
         }
-        override suspend fun seek(offset: ULong): CoreResult<Unit> = fileResult(Stage.WriteProtocol) {
+        override suspend fun seek(offset: ULong): CoreResult<Unit> = fileResult(Stage.WriteProtocol, "Output asset seek") {
             writer()
             if (offset > Long.MAX_VALUE.toULong()) reject("OFFSET_OUT_OF_BOUNDS", "Seek exceeds file offset range")
             position = offset
         }
-        override suspend fun truncate(length: ULong): CoreResult<Unit> = fileResult(Stage.WriteProtocol) {
+        override suspend fun truncate(length: ULong): CoreResult<Unit> = fileResult(Stage.WriteProtocol, "Output asset truncate") {
             val file = writer()
             if (length > this.length || length > file.size().toULong()) reject("INVALID_ARGUMENT", "Truncate cannot extend a file")
             file.resize(length.toLong())
             allocated -= this.length - length; this.length = length
             position = minOf(position, length)
         }
-        override suspend fun flush(): CoreResult<Unit> = fileResult(Stage.WriteProtocol) { writer().flush() }
-        override suspend fun close(): CoreResult<Unit> = fileResult(Stage.WriteProtocol) { finish() }
+        override suspend fun flush(): CoreResult<Unit> = fileResult(Stage.WriteProtocol, "Output asset flush") { writer().flush() }
+        override suspend fun close(): CoreResult<Unit> = fileResult(Stage.WriteProtocol, "Output asset close") { finish() }
     }
 }

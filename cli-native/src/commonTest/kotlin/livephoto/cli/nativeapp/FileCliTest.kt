@@ -4,6 +4,7 @@ import livephoto.cli.shared.*
 import livephoto.core.*
 import livephoto.adapters.files.localFileSystem
 import okio.*
+import okio.Path.Companion.toPath
 import kotlin.coroutines.*
 import kotlin.random.Random
 import kotlin.test.*
@@ -26,6 +27,29 @@ private class Platform(root: String) : FileCliPlatform({ root }) {
 }
 
 class FileCliTest {
+    @Test fun referenceCreateUsesFullCliAndNestedUnicodeParent(): Unit = immediate {
+        val fs = localFileSystem
+        fun fixture(name: String): String = listOf("reference/$name", "../reference/$name")
+            .first { fs.exists(it.toPath()) }
+        val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-cli-test-${Random.nextLong().toULong()}"
+        fs.createDirectory(root, mustCreate = true)
+        try {
+            val parent = root / "verify native 路径"
+            fs.createDirectory(parent, mustCreate = true)
+            val workspace = parent / "private workspace 输入"
+            fs.createDirectory(workspace, mustCreate = true)
+            var json = ""
+            val exit = CliEngine(Platform(workspace.toString())).run(listOf("create",
+                "--image", fixture("video.jpg"), "--video", fixture("video.mp4"), "--target", "oplus.olive",
+                "--profile", "jpeg-no-tail", "--output-dir", (parent / "created live").toString())) { json = it }
+            assertEquals(0, exit, json)
+            assertTrue(json.contains("\"state\":\"Committed\""), json)
+            assertTrue(fs.list(workspace).isEmpty())
+        } finally {
+            check(root.name.startsWith("livephoto-cli-test-"))
+            fs.deleteRecursively(root, mustExist = true) // Only this exclusively reserved test sandbox.
+        }
+    }
     @Test fun missingWorkspaceReturnsStructuredFailureWithoutCreatingOutput(): Unit = immediate {
         var json = ""
         assertEquals(3, CliEngine(Platform("")).run(listOf("detect", "--input", "private-path")) { json = it })
