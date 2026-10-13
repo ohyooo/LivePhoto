@@ -21,18 +21,28 @@ if ($log -notmatch ":process:${Target}Test(?:\s|$)" -or
     $log -match ":process:${Target}Test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)") {
     throw 'Native process tests were not freshly executed.'
 }
-$manifests = @(Get-ChildItem "process/build/classes/kotlin/$Target/main" -Recurse -File -Filter manifest |
-    Where-Object { $_.Directory.Name -eq 'default' })
-if ($manifests.Count -ne 1) { throw 'Missing Native process library.' }
+$mainRoot = "process/build/classes/kotlin/$Target/main/klib/process"
+$manifest = Get-Content "$mainRoot/default/manifest" -Raw
+$nativeTarget = @{ linuxX64 = 'linux_x64'; macosArm64 = 'macos_arm64'; mingwX64 = 'mingw_x64' }[$Target]
+if ($manifest -notmatch '(?m)^builtins_platform=NATIVE\r?$' -or
+    $manifest -notmatch "(?m)^native_targets=$nativeTarget\r?$") { throw 'Wrong Native process library target.' }
 $archive = Join-Path (Get-Location) 'ci-output/native-core/process.klib'
-[IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $archive,
+[IO.Compression.ZipFile]::CreateFromDirectory((Join-Path (Get-Location) $mainRoot), $archive,
     [IO.Compression.CompressionLevel]::Optimal, $false)
 $interopSha256 = $null
 if ($Target -ne 'mingwX64') {
-    $interops = @(Get-ChildItem "process/build/classes/kotlin/$Target/main/cinterop" -File -Filter '*.klib')
-    if ($interops.Count -ne 1) { throw 'Missing owned POSIX interop dependency.' }
+    $interopRoot = "process/build/classes/kotlin/$Target/main/cinterop"
+    $manifests = @(Get-ChildItem $interopRoot -Recurse -File -Filter manifest |
+        Where-Object { $_.Directory.Name -eq 'default' })
     $interopArchive = Join-Path (Get-Location) 'ci-output/native-core/process-posix.klib'
-    Copy-Item -LiteralPath $interops[0].FullName -Destination $interopArchive
+    if ($manifests.Count -eq 1) {
+        [IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $interopArchive,
+            [IO.Compression.CompressionLevel]::Optimal, $false)
+    } else {
+        $packed = @(Get-ChildItem $interopRoot -File -Filter '*.klib')
+        if ($manifests.Count -ne 0 -or $packed.Count -ne 1) { throw 'Missing or ambiguous owned POSIX interop dependency.' }
+        Copy-Item -LiteralPath $packed[0].FullName -Destination $interopArchive
+    }
     $interopSha256 = (Get-FileHash $interopArchive).Hash.ToLowerInvariant()
 }
 [ordered]@{

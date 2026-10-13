@@ -6,6 +6,7 @@ import kotlinx.cinterop.*
 import platform.posix.*
 import livephoto.adapters.process.posix.lp_spawn
 import livephoto.adapters.process.posix.lp_exit
+import livephoto.adapters.process.posix.lp_terminate_group
 
 internal actual fun isAbsoluteExecutable(path: String): Boolean = path.startsWith("/")
 
@@ -62,7 +63,7 @@ private class PosixChild(private val pid: pid_t, private val pipe: Int) : ChildP
     override fun terminateTree(): Boolean {
         if (terminated) return true
         // The group was allocated atomically by posix_spawn, not a post-start race.
-        val success = kill(-pid, SIGKILL) == 0 || errno == ESRCH
+        val success = lp_terminate_group(pid) == 0
         if (success) terminated = true
         return success
     }

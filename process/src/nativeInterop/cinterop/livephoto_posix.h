@@ -6,8 +6,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 #ifdef __APPLE__
 #include <crt_externs.h>
+#include <libproc.h>
+#include <sys/proc.h>
 #else
 extern char **environ;
 #endif
@@ -49,5 +52,36 @@ static inline int lp_exit(int pid, int *code) {
     if (status.si_pid != pid) return 0;
     *code = status.si_code == CLD_EXITED ? status.si_status : 128 + status.si_status;
     return 1;
+}
+
+static inline int lp_terminate_group(int pid) {
+    if (kill(-pid, SIGKILL) == 0 || errno == ESRCH) return 0;
+    int error = errno;
+#ifdef __APPLE__
+    /* XNU killpg1 filters SZOMB then returns EPERM if no live recipient exists.
+     * Do not waive EPERM for a live inaccessible child: inspect the entire bounded
+     * group, including zombies (arg=1), while WNOWAIT still owns the leader PID. */
+    if (error == EPERM) {
+        int code;
+        if (lp_exit(pid, &code) == 1) {
+            int members[128];
+            errno = 0;
+            int bytes = proc_listpids(PROC_PGRP_ONLY, (uint32_t)pid, members, sizeof(members));
+            if (bytes >= 0 && bytes < (int)sizeof(members) && bytes % sizeof(int) == 0 &&
+                (bytes != 0 || errno == 0)) {
+                int zombies_only = 1;
+                for (int i = 0; i < bytes / (int)sizeof(int); i++) {
+                    struct proc_bsdinfo info;
+                    if (proc_pidinfo(members[i], PROC_PIDTBSDINFO, 1, &info, sizeof(info)) != sizeof(info) ||
+                        info.pbi_pgid != (uint32_t)pid || info.pbi_status != SZOMB) {
+                        zombies_only = 0; break;
+                    }
+                }
+                if (zombies_only) return 0;
+            }
+        }
+    }
+#endif
+    return error;
 }
 #endif

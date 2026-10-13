@@ -198,6 +198,7 @@ jobs:
             cli-native/build/reports/tests/${{ matrix.target }}Test/
             process/build/test-results/${{ matrix.target }}Test/
             process/build/reports/tests/${{ matrix.target }}Test/
+            process/build/classes/kotlin/${{ matrix.target }}/main/
             core/build/libs/
             core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log
