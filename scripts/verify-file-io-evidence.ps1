@@ -48,22 +48,7 @@ $archive = Join-Path (Get-Location) 'ci-output/native-core/file-io.klib'
     [IO.Compression.CompressionLevel]::Optimal, $false)
 $library = Get-Item $archive
 if ($library.Length -le 0) { throw 'Empty Native file IO library.' }
-$interopSha256 = $null
-if ($Target -eq 'mingwX64') {
-    $root = "file-io/build/classes/kotlin/$Target/main/cinterop"
-    $manifests = @(Get-ChildItem $root -Recurse -File -Filter manifest |
-        Where-Object { $_.Directory.Name -eq 'default' })
-    $interopArchive = Join-Path (Get-Location) 'ci-output/native-core/file-io-win32.klib'
-    if ($manifests.Count -eq 1) {
-        [IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $interopArchive,
-            [IO.Compression.CompressionLevel]::Optimal, $false)
-    } else {
-        $packed = @(Get-ChildItem $root -File -Filter '*.klib')
-        if ($manifests.Count -ne 0 -or $packed.Count -ne 1) { throw 'Missing or ambiguous file IO interop dependency.' }
-        Copy-Item -LiteralPath $packed[0].FullName -Destination $interopArchive
-    }
-    $interopSha256 = (Get-FileHash $interopArchive).Hash.ToLowerInvariant()
-}
+$interopProvider = $(if ($Target -eq 'mingwX64') { 'process-win32.klib' } else { $null })
 [ordered]@{
     target = $Target
     commit = $env:GITHUB_SHA
@@ -76,7 +61,7 @@ if ($Target -eq 'mingwX64') {
     library = $library.Name
     librarySha256 = (Get-FileHash $archive).Hash.ToLowerInvariant()
     libraryBytes = $library.Length
-    interopSha256 = $interopSha256
+    interopProvider = $interopProvider
     compilerVersion = $manifest['compiler_version']
     nativeTarget = $konanTarget
     dependencies = $manifest['depends']

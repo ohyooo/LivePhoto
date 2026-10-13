@@ -1,3 +1,0 @@
-headers = win32_io.h
-headerFilter = win32_io.h
-package = livephoto.adapters.files.winio

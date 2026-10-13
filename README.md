@@ -566,7 +566,7 @@ $env:LIVEPHOTO_WORKSPACE = "$env:LOCALAPPDATA\LivePhoto\workspace"
 
 CI 对归档解压后的原生程序执行原素材 Create → Inspect/Validate → 字节精确 Extract，检查输入不变、预算、缺少工作目录及无 FFmpeg 的明确拒绝。另要求真实媒体 probe、抽帧、AAC copy remux/trim、显式视频转码及组合 Create；每条命令结束须释放私有副本。验收期间 `JAVA_HOME` 指向不存在的目录，子程序 PATH 清空并显式指定 FFmpeg。真实媒体测试不允许因缺少工具而跳过；不是更多格式或真机兼容性证明。
 
-Native 迁移新增独立 `process` 适配模块：协程等待、非阻塞管道读取、受限日志、超时与取消，直接启动绝对路径的可执行文件，不经过 shell、不使用 Java `Thread` / `ProcessBuilder`。Windows 通过 UTF-16 参数和 Job Object 管理子进程，Unix 通过 `posix_spawn` 与独立进程组管理；少量 C interop 仅桥接系统声明与捕获 Win32 错误码，不增加第三方运行库。CI 编译自有小型 C 测试程序，检验真实 argv/管道/退出/取消与资源释放；辅助程序不进入发行应用。库 artifact 附 `process.klib`、自有 SDK interop KLIB 和进程测试证据；Windows 文件库也附对应 interop KLIB。FFmpeg 现已接到这个原生进程层，但独立进程测试不能代替媒体与成品验收。
+Native 迁移新增独立 `process` 适配模块：协程等待、非阻塞管道读取、受限日志、超时与取消，直接启动绝对路径的可执行文件，不经过 shell、不使用 Java `Thread` / `ProcessBuilder`。Windows 通过 UTF-16 参数和 Job Object 管理子进程，Unix 通过 `posix_spawn` 与独立进程组管理；少量 C interop 仅桥接系统声明与捕获 Win32 错误码，不增加第三方运行库。CI 编译自有小型 C 测试程序，检验真实 argv/管道/退出/取消与资源释放；辅助程序不进入发行应用。库 artifact 附 `process.klib`、自有 SDK interop KLIB 和进程测试证据；Windows 文件库复用同一份 `process-win32.klib` 绑定，避免重复生成同一 header。FFmpeg 现已接到这个原生进程层，但独立进程测试不能代替媒体与成品验收。
 
 ## CI 与产物
 

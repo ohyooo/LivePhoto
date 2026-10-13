@@ -177,7 +177,6 @@ jobs:
           path: |
             ci-output/native-core/core.klib
             ci-output/native-core/file-io.klib
-            ci-output/native-core/file-io-win32.klib
             ci-output/native-core/process.klib
             ci-output/native-core/process-posix.klib
             ci-output/native-core/process-win32.klib

@@ -4,8 +4,8 @@ package livephoto.adapters.files
 import kotlinx.cinterop.*
 import okio.*
 import platform.windows.*
-import livephoto.adapters.files.winio.lp_win32_read
-import livephoto.adapters.files.winio.lp_win32_write
+import livephoto.adapters.process.winio.lp_win32_read
+import livephoto.adapters.process.winio.lp_win32_write
 
 public actual val localFileSystem: FileSystem = object : ForwardingFileSystem(FileSystem.SYSTEM) {
     override fun openReadOnly(file: Path): FileHandle = open(file, false, false, true)
