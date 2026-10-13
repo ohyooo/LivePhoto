@@ -1,4 +1,4 @@
-package livephoto.core.jvm
+package livephoto.core.media
 
 import livephoto.core.*
 import livephoto.core.binary.*
@@ -6,58 +6,46 @@ import livephoto.core.bmff.*
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.implementation.*
 import livephoto.core.memory.*
-import java.nio.file.Files
-import java.nio.file.Path
-import org.junit.Assume.assumeTrue
 import kotlin.test.*
 
 /** Actual FFmpeg packet copy, never a synthetic writer standing in for a media backend. */
 class FfmpegAudioTrimIntegrationTest {
     private val context = Context(Limits(128_000_000uL, 128_000_000uL))
-    private fun discovery(): BackendDiscovery {
-        val found = JvmMediaBackends.discover(System.getenv("LIVEPHOTO_FFMPEG")?.let(Path::of))
-        if (System.getenv("LIVEPHOTO_REQUIRE_FFMPEG") == "true") assertNotNull(found.ffmpegPath)
-        assumeTrue("No existing FFmpeg; audio trim was not executed", found.ffmpegPath != null)
-        return found
-    }
-    private suspend fun fixture(found: BackendDiscovery, twoAudio: Boolean = true, directConfiguration: Boolean = false,
+    private suspend fun fixture(host: MediaTestHost, twoAudio: Boolean = true, directConfiguration: Boolean = false,
         body: suspend (BinarySource, VideoStructure, BinaryReader, DefaultLivePhotoCore) -> Unit) {
-        val directory = Files.createTempDirectory("livephoto-audio-trim-")
-        val file = directory.resolve("video with two audio tracks.mp4")
-        val videoOnly = directory.resolve("video.mp4")
+        val file = host.path("video with two audio tracks.mp4")
+        val videoOnly = host.path("video.mp4")
         val extension = if (directConfiguration) "m4a" else "aac"
-        val audio = listOf(directory.resolve("mono.$extension"), directory.resolve("stereo.$extension"))
-        fun generate(arguments: List<String>) {
-            val process = ExternalProcess.run(listOf(found.ffmpegPath.toString(), "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + arguments, 60_000L)
+        val audio = listOf(host.path("mono.$extension"), host.path("stereo.$extension"))
+        suspend fun generate(arguments: List<String>) {
+            val process = host.execute(listOf(host.executable, "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + arguments, 60_000L)
             assertEquals(0, process.code, process.output)
         }
+        generate(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "40",
+            "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "3", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
+            "-use_editlist", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", videoOnly.toString()))
+        for ((index, path) in audio.withIndex()) generate(listOf("-f", "lavfi", "-i", "sine=frequency=${440 + index * 440}:sample_rate=${if (index == 0) 44100 else 48000}:duration=1.6",
+            "-c:a", "aac", "-b:a", "64k", "-ac", (index + 1).toString(), "-flags:a", "+bitexact") +
+            (if (directConfiguration) listOf("-use_editlist", "0", "-fflags", "+bitexact", "-write_btrt", "0") else listOf("-f", "adts")) + listOf(path.toString()))
+        generate(listOf("-i", videoOnly.toString(), "-i", audio[0].toString(), "-i", audio[1].toString(), "-map", "1:a", "-map", "0:v") + (if (twoAudio) listOf("-map", "2:a") else emptyList()) + listOf(
+            "-c", "copy") + (if (directConfiguration) emptyList() else listOf("-bsf:a", "aac_adtstoasc")) + listOf("-use_editlist", "0", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0",
+            "-streamid", "0:4", "-streamid", "1:17") + (if (twoAudio) listOf("-streamid", "2:29") else emptyList()) + listOf("-use_stream_ids_as_track_ids", "1", file.toString()))
+        val source = host.source(file)
         try {
-            generate(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "40",
-                "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "3", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
-                "-use_editlist", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", videoOnly.toString()))
-            for ((index, path) in audio.withIndex()) generate(listOf("-f", "lavfi", "-i", "sine=frequency=${440 + index * 440}:sample_rate=${if (index == 0) 44100 else 48000}:duration=1.6",
-                "-c:a", "aac", "-b:a", "64k", "-ac", (index + 1).toString(), "-flags:a", "+bitexact") +
-                (if (directConfiguration) listOf("-use_editlist", "0", "-fflags", "+bitexact", "-write_btrt", "0") else listOf("-f", "adts")) + listOf(path.toString()))
-            generate(listOf("-i", videoOnly.toString(), "-i", audio[0].toString(), "-i", audio[1].toString(), "-map", "1:a", "-map", "0:v") + (if (twoAudio) listOf("-map", "2:a") else emptyList()) + listOf(
-                "-c", "copy") + (if (directConfiguration) emptyList() else listOf("-bsf:a", "aac_adtstoasc")) + listOf("-use_editlist", "0", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0",
-                "-streamid", "0:4", "-streamid", "1:17") + (if (twoAudio) listOf("-streamid", "2:29") else emptyList()) + listOf("-use_stream_ids_as_track_ids", "1", file.toString()))
-            val source = FileBinarySource(file)
-            try {
-                val reader = BinaryReader(source, context)
-                val range = ByteRange(0uL, reader.identity().orThrow().size)
-                val hash = sha256Range(reader, range).orThrow()
-                val video = BmffVideoProbe(reader).probe(range).orThrow()
-                assertEquals(if (twoAudio) listOf(4u, 17u, 29u) else listOf(4u, 17u), video.tracks.map { it.trackId })
-                assertEquals(if (twoAudio) listOf(44100u, 48000u) else listOf(44100u), video.tracks.filter { it.handler == "soun" }.map { it.timescale })
-                body(source, video, reader, DefaultLivePhotoCore(found.backend))
-                assertEquals(hash, sha256Range(reader, range).orThrow())
-            } finally { source.close() }
-        } finally { (listOf(file, videoOnly) + audio).forEach { Files.deleteIfExists(it) }; Files.delete(directory) }
+            val reader = BinaryReader(source, context)
+            val range = ByteRange(0uL, reader.identity().orThrow().size)
+            val hash = sha256Range(reader, range).orThrow()
+            val video = BmffVideoProbe(reader).probe(range).orThrow()
+            assertEquals(if (twoAudio) listOf(4u, 17u, 29u) else listOf(4u, 17u), video.tracks.map { it.trackId })
+            assertEquals(if (twoAudio) listOf(44100u, 48000u) else listOf(44100u), video.tracks.filter { it.handler == "soun" }.map { it.timescale })
+            body(source, video, reader, DefaultLivePhotoCore(host.backend))
+            assertEquals(hash, sha256Range(reader, range).orThrow())
+        } finally { source.close() }
     }
 
-    @Test fun knownAbsentSbrConfigurationIsPreservedByRealAllTrackRemuxAndTrim(): Unit = runImmediate {
+    @Test fun knownAbsentSbrConfigurationIsPreservedByRealAllTrackRemuxAndTrim(): Unit = runMediaTest { host ->
         // Encoding here creates independent test inputs only; neither tested operation may encode audio.
-        fixture(discovery(), directConfiguration = true) { source, original, _, core ->
+        fixture(host, directConfiguration = true) { source, original, _, core ->
             for (track in original.tracks.filter { it.handler == "soun" }) {
                 val raw = track.codecConfiguration.toByteArray()
                 assertTrue(raw.asList().windowed(3).any { it == listOf(0x56.toByte(), 0xe5.toByte(), 0.toByte()) }, "Fixture must exercise the explicit absent-SBR extension")
@@ -82,9 +70,8 @@ class FfmpegAudioTrimIntegrationTest {
         }
     }
 
-    @Test fun nonzeroPreferredTrimCopiesBothAudioTracksAndDisclosesTheirExactPacketRanges(): Unit = runImmediate {
-        val found = discovery()
-        fixture(found) { source, video, input, core ->
+    @Test fun nonzeroPreferredTrimCopiesBothAudioTracksAndDisclosesTheirExactPacketRanges(): Unit = runMediaTest { host ->
+        fixture(host) { source, video, input, core ->
             val spec = TrimSpec(TimeRange(Time(130, 1000u), Time(270, 1000u)))
             val plan = planLosslessTrim(input, video, spec)
             val tx = MemoryOutputTransaction(context, "audio-trim-preferred")
@@ -125,8 +112,8 @@ class FfmpegAudioTrimIntegrationTest {
         }
     }
 
-    @Test fun prefixCopyPreservesRecoveryAndStrictOrdinaryMetadata(): Unit = runImmediate {
-        fixture(discovery()) { source, video, input, core ->
+    @Test fun prefixCopyPreservesRecoveryAndStrictOrdinaryMetadata(): Unit = runMediaTest { host ->
+        fixture(host) { source, video, input, core ->
             val spec = TrimSpec(TimeRange(Time.Zero, Time(280, 1000u)))
             val plan = planLosslessTrim(input, video, spec)
             val result = core.trim(TrimRequest(ResourceRef(SourceSet.Single(source)), spec,
@@ -140,9 +127,9 @@ class FfmpegAudioTrimIntegrationTest {
         }
     }
 
-    @Test fun createAndConvertUsePrivateAudioTrimAndRebaseTheKeyWithoutDroppingTracks(): Unit = runImmediate {
+    @Test fun createAndConvertUsePrivateAudioTrimAndRebaseTheKeyWithoutDroppingTracks(): Unit = runMediaTest { host ->
         // Protocol writers retain their existing single-audio constraint; trim does not expand it.
-        fixture(discovery(), twoAudio = false) { source, _, _, core ->
+        fixture(host, twoAudio = false) { source, _, _, core ->
             val image = MemoryBinarySource(Bytes(GoogleFixtures.jpeg()), SourceId("audio-trim-image"))
             val sourceReader = BinaryReader(source, context)
             val originalVideo = sourceReader.readExactly(0uL, sourceReader.identity().orThrow().size.toUInt()).orThrow().toByteArray()

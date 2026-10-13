@@ -1,6 +1,7 @@
 package livephoto.core.media
 
 import livephoto.core.*
+import livephoto.core.binary.Sha256
 import livephoto.core.ffmpeg.FfmpegProcessResult
 
 internal val mediaTestContext = Context(Limits(128_000_000uL, 128_000_000uL))
@@ -16,6 +17,9 @@ internal interface MediaTestHost {
     suspend fun execute(arguments: List<String>, timeoutMillis: Long = 60_000): FfmpegProcessResult
 }
 internal expect fun runMediaTest(block: suspend (MediaTestHost) -> Unit)
+
+/** Hash the original host file as well as any frozen BinarySource snapshot. */
+internal fun mediaFileDigest(bytes: ByteArray): Digest = Sha256().apply { update(Bytes(bytes)) }.finish()
 
 internal fun frameFixtureArguments(executable: String, path: String, colors: Boolean = true): List<String> =
     listOf(executable, "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror",

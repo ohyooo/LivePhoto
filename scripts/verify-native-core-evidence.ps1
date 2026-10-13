@@ -31,6 +31,14 @@ if ($reports.Count -eq 0) { throw 'Missing executed Native test reports.' }
 $tests = 0
 $fixtureTests = 0
 $mediaTests = 0
+$mediaSuites = @{
+    FfmpegIntegrationTest = 1; FfmpegFrameIntegrationTest = 3
+    FfmpegReplaceIntegrationTest = 1; FfmpegCreateTrimIntegrationTest = 1
+    FfmpegCreateReplacementIntegrationTest = 1; FfmpegAudioTrimIntegrationTest = 4
+    FfmpegTrimIntegrationTest = 2; FfmpegRemuxIntegrationTest = 5
+    FfmpegTranscodeIntegrationTest = 2
+}
+$seenMedia = @{}
 foreach ($file in $reports) {
     [xml]$report = Get-Content -LiteralPath $file.FullName -Raw
     $suite = $report.testsuite
@@ -40,9 +48,17 @@ foreach ($file in $reports) {
     }
     $tests += [int]$suite.tests
     if ($file.Name -match 'ProtocolCompatibilityFixtureTest') { $fixtureTests += [int]$suite.tests }
-    if ($file.Name -match 'livephoto\.core\.media\.Ffmpeg(Frame|Replace|CreateTrim|CreateReplacement)?IntegrationTest') { $mediaTests += [int]$suite.tests }
+    foreach ($name in $mediaSuites.Keys) {
+        if ($suite.name -eq "livephoto.core.media.$name") {
+            if ($seenMedia.ContainsKey($name) -or [int]$suite.tests -ne $mediaSuites[$name]) {
+                throw "Duplicate or incomplete real media suite: $name"
+            }
+            $seenMedia[$name] = $true
+            $mediaTests += [int]$suite.tests
+        }
+    }
 }
-if ($mediaTests -ne 7) { throw 'Mandatory common real media regressions must all execute on Native.' }
+if ($mediaTests -ne 20 -or $seenMedia.Count -ne $mediaSuites.Count) { throw 'Mandatory common real media regressions must all execute on Native.' }
 if ($fixtureTests -ne 20) { throw 'Fixed protocol fixture regressions must all execute on Native.' }
 $fixtureEvidence = 'core/build/reports/protocol-compatibility/verified-captures.tsv'
 if (-not (Test-Path $fixtureEvidence) -or @(Get-Content $fixtureEvidence | Where-Object { $_.Trim() }).Count -ne 19) {

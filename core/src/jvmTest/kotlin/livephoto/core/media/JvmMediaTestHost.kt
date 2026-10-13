@@ -14,6 +14,7 @@ internal actual fun runMediaTest(block: suspend (MediaTestHost) -> Unit): Unit {
     assumeTrue("No existing FFmpeg; real media tests were not run", discovery.ffmpegPath != null)
     val root = Files.createTempDirectory("livephoto-common-media-")
     val owned = linkedSetOf<Path>()
+    val originals = linkedMapOf<String, Digest>()
     val host = object : MediaTestHost {
         override val executable = assertNotNull(discovery.ffmpegPath).toString()
         override val backend = assertNotNull(discovery.backend)
@@ -27,13 +28,22 @@ internal actual fun runMediaTest(block: suspend (MediaTestHost) -> Unit): Unit {
                 .map { it.resolve("reference/$name") }.first(Files::isRegularFile).toString()
         }
         override fun read(path: String): ByteArray = Files.readAllBytes(Path.of(path))
-        override suspend fun source(path: String): BinarySource = FileBinarySource(Path.of(path))
+        override suspend fun source(path: String): BinarySource {
+            originals.getOrPut(path) { mediaFileDigest(read(path)) }
+            return FileBinarySource(Path.of(path))
+        }
         override suspend fun execute(arguments: List<String>, timeoutMillis: Long): FfmpegProcessResult =
             JvmFfmpegRuntime.execute(arguments, timeoutMillis, mediaTestContext)
     }
     try { runImmediate { block(host) } }
     finally {
-        owned.forEach { Files.deleteIfExists(it) }
-        Files.delete(root) // Unexpected children must fail cleanup, never be recursively erased.
+        try {
+            originals.forEach { (path, digest) ->
+                assertEquals(digest, mediaFileDigest(Files.readAllBytes(Path.of(path))), "Original input changed")
+            }
+        } finally {
+            owned.forEach { Files.deleteIfExists(it) }
+            Files.delete(root) // Unexpected children must fail cleanup, never be recursively erased.
+        }
     }
 }

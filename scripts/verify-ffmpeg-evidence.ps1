@@ -14,9 +14,7 @@ $expected = @(
 )
 $results = @()
 foreach ($name in $expected) {
-    $package = if ($name -in @('FfmpegIntegrationTest','FfmpegFrameIntegrationTest','FfmpegReplaceIntegrationTest','FfmpegCreateTrimIntegrationTest','FfmpegCreateReplacementIntegrationTest')) {
-        'livephoto.core.media'
-    } else { 'livephoto.core.jvm' }
+    $package = 'livephoto.core.media'
     $file = "core/build/test-results/jvmTest/TEST-$package.$name.xml"
     if (-not (Test-Path $file)) { throw "Missing real FFmpeg test report: $name" }
     [xml]$report = Get-Content -LiteralPath $file -Raw
