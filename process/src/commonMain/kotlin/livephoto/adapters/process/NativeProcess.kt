@@ -21,6 +21,8 @@ public data class ProcessResult(
  * environment and a private process group/job. OS pipe reads are nonblocking;
  * delay yields while awaiting data/exit. The caller owns diagnostic redaction.
  * Coroutine cancellation propagates only after terminating/reaping the child.
+ * This is not a sandbox: trusted children must not escape their group/job.
+ * On POSIX the embedding host must mark unrelated descriptors CLOEXEC.
  */
 public object NativeProcess {
     public suspend fun run(
@@ -36,15 +38,15 @@ public object NativeProcess {
         require(isAbsoluteExecutable(argv.first())) { "An absolute executable path is required" }
         currentCoroutineContext().ensureActive()
         if (cancelled()) return ProcessResult(ProcessStatus.Cancelled, null, "")
-        val child = startProcess(argv) ?: return ProcessResult(ProcessStatus.StartFailed, null, "")
         val retained = ByteArray(maxDiagnosticBytes)
         val buffer = ByteArray(4096)
+        val start = TimeSource.Monotonic.markNow()
+        val child = startProcess(argv) ?: return ProcessResult(ProcessStatus.StartFailed, null, "")
         var length = 0
         var status = ProcessStatus.Exited
         var code: Int? = null
         var eof = false
         var cleaned = true
-        val start = TimeSource.Monotonic.markNow()
         try {
             while (true) {
                 currentCoroutineContext().ensureActive()

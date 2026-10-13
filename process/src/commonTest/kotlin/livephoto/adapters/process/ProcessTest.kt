@@ -33,13 +33,13 @@ class ProcessTest {
         assertEquals(ProcessStatus.StartFailed, result.status)
         assertEquals("", result.diagnostics)
     }
-    @Test fun relativeExecutableRejected() = runBlocking {
+    @Test fun relativeExecutableRejected() = runBlocking<Unit> {
         assertFailsWith<IllegalArgumentException> { NativeProcess.run(listOf("fixture.exe")) }
     }
-    @Test fun nulArgumentRejected() = runBlocking {
+    @Test fun nulArgumentRejected() = runBlocking<Unit> {
         assertFailsWith<IllegalArgumentException> { run("echo", "bad\u0000argument") }
     }
-    @Test fun invalidBudgetsRejected() = runBlocking {
+    @Test fun invalidBudgetsRejected() = runBlocking<Unit> {
         assertFailsWith<IllegalArgumentException> { NativeProcess.run(listOf(fixtureExecutable()), timeoutMillis = 0) }
         assertFailsWith<IllegalArgumentException> { NativeProcess.run(listOf(fixtureExecutable()), maxDiagnosticBytes = 65_537) }
     }
