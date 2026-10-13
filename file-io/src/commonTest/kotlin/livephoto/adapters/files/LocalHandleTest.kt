@@ -1,4 +1,5 @@
 package livephoto.adapters.files
+import okio.use
 import kotlin.test.*
 
 class LocalHandleTest {
