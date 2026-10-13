@@ -27,6 +27,14 @@ if ($manifests.Count -ne 1) { throw 'Missing Native process library.' }
 $archive = Join-Path (Get-Location) 'ci-output/native-core/process.klib'
 [IO.Compression.ZipFile]::CreateFromDirectory($manifests[0].Directory.Parent.FullName, $archive,
     [IO.Compression.CompressionLevel]::Optimal, $false)
+$interopSha256 = $null
+if ($Target -ne 'mingwX64') {
+    $interops = @(Get-ChildItem "process/build/classes/kotlin/$Target/main/cinterop" -File -Filter '*.klib')
+    if ($interops.Count -ne 1) { throw 'Missing owned POSIX interop dependency.' }
+    $interopArchive = Join-Path (Get-Location) 'ci-output/native-core/process-posix.klib'
+    Copy-Item -LiteralPath $interops[0].FullName -Destination $interopArchive
+    $interopSha256 = (Get-FileHash $interopArchive).Hash.ToLowerInvariant()
+}
 [ordered]@{
     target = $Target
     commit = $env:GITHUB_SHA
@@ -36,6 +44,7 @@ $archive = Join-Path (Get-Location) 'ci-output/native-core/process.klib'
     errors = 0
     skipped = 0
     librarySha256 = (Get-FileHash $archive).Hash.ToLowerInvariant()
+    interopSha256 = $interopSha256
     scope = 'native-argv-process-pipes-timeout-cancellation-resource-cleanup-not-ffmpeg-backend'
 } | ConvertTo-Json | Set-Content ci-output/process-evidence.json -Encoding utf8
 Write-Host "NATIVE_PROCESS_EVIDENCE=SUCCESS target=$Target tests=$tests"

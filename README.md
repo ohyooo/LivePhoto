@@ -564,6 +564,8 @@ $env:LIVEPHOTO_WORKSPACE = "$env:LOCALAPPDATA\LivePhoto\workspace"
 
 CI 对归档解压后的原生程序执行原素材 Create → Inspect/Validate → 字节精确 Extract，检查输入不变、预算与缺少工作目录的拒绝、每条命令后副本清理、未实现后端的明确拒绝。另有真实文件适配和实际挂起的入口测试。验收期间 `JAVA_HOME` 指向不存在的目录；这不是 FFmpeg、更多协议格式或真机兼容性证明。
 
+Native 迁移新增独立 `process` 适配模块：协程等待、非阻塞管道读取、受限日志、超时与取消，直接启动绝对路径的可执行文件，不经过 shell、不使用 Java `Thread` / `ProcessBuilder`。Windows 通过 UTF-16 参数和 Job Object 管理子进程，Unix 通过 `posix_spawn` 与独立进程组管理；少量 POSIX C interop 仅桥接系统声明，不增加第三方运行库。CI 编译自有小型 C 测试程序，检验真实 argv/管道/退出/取消与资源释放；辅助程序不进入发行应用。库 artifact 附 `process.klib`、Unix 自有 interop KLIB 和进程测试证据。**目前是独立适配层，尚未接入 Native CLI 的 FFmpeg 后端**，不能因此宣称原生媒体迁移已完成。
+
 ## CI 与产物
 
 [Build workflow](.github/workflows/build.yml) 在每次 push、pull request 和手动触发时运行 Windows x64 / Linux x64 / macOS ARM64 构建、测试、便携打包及 smoke tests。CI 通过 `actions/setup-java` 准备 Zulu JDK 25；这是 workflow 的环境准备，与项目禁用 Gradle 自动供应 Java、应用运行时不安装 Java 的策略不同。Linux/macOS 直接执行仓库中带可执行位的 `gradlew`。便携 smoke 启用 trace，日志随报告上传。
