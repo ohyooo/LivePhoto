@@ -38,7 +38,10 @@ class NativeFfmpegTest {
             val runtime = NativeFfmpeg({ box.root.toString() })
             val files = result(runtime.openFiles(source, context, "frame.jpg", true))
             try {
-                val process = runtime.execute(listOf((box.root / "definitely-missing-ffmpeg").toString()), 1000, context)
+                // Okio's temporary root may be drive-relative on Windows. Resolve the
+                // existing parent, not the deliberately nonexistent executable.
+                val missing = localFileSystem.canonicalize(box.root) / "definitely-missing-ffmpeg"
+                val process = runtime.execute(listOf(missing.toString()), 1000, context)
                 assertNotEquals(0, process.code)
                 failure(files.outputSize(), "FFMPEG_OUTPUT_MISSING")
             } finally { result(files.close()) }
