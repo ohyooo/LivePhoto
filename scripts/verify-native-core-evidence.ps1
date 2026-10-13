@@ -49,7 +49,7 @@ foreach ($file in $reports) {
     $tests += [int]$suite.tests
     if ($file.Name -match 'ProtocolCompatibilityFixtureTest') { $fixtureTests += [int]$suite.tests }
     foreach ($name in $mediaSuites.Keys) {
-        if ($suite.name -eq "livephoto.core.media.$name") {
+        if ($suite.name -eq "${Target}Test.livephoto.core.media.$name") {
             if ($seenMedia.ContainsKey($name) -or [int]$suite.tests -ne $mediaSuites[$name]) {
                 throw "Duplicate or incomplete real media suite: $name"
             }
