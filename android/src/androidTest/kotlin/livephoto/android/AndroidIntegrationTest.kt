@@ -121,6 +121,9 @@ class AndroidIntegrationTest {
             assertEquals(result.uri.toString(), result.operation.output.assets.single().accessReference)
             assertTrue(result.operation.execution.none { it.transcoded || it.remuxed })
             val saved = app.contentResolver.openInputStream(result.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
+            val selectedInfo = readSelectedMediaInfo(app.contentResolver, result.uri)
+            assertEquals(saved.size.toLong(), selectedInfo.sizeBytes)
+            assertTrue(assertNotNull(selectedInfo.displayName).endsWith(".jpg"))
             assertEquals(result.operation.output.assets.single().digest.value, sha(saved))
             val source = MemoryBinarySource(Bytes(saved), SourceId("android-gallery-readback"))
             try {
