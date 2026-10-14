@@ -18,8 +18,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      # Exercise the same property mechanism used by the Wrapper updater.
-      ORG_GRADLE_PROJECT_livephoto.nativeTarget: ${{ matrix.platform }}
+      # Dotted environment names are dropped by some POSIX Wrapper shells.
+      # Exercise the same Wrapper option used by the updater on all three hosts.
+      GRADLE_OPTS: -Dorg.gradle.project.livephoto.nativeTarget=${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
