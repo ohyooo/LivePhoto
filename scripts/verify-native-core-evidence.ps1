@@ -61,6 +61,10 @@ foreach ($file in $reports) {
     }
 }
 if ($mediaTests -ne 23 -or $seenMedia.Count -ne $mediaSuites.Count) { throw 'Mandatory common real media regressions must all execute on Native.' }
+$dispatch = @($reports | Where-Object { $_.Name -eq "TEST-${Target}Test.livephoto.core.media.MediaBackendDispatchTest.xml" })
+if ($dispatch.Count -ne 1) { throw 'Missing/duplicate shared backend dispatch suite.' }
+[xml]$dispatchXml = Get-Content $dispatch[0].FullName -Raw
+if ([int]$dispatchXml.testsuite.tests -ne 6) { throw 'Backend dispatch safety regressions did not all execute.' }
 foreach ($name in @('AppleHeifPortableFixtureTest', 'AppleOrdinaryExifPortableFixtureTest')) {
     $matching = @($reports | Where-Object { $_.Name -eq "TEST-${Target}Test.livephoto.core.compatibility.$name.xml" })
     if ($matching.Count -ne 1) { throw "Missing/duplicate shared portable fixture suite: $name" }
