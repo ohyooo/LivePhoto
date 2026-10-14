@@ -1,12 +1,13 @@
 # LivePhoto
 
 [![Build](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml/badge.svg)](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)
+[![Android](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml/badge.svg)](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml)
 
 使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core 与命令行工具。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
 **当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，历史 JVM 运行时与桌面系统媒体实现已移除。Android 新增直接复用 Core 的实验性应用与最小测试界面，构建/验证见独立 Android CI；不是 JNI 或桌面 JVM 发行版。iOS 和正式 Compose UI 尚未交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证。当前增加 Android 应用、素材回归及单张照片保存，暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
@@ -521,7 +522,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 
 ## 进度、已完成与 TODO
 
-桌面完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 是新工作包，结果以本提交的 [Android CI](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml) 为准；不将桌面测试数当成 Android 验证。
+桌面完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 初始接入独立验收：[提交 `cc781d9` 的 Android CI](https://github.com/ohyooo/LivePhoto/actions/runs/38523702403)，**9 项宿主单元测试＋9 项 API 36 模拟器测试，零失败、零跳过**；APK、签名、lint、原片哈希及 MediaStore 保存回读通过，应用和报告两份产物已独立核验。不是手机相册兼容认证，不将桌面测试数当成 Android 验证。
 
 已完成的有限范围：
 
@@ -531,6 +532,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [x] 三平台 Kotlin/Native Core、共用 CLI、文件 IO、原生进程和有限 FFmpeg 后端；单文件程序不携带 Java。
 - [x] Windows/macOS/Linux 真实 FFmpeg 抽帧、remux、有限带音频裁剪、显式视频转码、封面替换及组合 Create 回归；音频只 copy。
 - [x] 迁移期 JVM 运行时代码、旧 CLI、NIO/ImageIO/Java 进程桥、Windows 历史系统媒体 API及其专项测试、旧 JVM 打包/回归流程清理；保留共用/Native 测试和全部素材。Gradle 构建仍需要 JDK。
+- [x] Android 初始接入：直接引用 Core 的 APK、最小手测界面、系统选择器/有界内存输入、单张 MediaStore 保存、宿主与模拟器回归及 CI 产物。
 
 后续 TODO（当前不扩展这些业务范围）：
 
@@ -538,7 +540,6 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [ ] 更多有规范证据的媒体时间线、容器/codec、AAC priming/复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
 - [ ] 其它显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
 - [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
-- [ ] **当前 Android 初始接入**：直接引用 Core 的 APK、最小手测界面、系统选择器/有界内存输入、单张 MediaStore 保存、宿主与模拟器回归及 CI 产物；以独立 CI 证据闭合，不能借桌面验收计为完成。
 - [ ] 后续移动工作：大文件/随机访问 IO、URI 生命周期、通用多资产事务、移动系统媒体后端及真机验收。iOS targets、构建/IO/媒体适配仍未实施；不复用桌面 FFmpeg 进程冒充移动支持。
 - [ ] Compose UI：未来规划，不属于当前 Core + CLI 范围。
 
