@@ -32,7 +32,9 @@ class GooglePublicationTest {
         for (mode in listOf(Fault.WriteZero, Fault.WriteFailure)) {
             val context = context()
             val transaction = FaultTransaction(MemoryOutputTransaction(context, "write-$mode"), fault = mode)
-            assertIs<CoreResult.Failure>(create(transaction, context))
+            val failure = assertIs<CoreResult.Failure>(create(transaction, context))
+            assertEquals(Value.Text("write-output"), failure.error.details["livephoto.step"])
+            assertEquals(Value.Text("output"), failure.error.details["livephoto.inputRole"])
             assertTrue(transaction.delegate.committedAssets().isEmpty())
             assertEquals(TransactionState.Aborted, value(transaction.delegate.query()).state)
             assertEquals(0, transaction.commitCalls)
@@ -44,7 +46,9 @@ class GooglePublicationTest {
         for (mode in listOf(Fault.PrepareFailure, Fault.StagedReadFailure, Fault.StagedCorruption)) {
             val context = context()
             val transaction = FaultTransaction(MemoryOutputTransaction(context, "verify-$mode"), fault = mode)
-            assertIs<CoreResult.Failure>(create(transaction, context))
+            val failure = assertIs<CoreResult.Failure>(create(transaction, context))
+            assertEquals(Value.Text(if (mode == Fault.PrepareFailure) "prepare-output" else "verify-output"), failure.error.details["livephoto.step"])
+            assertEquals(Value.Text("output"), failure.error.details["livephoto.inputRole"])
             assertTrue(transaction.delegate.committedAssets().isEmpty())
             assertEquals(TransactionState.Aborted, value(transaction.delegate.query()).state)
             assertEquals(0, transaction.commitCalls)

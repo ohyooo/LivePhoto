@@ -38,11 +38,11 @@ class AndroidIntegrationTest {
     @Test fun googleV2CreateExtractPreservesOriginalVideo() = runBlocking { roundTrip(ProtocolIds.GoogleV2, "jpeg") }
     @Test fun googleV1CreateExtractPreservesOriginalVideo() = runBlocking { roundTrip(ProtocolIds.GoogleV1, "jpeg") }
     @Test fun cameraStartOffsetRoundTripsWithoutRewritingMovieHeaders() = runBlocking {
-        roundTrip(ProtocolIds.Oplus, "jpeg-no-tail", cameraOffsetVideo())
+        roundTrip(ProtocolIds.Oplus, "jpeg-no-tail", cameraOffsetVideo(), ByteArray(435) { ((it * 37 + 11) and 255).toByte() })
     }
 
-    private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4")) {
-        val imageBytes = fixture("video.jpg")
+    private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4"), suffix: ByteArray = byteArrayOf()) {
+        val imageBytes = fixture("video.jpg") + suffix
         val imageHash = sha(imageBytes)
         val videoHash = sha(videoBytes)
         val image = MemoryBinarySource(Bytes(imageBytes), SourceId("android-image"))
@@ -53,6 +53,12 @@ class AndroidIntegrationTest {
             val output = MemoryOutputTransaction(context, "android-create-$profile-${protocol.value}")
             val result = success(app.core.create(CreateRequest(image, video, ProtocolSelector(protocol, ProfileId(profile)), output = output, context = context)))
             created = result
+            if (suffix.isNotEmpty()) {
+                val bytes = output.committedAssets().values.single().toByteArray()
+                val start = bytes.size - videoBytes.size - suffix.size
+                assertContentEquals(suffix, bytes.copyOfRange(start, start + suffix.size))
+                assertEquals(GuaranteeOutcome.Unknown, result.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
+            }
             assertTrue(result.execution.none { it.transcoded || it.remuxed })
             val source = assertNotNull(result.output.assets.single().readableSource)
             val input = SourceSet.Single(source)
@@ -90,7 +96,9 @@ class AndroidIntegrationTest {
         val second = MemoryBinarySource(Bytes(fixture("video.mp4")), SourceId("video"))
         val output = MemoryOutputTransaction(context, "must-not-publish")
         try {
-            assertIs<CoreResult.Failure>(app.core.create(CreateRequest(first, second, ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")), output = output, context = context)))
+            val failure = assertIs<CoreResult.Failure>(app.core.create(CreateRequest(first, second, ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")), output = output, context = context)))
+            assertEquals(Value.Text("image"), failure.error.details["livephoto.inputRole"])
+            assertEquals(Value.Text("inspect-image"), failure.error.details["livephoto.step"])
             assertTrue(output.committedAssets().isEmpty())
         } finally { first.close(); second.close() }
     }
@@ -101,6 +109,40 @@ class AndroidIntegrationTest {
             val result = assertIs<CoreResult.Failure>(app.core.probe(ProbeRequest(ResourceRef(SourceSet.Single(source)), decodeCheck = true, context = context)))
             assertEquals("CAPABILITY_UNSUPPORTED", result.error.code.value)
         } finally { source.close() }
+    }
+
+    @Test fun malformedVideoReportsVideoParsingAndPublishesNothing() = runBlocking {
+        val image = MemoryBinarySource(Bytes(fixture("video.jpg")), SourceId("diagnostic-image"))
+        val video = MemoryBinarySource(Bytes(byteArrayOf(0, 1, 2)), SourceId("diagnostic-video"))
+        val output = MemoryOutputTransaction(context, "bad-video")
+        try {
+            val error = assertIs<CoreResult.Failure>(app.core.create(CreateRequest(image, video,
+                ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")), output = output, context = context))).error
+            assertEquals(Value.Text("video"), error.details["livephoto.inputRole"])
+            assertEquals(Value.Text("inspect-video"), error.details["livephoto.step"])
+            assertEquals(SourceId("diagnostic-video"), error.location?.source)
+            assertTrue(formatCoreFailure(error, "cover.jpg", "clip.mp4").contains("视频输入（clip.mp4）"))
+            assertTrue(output.committedAssets().isEmpty())
+        } finally { image.close(); video.close() }
+    }
+
+    @Test fun controllerMissingVideoIdentifiesReadFailureBeforeMerge() = runBlocking {
+        val token = UUID.randomUUID().toString()
+        val imageName = "diagnostic-$token.jpg"
+        val imageFile = app.getFileStreamPath(imageName)
+        val videoFile = app.getFileStreamPath("missing-$token.mp4")
+        try {
+            app.openFileOutput(imageName, 0).use { it.write(fixture("video.jpg")) }
+            assertFalse(videoFile.exists())
+            val failure = assertFailsWith<AndroidOperationFailure> {
+                AndroidCreateController(app, app.core).create(Uri.fromFile(imageFile), Uri.fromFile(videoFile),
+                    ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")))
+            }
+            assertEquals("read-video", failure.step)
+            assertEquals("video", failure.inputRole)
+            assertIs<java.io.FileNotFoundException>(failure.cause)
+            assertTrue(formatAndroidFailure(failure, "cover.jpg", "clip.mp4").contains("读取所选视频"))
+        } finally { if (imageFile.exists()) assertTrue(imageFile.delete()) }
     }
 
     @Test fun controllerFreezesSelectedInputsAndPublishesExactGalleryCopy() = runBlocking {

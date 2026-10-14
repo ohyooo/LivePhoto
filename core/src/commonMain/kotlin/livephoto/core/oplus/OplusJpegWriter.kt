@@ -13,7 +13,7 @@ import livephoto.core.xmp.*
 internal object OplusJpegWriter {
     suspend fun createPlan(
         session: SourceSession, videoLength: ULong, timestamp: Long, strip: Boolean,
-        context: Context, budget: ParseBudget,
+        context: Context, budget: ParseBudget, primaryPadding: ULong = 0uL,
     ): CoreResult<JpegRewritePlan> = attempt {
         checkCancelled(context)
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Oplus creation requires JPEG image content")
@@ -26,7 +26,8 @@ internal object OplusJpegWriter {
         reserveXmp(jpeg, budget, mergingVendor = true)
         val additional = markerPatch(session, ExifMarkerAction.AddCanonical, budget)
         val base = GoogleJpegWriter.createPlan(session, ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("jpeg")),
-            videoLength, "video/mp4", timestamp, false, context, additional).orThrow()
+            videoLength, "video/mp4", timestamp, false, context, additional,
+            primaryPadding = primaryPadding, preservePrimarySuffix = primaryPadding != 0uL).orThrow()
         val xmpPatch = base.patches.singleOrNull { it.exifProof == null }
             ?: fail("POSTCONDITION_FAILED", "Canonical Google base must produce exactly one XMP patch")
         val xmlStart = 4 + XMP_HEADER.length
@@ -41,7 +42,7 @@ internal object OplusJpegWriter {
         val merged = XmpWriter.merge(packet, updates, context).orThrow()
         // For a fresh packet, match the reachable upstream JPEG+MP4 wire profile rather than
         // treating namespace-equivalent RDF and omitted zero fields as gallery-compatible.
-        val xml = if (session.xmp!!.packets.isEmpty()) upstreamCompatiblePacket(videoLength, timestamp) else merged
+        val xml = if (session.xmp!!.packets.isEmpty()) upstreamCompatiblePacket(videoLength, timestamp, primaryPadding) else merged
         val readback = XmpReader.parse(xml, context).orThrow()
         for ((name, expected) in updates) if (readback.scalar(name.uri, name.local).orThrow() != expected) fail("POSTCONDITION_FAILED", "Oplus XMP scalar failed final readback")
         if (readback.scalar(CAMERA_URI, "MotionPhotoPresentationTimestampUs").orThrow() != timestamp.toString()) fail("POSTCONDITION_FAILED", "Oplus and Google timestamps disagree after writing")
@@ -54,13 +55,13 @@ internal object OplusJpegWriter {
         } else GoogleJpegWriter.patch(jpeg, xml, additional)
     }
 
-    private fun upstreamCompatiblePacket(length: ULong, timestamp: Long): Bytes = Bytes((
+    private fun upstreamCompatiblePacket(length: ULong, timestamp: Long, primaryPadding: ULong): Bytes = Bytes((
         "<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
         "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
         "<rdf:Description rdf:about=\"\" xmlns:GCamera=\"$CAMERA_URI\" xmlns:Container=\"$CONTAINER_URI\" xmlns:Item=\"$ITEM_URI\" xmlns:OpCamera=\"$OPLUS_URI\"" +
         " GCamera:MotionPhoto=\"1\" GCamera:MotionPhotoVersion=\"1\" GCamera:MotionPhotoPresentationTimestampUs=\"$timestamp\"" +
         " OpCamera:MotionPhotoPrimaryPresentationTimestampUs=\"$timestamp\" OpCamera:MotionPhotoOwner=\"oplus\" OpCamera:OLivePhotoVersion=\"2\" OpCamera:VideoLength=\"$length\">" +
-        "<Container:Directory><rdf:Seq><rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"image/jpeg\" Item:Semantic=\"Primary\" Item:Length=\"0\" Item:Padding=\"0\"/></rdf:li>" +
+        "<Container:Directory><rdf:Seq><rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"image/jpeg\" Item:Semantic=\"Primary\" Item:Length=\"0\" Item:Padding=\"$primaryPadding\"/></rdf:li>" +
         "<rdf:li rdf:parseType=\"Resource\"><Container:Item Item:Mime=\"video/mp4\" Item:Semantic=\"MotionPhoto\" Item:Length=\"$length\" Item:Padding=\"0\"/></rdf:li>" +
         "</rdf:Seq></Container:Directory></rdf:Description></rdf:RDF></x:xmpmeta>\n<?xpacket end=\"w\"?>").encodeToByteArray())
 

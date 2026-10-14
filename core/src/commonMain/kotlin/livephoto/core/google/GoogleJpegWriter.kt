@@ -9,12 +9,13 @@ import livephoto.core.xmp.*
 
 /** Produces staging bytes only; publication belongs exclusively to the Core orchestrator. */
 internal object GoogleJpegWriter {
-    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList(), primaryPadding: ULong = 0uL, motionPadding: ULong? = null): CoreResult<JpegRewritePlan> = attemptNow {
+    fun createPlan(session: SourceSession, target: ProtocolSelector, videoLength: ULong, mime: String, timestamp: Long, strip: Boolean, context: Context, additionalPatches: List<JpegPatch> = emptyList(), primaryPadding: ULong = 0uL, motionPadding: ULong? = null, preservePrimarySuffix: Boolean = false): CoreResult<JpegRewritePlan> = attemptNow {
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Google JPEG creation requires JPEG image content")
         val xmp = session.xmp!!
         if (session.bindings.isNotEmpty() && !strip) fail("SOURCE_ALREADY_LIVE", "Image contains source protocol bindings")
         if (strip && session.bindings.isNotEmpty() && (session.bindings.size != 1 || !session.bindings.single().structurallyValid || session.bindings.single().protocol !in session.videos)) fail("UNSAFE_METADATA_REWRITE", "Source stripping needs one fully verified source binding")
-        if (jpeg.trailing.length != 0uL && (!strip || session.bindings.size != 1 || !session.bindings.single().structurallyValid ||
+        val copiedSuffix = preservePrimarySuffix && session.bindings.isEmpty() && primaryPadding == jpeg.trailing.length
+        if (jpeg.trailing.length != 0uL && !copiedSuffix && (!strip || session.bindings.size != 1 || !session.bindings.single().structurallyValid ||
             session.bindings.single().video?.offset != jpeg.primary.endExclusive || session.bindings.single().protocol !in session.videos || session.bindings.single().items.size > 2)) {
             fail("UNSAFE_METADATA_REWRITE", "Create cannot discard an unverified or unowned carrier suffix")
         }

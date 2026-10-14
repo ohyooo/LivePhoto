@@ -66,7 +66,9 @@ class AndroidUiTest {
                         else SelectedMediaInfo("clip.mp4", 3145728)
                     }) { _, _, _ ->
                         CoreResult.Failure(CoreError(IssueCode("UNSUPPORTED_CONTAINER"), Stage.Parse,
-                            "Multiple sample descriptions are not implemented"))
+                            "Multiple sample descriptions are not implemented", details = mapOf(
+                                "livephoto.step" to livephoto.core.Value.Text("inspect-video"),
+                                "livephoto.inputRole" to livephoto.core.Value.Text("video"))))
                     }
                 }
             }
@@ -82,6 +84,8 @@ class AndroidUiTest {
             compose.onNodeWithTag("status").assertIsDisplayed()
                 .assertTextContains("UNSUPPORTED_CONTAINER", substring = true)
                 .assertTextContains("Multiple sample descriptions are not implemented", substring = true)
+                .assertTextContains("视频输入（clip.mp4）", substring = true)
+                .assertTextContains("解析视频容器、轨道与采样表", substring = true)
             val errorY = compose.onNodeWithTag("status").fetchSemanticsNode().positionInRoot.y
             val imageY = compose.onNodeWithTag("select-image").fetchSemanticsNode().positionInRoot.y
             assertTrue(errorY < imageY, "Error details must appear above the input buttons")

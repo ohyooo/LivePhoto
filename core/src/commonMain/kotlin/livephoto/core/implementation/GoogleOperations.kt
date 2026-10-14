@@ -13,19 +13,26 @@ import livephoto.core.apple.*
 
 internal object GoogleOperations {
     suspend fun create(request: CreateRequest, originalInputs: List<BinaryReader> = emptyList(), sourceChanges: List<Change> = emptyList(), sourceKey: KeyPhotoResult? = null, metadataUnproven: Boolean = false,
-        verifyAdditional: (suspend (SourceSession) -> Unit)? = null): CoreResult<OperationResult> = attempt {
+        verifyAdditional: (suspend (SourceSession) -> Unit)? = null): CoreResult<OperationResult> = createAttempt { diagnostic ->
         RequestValidation.validate(request).orThrow()
         if (Guarantee.ExactExtraction in request.policy.requiredGuarantees) fail("PRESERVATION_REQUIREMENT_FAILED", "Create constructs a new composite asset; whole-asset exact extraction is not applicable", Stage.Plan)
         if (request.context.limits.maxSources < 2u) fail("RESOURCE_LIMIT_EXCEEDED", "Create requires two input sources")
         val budget = ParseBudget(request.context)
+        diagnostic.at("inspect-image", "image")
         val image = SourceSession.open(SourceSet.Single(request.image), request.context, budget).orThrow()
+        val imageId = image.snapshot.identities.single().id
+        diagnostic.at("inspect-video", "video")
         val videoReader = BinaryReader(request.video, request.context)
         val videoIdentity = videoReader.identity().orThrow()
+        diagnostic.at("inspect-video", "video", videoIdentity.id)
         if (image.snapshot.identities.any { it.id == videoIdentity.id } || request.image === request.video) fail("INVALID_ARGUMENT", "Image and video inputs must have distinct identities")
         val video = BmffVideoProbe(videoReader, budget).probe(ByteRange(0uL, videoIdentity.size)).orThrow()
+        diagnostic.at("check-video-profile", "video", videoIdentity.id)
         requireGoogleWriteVideo(video, request.target)
+        diagnostic.at("inspect-image", "image", imageId)
         val facts = image.inspection.media.firstOrNull()
         if (facts?.width == null || facts.height == null || image.jpeg == null) fail("UNSUPPORTED_CONTAINER", "Create requires a supported JPEG frame structure")
+        diagnostic.at("plan-target", "request")
         if (request.edits?.trim != null || request.edits?.replacementFrame != null) fail("CAPABILITY_UNSUPPORTED", "Requested media edits require backend orchestration")
         if (request.preference.imageFormat != null && request.preference.imageFormat != ImageFormat.Jpeg || request.preference.videoContainer != null && request.preference.videoContainer != video.container ||
             request.preference.videoCodec != null && video.tracks.filter { it.handler == "vide" }.any { it.codec != request.preference.videoCodec } ||
@@ -33,7 +40,9 @@ internal object GoogleOperations {
         val huawei = request.target.protocol == ProtocolIds.Huawei
         if (huawei && !basicMediaEnvelope(videoReader, ByteRange(0uL, videoIdentity.size), budget)) fail("UNKNOWN_PROTOCOL_VARIANT", "Huawei writer cannot bind unknown media extensions", Stage.Plan)
         if (huawei && request.target.profile != null && request.target.profile != ProfileId("basic60")) fail("UNSUPPORTED_PROTOCOL", "Huawei writer only implements basic60 JPEG")
+        diagnostic.at("prepare-image-metadata", "image", imageId)
         val huaweiPlan = if (huawei) HuaweiJpegWriter.createPlan(image, video, videoIdentity.size, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.edits?.keyPosition, budget).orThrow() else null
+        diagnostic.at("plan-target", "request")
         val key = if (huawei) KeyPhotoResult() else if (request.edits?.keyPosition == null && sourceKey != null) sourceKey else selectKey(video, request.edits?.keyPosition)
         key.position?.let { position ->
             val duration = video.tracks.filter { it.handler == "vide" }.maxOfOrNull { it.presentationDuration }
@@ -43,21 +52,38 @@ internal object GoogleOperations {
         val timestamp = if (huawei) 0L else key.position?.let(::microseconds) ?: -1L
         val mime = if (video.container == VideoContainer.Mov) "video/quicktime" else "video/mp4"
         val oplus = request.target.protocol == ProtocolIds.Oplus
+        // Retain ordinary JPEG suffix bytes before the movie, never reinterpret
+        // them as a vendor motion trailer or silently remove them. Only the
+        // three plain JPEG profiles use this opaque, byte-verified preservation.
+        val preservedSuffix = image.jpeg.trailing.takeIf { it.length != 0uL && image.bindings.isEmpty() &&
+            request.target.protocol in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2, ProtocolIds.Oplus) }
+        val primaryPadding = preservedSuffix?.length ?: 0uL
         val samsung = request.target.protocol == ProtocolIds.Samsung
         val vivo = request.target.protocol == ProtocolIds.VivoModern
         if (vivo && request.target.profile != null && request.target.profile != ProfileId("jpeg")) fail("UNSUPPORTED_PROTOCOL", "vivo writer only implements jpeg")
         if (samsung && request.target.profile != null && request.target.profile != ProfileId("jpeg-sef-mpv3")) fail("UNSUPPORTED_PROTOCOL", "Samsung writer only implements JPEG SEF mpv3")
+        diagnostic.at("prepare-image-metadata", "image", imageId)
         val samsungPlan = if (samsung) SamsungJpegWriter.createPlan(image, videoReader, ByteRange(0uL, videoIdentity.size), timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else null
         if (oplus && request.target.profile != null && request.target.profile != ProfileId("jpeg-no-tail")) fail("UNSUPPORTED_PROTOCOL", "Oplus writer only implements jpeg-no-tail")
         val rewrite = if (huaweiPlan != null) huaweiPlan.image else if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.createPlan(image, videoIdentity.size, timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.createPlan(image, videoIdentity.size, timestamp,
-            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow()
+            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget, primaryPadding).orThrow()
             else GoogleJpegWriter.createPlan(image, request.target, videoIdentity.size, mime, timestamp,
-                request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context).orThrow()
+                request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context,
+                primaryPadding = primaryPadding, preservePrimarySuffix = preservedSuffix != null).orThrow()
+        diagnostic.at("verify-input", "video", videoIdentity.id)
         val videoDigest = sha256Range(videoReader, ByteRange(0uL, videoIdentity.size)).orThrow()
+        diagnostic.at("verify-input", "image", imageId)
         val coding = codingDigest(image)
         val metadata = ordinaryDigest(image, if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS, oplus)
+        val suffixDigest = preservedSuffix?.let { sha256Range(image.reader, it).orThrow() }
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
-            write = { writer -> JpegRewrite.write(image.reader, writer, image.jpeg, rewrite, request.context).orThrow(); if (samsungPlan != null) SefWriter.write(samsungPlan.suffix, writer, request.context).orThrow() else copyRange(videoReader, writer, ByteRange(0uL, videoIdentity.size), request.context).orThrow(); if (huaweiPlan != null) writer.writeAll(huaweiPlan.tail).orThrow() },
+            write = { writer ->
+                JpegRewrite.write(image.reader, writer, image.jpeg, rewrite, request.context).orThrow()
+                if (preservedSuffix != null) copyRange(image.reader, writer, preservedSuffix, request.context).orThrow()
+                if (samsungPlan != null) SefWriter.write(samsungPlan.suffix, writer, request.context).orThrow()
+                else copyRange(videoReader, writer, ByteRange(0uL, videoIdentity.size), request.context).orThrow()
+                if (huaweiPlan != null) writer.writeAll(huaweiPlan.tail).orThrow()
+            },
             verify = { id, reader ->
                 val staged = SourceSession.open(SourceSet.Single(reader.source), request.context, budget).orThrow()
                 val report = validateSession(staged, listOf(Layer.Structure, Layer.Protocol), target = request.target).orThrow()
@@ -65,6 +91,12 @@ internal object GoogleOperations {
                 if (binding.protocol != request.target.protocol || !binding.structurallyValid || binding.protocol !in staged.videos || report.verdict == Verdict.Invalid ||
                     report.checks.any { it.coverage != Coverage.Complete }) fail("POSTCONDITION_FAILED", "Created carrier failed required protocol and media checks", Stage.Verify)
                 val extractedDigest = sha256Range(reader, binding.video!!).orThrow()
+                if (preservedSuffix != null) {
+                    val padding = binding.padding ?: fail("POSTCONDITION_FAILED", "Copied image suffix has no verified range", Stage.Verify)
+                    if (padding != ByteRange(rewrite.outputLength, preservedSuffix.length) ||
+                        binding.video.offset != padding.endExclusive || sha256Range(reader, padding).orThrow() != suffixDigest)
+                        fail("POSTCONDITION_FAILED", "Copied image suffix or video boundary changed", Stage.Verify)
+                }
                 val outputCoding = codingDigest(staged)
                 val outputMetadata = ordinaryDigest(staged, verifiedExifRewrite = oplus)
                 if (videoDigest != extractedDigest || coding != outputCoding || metadata != outputMetadata) fail("POSTCONDITION_FAILED", "Create changed unrequested video, image coding, or ordinary metadata", Stage.Verify)
@@ -73,7 +105,9 @@ internal object GoogleOperations {
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "Create constructs a new composite carrier; no whole-carrier exact extraction claim"),
                     GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.Verified, videoDigest, extractedDigest, "Embedded resource ${videoId(binding.protocol).value}: complete encoded video suffix bytes unchanged"),
                     GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.Verified, coding, outputCoding, "JPEG frame/tables/scan headers/entropy bytes unchanged"),
-                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (!metadataUnproven && opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata, "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately")), if (huawei || sourceKey != null) staged.inspection.keyPhoto else key.copy(position = Time(timestamp, 1_000_000u)))
+                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (!metadataUnproven && preservedSuffix == null && opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata,
+                        if (preservedSuffix == null) "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately"
+                        else "Ordinary metadata and opaque JPEG suffix bytes unchanged; private suffix semantics and offset dependencies remain unverified")), if (huawei || sourceKey != null) staged.inspection.keyPhoto else key.copy(position = Time(timestamp, 1_000_000u)))
             })
         val targetFields = if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS
         val changes = targetFields.map { field ->
@@ -96,6 +130,7 @@ internal object GoogleOperations {
             Change("{$OPLUS_URI}MotionPhotoOwner", after = Value.Text("oplus"), reason = "Write Oplus ownership", requested = true),
             Change("{$OPLUS_URI}OLivePhotoVersion", after = Value.Text("2"), reason = "Write the implemented Oplus version", requested = true),
             Change("exif:UserComment", after = Value.Text(OPLUS_MARKER), reason = "Write the requested vendor recognition marker", requested = true)) else emptyList()
+        diagnostic.at("publish-output", "output")
         publish(request.output, request.policy, request.context, originalInputs + image.readers + videoReader, listOf(asset), sourceChanges + allChanges).orThrow()
     }
 

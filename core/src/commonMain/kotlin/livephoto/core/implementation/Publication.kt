@@ -20,6 +20,8 @@ internal suspend fun publish(
     val resultHandles = mutableListOf<BinarySource>()
     var ownsOpenTransaction = false
     var commitAttempted = false
+    val diagnostic = FailureContext()
+    diagnostic.at("prepare-output", "output")
     try {
         if (assets.isEmpty()) fail("INVALID_ARGUMENT", "Publication requires at least one asset", Stage.Plan)
         checkCancelled(context)
@@ -28,7 +30,9 @@ internal suspend fun publish(
         val capabilities = output.capabilities()
         if (!capabilities.canReadStaged || policy.atomicity == Atomicity.AssetSetRequired && !capabilities.assetSetAtomic ||
             policy.existingOutput == ExistingOutput.Replace && !capabilities.replacesAtomically) fail("ATOMIC_PUBLICATION_UNAVAILABLE", "Output cannot provide required verification and atomic publication", Stage.Plan)
+        diagnostic.at("verify-input", "input")
         for (input in inputs) input.validateIdentity().orThrow()
+        diagnostic.at("write-output", "output")
         ownsOpenTransaction = true
         val sharedBudget = OutputBudget(context)
         val handles = mutableListOf<OutputHandle>()
@@ -54,7 +58,9 @@ internal suspend fun publish(
             }
             writeFailure?.let { throw it }
         }
+        diagnostic.at("prepare-output", "output")
         output.prepare().orThrow()
+        diagnostic.at("verify-output", "output")
         val verified = mutableListOf<AssetVerification>()
         val outputs = mutableListOf<OutputAsset>()
         val stagedIdentities = mutableListOf<SourceIdentity>()
@@ -105,9 +111,11 @@ internal suspend fun publish(
         for (asset in outputs) for (guarantee in policy.requiredGuarantees) if (records.none { it.assetId == asset.id && it.guarantee == guarantee && it.outcome in setOf(GuaranteeOutcome.Verified, GuaranteeOutcome.NotApplicable) }) {
             fail("PRESERVATION_REQUIREMENT_FAILED", "Required guarantee lacks verification for an output asset", Stage.Verify)
         }
+        diagnostic.at("verify-input", "input")
         for (input in inputs) input.validateIdentity().orThrow()
         checkCancelled(context)
         commitAttempted = true
+        diagnostic.at("publish-output", "output")
         val committed = output.commit()
         val receipt = when (committed) {
             is CoreResult.Success -> committed.value
@@ -129,7 +137,7 @@ internal suspend fun publish(
             keyPhoto = verified.firstNotNullOfOrNull { it.key }))
     } catch (fault: CoreFault) {
         for (handle in resultHandles) handle.close()
-        var error = fault.error
+        var error = diagnostic.annotate(fault.error)
         if (ownsOpenTransaction && !commitAttempted) when (val abort = output.abort()) {
             is CoreResult.Success -> Unit
             is CoreResult.Failure -> error = error.copy(details = error.details + ("abortFailure" to Value.Text(abort.error.code.value)))

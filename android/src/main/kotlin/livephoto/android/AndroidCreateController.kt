@@ -25,23 +25,30 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         val job = currentCoroutineContext()[Job]
         val context = Context(Limits(MAX_INPUT_BYTES.toULong(), MAX_OUTPUT_BYTES.toULong()),
             cancellation = Cancellation { job?.isActive == false })
-        val imageBytes = readSelected(image, MAX_INPUT_BYTES)
-        val videoBytes = readSelected(video, MAX_INPUT_BYTES - imageBytes.size)
+        val imageBytes = androidOperation("read-image", "image") { readSelected(image, MAX_INPUT_BYTES) }
+        val videoBytes = androidOperation("read-video", "video") { readSelected(video, MAX_INPUT_BYTES - imageBytes.size) }
         val token = UUID.randomUUID().toString()
         val imageSource = MemoryBinarySource(Bytes(imageBytes), SourceId("android-image:$token"))
         val videoSource = MemoryBinarySource(Bytes(videoBytes), SourceId("android-video:$token"))
         val output = MemoryOutputTransaction(context, token)
         var created: OperationResult? = null
         try {
-            when (val result = core.create(CreateRequest(imageSource, videoSource, target, output = output, context = context))) {
+            when (val result = androidOperation("invoke-core", "request") {
+                core.create(CreateRequest(imageSource, videoSource, target, output = output, context = context))
+            }) {
                 is CoreResult.Failure -> result
                 is CoreResult.Success -> {
                     created = result.value
-                    val asset = result.value.output.assets.single()
-                    check(asset.mime == "image/jpeg") { "This initial Android exporter supports one JPEG asset only" }
-                    currentCoroutineContext().ensureActive()
-                    val bytes = output.committedAssets().getValue(asset.id).toByteArray()
-                    val uri = AndroidPhotoExporter(android.contentResolver).publish(bytes, "LivePhoto-$token.jpg")
+                    val asset = androidOperation("verify-output", "output") {
+                        result.value.output.assets.single().also {
+                            check(it.mime == "image/jpeg") { "This initial Android exporter supports one JPEG asset only" }
+                        }
+                    }
+                    val uri = androidOperation("save-output", "output") {
+                        currentCoroutineContext().ensureActive()
+                        val bytes = output.committedAssets().getValue(asset.id).toByteArray()
+                        AndroidPhotoExporter(android.contentResolver).publish(bytes, "LivePhoto-$token.jpg")
+                    }
                     // Return the published URI, not a memory handle closed by this session.
                     // Preserve the original conservative/volatile durability report.
                     val published = result.value.copy(output = MediaOutput(

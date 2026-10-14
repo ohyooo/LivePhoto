@@ -102,6 +102,8 @@ internal fun LivePhotoScreen(
                 modifier = Modifier.fillMaxWidth().testTag("create"), onClick = {
                     val chosenImage = image?.let(Uri::parse) ?: return@Button
                     val chosenVideo = video?.let(Uri::parse) ?: return@Button
+                    val chosenImageName = imageInfo?.displayName
+                    val chosenVideoName = videoInfo?.displayName
                     val target = when (profile) {
                         0 -> ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail"))
                         1 -> ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("jpeg"))
@@ -114,10 +116,10 @@ internal fun LivePhotoScreen(
                         try {
                             status = when (val result = create(chosenImage, chosenVideo, target)) {
                                 is CoreResult.Success -> "已保存到 Pictures/LivePhoto。\nCore 验证：${result.value.operation.validation.verdict}；问题报告：${result.value.operation.issues.size} 项。\n默认 BestEffortWithReport，不保证全部 metadata 无损。请在相册测试动态播放与声音；生成成功不等于相册兼容。"
-                                is CoreResult.Failure -> { failed = true; formatCoreFailure(result.error) }
+                                is CoreResult.Failure -> { failed = true; formatCoreFailure(result.error, chosenImageName, chosenVideoName) }
                             }
                         } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (error: Exception) { failed = true; status = formatAndroidFailure(error) }
+                        catch (error: Exception) { failed = true; status = formatAndroidFailure(error, chosenImageName, chosenVideoName) }
                         finally { busy = false }
                         // The user is normally at the bottom near Create; reveal the actual result.
                         scroll.animateScrollTo(0)
