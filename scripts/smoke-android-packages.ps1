@@ -9,8 +9,10 @@ foreach ($variant in @('release', 'debug')) {
     $apk = "android/build/outputs/apk/$variant/android-$variant.apk"
     $installed = (& $adb install -r $apk 2>&1) -join "`n"
     if ($LASTEXITCODE -ne 0 -or $installed -notmatch '(?m)^Success\s*$') { throw "Cannot upgrade to $variant APK." }
-    $launch = (& $adb shell am start -W -n "$package/.MainActivity" 2>&1) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $launch -notmatch '(?m)^Status: ok\s*$') { throw "$variant Activity launch failed." }
+    $launch = (& $adb shell am start -W -n "$package/livephoto.android.MainActivity" 2>&1) -join "`n"
+    $launchExit = $LASTEXITCODE
+    $launch | Set-Content "ci-output/android-$variant-launch.log" -Encoding utf8
+    if ($launchExit -ne 0 -or $launch -notmatch '(?m)^Status: ok\s*$') { throw "$variant Activity launch failed." }
     Start-Sleep -Seconds 2
     $process = (& $adb shell pidof -s $package 2>&1) -join ''
     if ($LASTEXITCODE -ne 0 -or $process -notmatch '^\d+\s*$') { throw "$variant application exited after launch." }
