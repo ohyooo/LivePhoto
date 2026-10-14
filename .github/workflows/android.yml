@@ -54,8 +54,15 @@ jobs:
           key: livephoto-android-system-image-${{ runner.os }}-37-google-apis-x86-64
 
       - name: Install required Android SDK components
-        shell: bash
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+        shell: pwsh
+        run: |
+          $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager'
+          if (-not (Test-Path -LiteralPath $manager -PathType Leaf)) {
+            throw 'Missing preinstalled Android command-line tools.'
+          }
+          & $manager 'platforms;android-37' 'build-tools;37.0.0'
+          if ($LASTEXITCODE -ne 0) { throw 'Required stable Android SDK components unavailable.' }
+          (Split-Path $manager -Parent) | Add-Content $env:GITHUB_PATH
 
       - name: Prepare fixed test-only media
         shell: pwsh
