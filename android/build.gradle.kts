@@ -18,7 +18,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     // Test inputs belong only to the test APK, never to the application.
-    sourceSets.named("androidTest") { assets.srcDir(layout.buildDirectory.dir("test-assets")) }
+    sourceSets.named("androidTest") { assets.directories.add("build/test-assets") }
     val suppliedKey = providers.environmentVariable("LIVEPHOTO_SIGNING_KEYSTORE").orNull
     if (suppliedKey != null) {
         signingConfigs.getByName("debug") {
