@@ -26,7 +26,7 @@ class AndroidCoreTest {
         assertEquals(Implementation.Experimental, capabilities.operations.single { it.operation == Operation.Create }.implementation)
         assertTrue(capabilities.operations.none { Verification.DeviceTested in it.verification })
     }
-    @Test fun callerMutationCannotChangeMemorySnapshot() = runBlocking {
+    @Test fun callerMutationCannotChangeMemorySnapshot() = runBlocking<Unit> {
         val original = byteArrayOf(1, 2, 3)
         val source = MemoryBinarySource(Bytes(original), SourceId("android-host-test"))
         try {
@@ -34,26 +34,26 @@ class AndroidCoreTest {
             assertContentEquals(byteArrayOf(1, 2, 3), assertIs<CoreResult.Success<Bytes>>(source.readAt(0u, 3u)).value.toByteArray())
         } finally { source.close() }
     }
-    @Test fun boundedReadAcceptsExactlyTheLimit() = runBlocking {
+    @Test fun boundedReadAcceptsExactlyTheLimit() = runBlocking<Unit> {
         val bytes = ByteArray(100) { it.toByte() }
         assertContentEquals(bytes, readBounded(ByteArrayInputStream(bytes), bytes.size) {})
     }
-    @Test fun boundedReadRejectsOverflowBeforeStoringIt() = runBlocking {
+    @Test fun boundedReadRejectsOverflowBeforeStoringIt() = runBlocking<Unit> {
         assertFailsWith<IllegalArgumentException> { readBounded(ByteArrayInputStream(ByteArray(100)), 99) {} }
     }
-    @Test fun boundedReadRejectsZeroProgress() = runBlocking {
+    @Test fun boundedReadRejectsZeroProgress() = runBlocking<Unit> {
         val stream = object : InputStream() {
             override fun read(): Int = 0
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int = 0
         }
         assertFailsWith<IllegalStateException> { readBounded(stream, 100) {} }
     }
-    @Test fun boundedReadHonorsCancellation() = runBlocking {
+    @Test fun boundedReadHonorsCancellation() = runBlocking<Unit> {
         assertFailsWith<CancellationException> {
             readBounded(ByteArrayInputStream(ByteArray(100)), 100) { throw CancellationException("test") }
         }
     }
-    @Test fun memoryPublicationBudgetDoesNotExposePartialAssets() = runBlocking {
+    @Test fun memoryPublicationBudgetDoesNotExposePartialAssets() = runBlocking<Unit> {
         val context = Context(Limits(3u, 2u))
         val transaction = MemoryOutputTransaction(context, "android-budget-test")
         val handle = assertIs<CoreResult.Success<OutputHandle>>(transaction.create(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"))).value
