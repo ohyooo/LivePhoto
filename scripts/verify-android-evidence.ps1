@@ -6,10 +6,25 @@ function Test-Reports([string]$Directory, [int]$Expected) {
     $count = 0
     foreach ($file in $files) {
         [xml]$report = Get-Content -LiteralPath $file.FullName -Raw
-        $suite = $report.testsuite
-        if ([int]$suite.failures -ne 0 -or [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0 -or
-            @($suite.SelectNodes('testcase/skipped')).Count -ne 0) { throw 'Android tests failed or skipped.' }
-        $count += [int]$suite.tests
+        # Gradle host reports use testsuite; AGP device reports wrap it in testsuites.
+        # Count leaf suites only, never the aggregate container as well.
+        $suites = @($report.SelectNodes('//testsuite[not(descendant::testsuite)]'))
+        if ($suites.Count -eq 0) { throw 'Missing Android test suites.' }
+        foreach ($suite in $suites) {
+            foreach ($attribute in @('tests', 'failures', 'errors', 'skipped')) {
+                if (-not $suite.HasAttribute($attribute) -or
+                    $suite.GetAttribute($attribute) -notmatch '^\d+$') {
+                    throw "Missing or invalid Android report attribute: $attribute"
+                }
+            }
+            if ([int]$suite.failures -ne 0 -or [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0 -or
+                @($suite.SelectNodes('testcase/skipped | testcase/failure | testcase/error')).Count -ne 0) {
+                throw 'Android tests failed or skipped.'
+            }
+            $executed = @($suite.SelectNodes('testcase')).Count
+            if ($executed -ne [int]$suite.tests) { throw 'Android report testcase count mismatch.' }
+            $count += $executed
+        }
     }
     if ($count -ne $Expected) { throw "Incomplete Android test execution: $count / $Expected" }
     return $count
