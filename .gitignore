@@ -4,6 +4,10 @@ upstream
 **/build/
 .validation/
 .DS_Store
+local.properties
+*.jks
+*.keystore
+signing.properties
 # Specifications/logs stay local; the root README and approved test media are tracked.
 *.md
 !/README.md

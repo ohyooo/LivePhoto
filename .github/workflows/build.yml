@@ -54,7 +54,8 @@ jobs:
           if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
             throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
           }
-          $sources = git ls-files '*.kt' '*.java'
+          # Android's ordinary app/ART adapter is deliberately outside this graph.
+          $sources = git ls-files 'core/src/*.kt' 'core/src/*.java' 'cli-shared/src/*.kt' 'cli-native/src/*.kt' 'file-io/src/*.kt' 'process/src/*.kt'
           if ($sources | Where-Object { $_ -match '/src/jvm(Main|Test)/|\.java$' }) {
             throw 'Legacy JVM sources must not return to the Native-only project.'
           }

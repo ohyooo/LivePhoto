@@ -1,0 +1,137 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: -Dorg.gradle.project.livephoto.android=true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate Android environment
+        id: environment
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
+            throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
+          }
+          if (-not $env:ANDROID_HOME -or -not (Test-Path -LiteralPath $env:ANDROID_HOME)) { throw 'Existing Android SDK required.' }
+          "sdk=$env:ANDROID_HOME" | Add-Content $env:GITHUB_OUTPUT
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+
+      - name: Setup JDK 25 for build tools
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          cache-jdk: true
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      - name: Cache stable Android emulator image
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.environment.outputs.sdk }}/system-images/android-37
+          key: livephoto-android-system-image-${{ runner.os }}-37-google-apis-x86-64
+
+      - name: Install required Android SDK components
+        shell: bash
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+
+      - name: Prepare fixed test-only media
+        shell: pwsh
+        run: ./scripts/prepare-android-fixtures.ps1
+
+      - name: Restore optional private signing key
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.LIVEPHOTO_SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.LIVEPHOTO_SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.LIVEPHOTO_SIGNING_KEY_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.LIVEPHOTO_SIGNING_KEY_ALIAS }}
+        run: |
+          if (-not $env:SIGNING_KEYSTORE_BASE64) {
+            Write-Host 'No custom key configured; using the Android debug key.'
+            exit 0
+          }
+          if (-not $env:SIGNING_STORE_PASSWORD -or -not $env:SIGNING_KEY_PASSWORD -or -not $env:SIGNING_KEY_ALIAS) {
+            throw 'Custom signing configuration is incomplete.'
+          }
+          $path = Join-Path $env:RUNNER_TEMP 'livephoto-signing.jks'
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:SIGNING_KEYSTORE_BASE64))
+          "LIVEPHOTO_SIGNING_KEYSTORE=$path" | Add-Content $env:GITHUB_ENV
+          "LIVEPHOTO_SIGNING_STORE_PASSWORD=$env:SIGNING_STORE_PASSWORD" | Add-Content $env:GITHUB_ENV
+          "LIVEPHOTO_SIGNING_KEY_PASSWORD=$env:SIGNING_KEY_PASSWORD" | Add-Content $env:GITHUB_ENV
+          "LIVEPHOTO_SIGNING_KEY_ALIAS=$env:SIGNING_KEY_ALIAS" | Add-Content $env:GITHUB_ENV
+
+      - name: Build installable APK, test APK, unit tests and lint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./gradlew :verifyAndroidBuild :android:assembleDebug :android:assembleDebugAndroidTest :android:testDebugUnitTest --rerun :android:lintDebug --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | Tee-Object -FilePath ci-output/android-build.log
+          if ($LASTEXITCODE -ne 0) { throw 'Android compilation, unit tests or lint failed.' }
+
+      - name: Enable emulator hardware acceleration
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Run real Android instrumentation tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 37
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            bash -o pipefail -c './gradlew :android:connectedDebugAndroidTest --rerun --max-workers=2 --console=plain --warning-mode=all --stacktrace "-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m" 2>&1 | tee ci-output/android-device.log'
+
+      - name: Verify fresh tests and installable APK evidence
+        shell: pwsh
+        run: ./scripts/verify-android-evidence.ps1
+
+      - name: Upload application APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhoto-android-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            android/build/outputs/apk/debug/*.apk
+            ci-output/android-evidence.json
+            ci-output/android-signature.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Android test APK and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            android/build/outputs/apk/androidTest/debug/*.apk
+            android/build/test-results/
+            android/build/outputs/androidTest-results/
+            android/build/reports/
+            ci-output/android-*.log
+            ci-output/android-evidence.json
+            ci-output/android-signature.txt
+          if-no-files-found: warn
+          retention-days: 14

@@ -4,6 +4,8 @@ updates:
     directory: /
     schedule:
       interval: daily
+    cooldown:
+      default-days: 0
     registries:
       - maven-google
       - gradle-plugin
@@ -16,6 +18,8 @@ updates:
     directory: /
     schedule:
       interval: daily
+    cooldown:
+      default-days: 0
     groups:
       github-actions:
         patterns:

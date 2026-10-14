@@ -4,14 +4,15 @@
 
 使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core 与命令行工具。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
-**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；提供三平台 Kotlin/Native 库和原生 CLI；有限 FFmpeg 媒体后端已通过三平台验收，历史 JVM 运行时与桌面系统媒体实现已移除。尚未交付 Android、iOS 或 GUI。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
+**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，历史 JVM 运行时与桌面系统媒体实现已移除。Android 新增直接复用 Core 的实验性应用与最小测试界面，构建/验证见独立 Android CI；不是 JNI 或桌面 JVM 发行版。iOS 和正式 Compose UI 尚未交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：有限 Core + CLI 已交付三平台 Native 单文件程序，运行不需要 Java。真实 FFmpeg 和成品验收已补齐；当前清理旧 JVM 与历史系统媒体代码，并重新进行三平台验证。其它业务扩展暂不实施，Apple 新功能暂停；移动端系统 API 留在后续 TODO。** 见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证。当前增加 Android 应用、素材回归及单张照片保存，暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
 
 ## 目录
 
 - [下载与运行](#下载与运行)
 - [前提与推荐](#前提与推荐)
+- [Android 测试应用](#android-测试应用)
 - [快速开始](#快速开始)
 - [命令与参数](#命令与参数)
 - [协议与能力范围](#协议与能力范围)
@@ -47,6 +48,30 @@ Linux，在解压位置运行：
 ./LivePhoto.kexe --version
 ./LivePhoto.kexe --help
 ```
+
+## Android 测试应用
+
+在 [Android workflow](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml) 选择成功的运行，下载 `LivePhoto-android-<run_id>-<attempt>`，解压并安装 `android-debug.apk`。需要 **Android 10 / API 29 或更高**；这是测试 APK，不是正式商店发行版。
+
+打开 LivePhoto，依次选择图片、视频及目标协议，再点击“生成并保存”。当前界面只开放已实现的 **JPEG＋MP4**：OPPO/OnePlus `jpeg-no-tail`、Google Motion Photo V2 `jpeg`、Google MicroVideo V1 `jpeg`。输入由内容识别，不靠文件名；同名仅便于自己选择。未知/不安全的格式、metadata 或媒体 profile 会由 Core 拒绝，不自动转换。
+
+输入合计上限 **32 MiB**，输出上限 **48 MiB**；此首版使用冻结的内存输入和内存事务，不是大视频工具。Core 完成验证后，把单张 JPEG 原字节写入 MediaStore 的 pending 项，回读确认一致再发布到 `Pictures/LivePhoto`，不会覆盖原片。不申请全盘读写、联网或相册遍历权限；输入由系统文件选择器授权。未完成的 pending 项只按本次创建的 URI 清理；已发布或状态不确定的项不盲删。
+
+请在系统相册检查动态识别、播放、声音与 key；**保存成功、模拟器通过都不等于你的手机相册兼容**。Android 当前没有 FFmpeg、抽帧、裁剪、remux 或 transcode 后端。保存只支持本节的单 JPEG，不宣称实现通用配对/多资产相册事务。
+
+应用直接依赖 `implementation(project(":core"))`，Gradle 自动编译同一份 `commonMain` 并打入 APK；不需要手动打包、发布或导入 AAR，也不生成 `.so`。Android 使用常规 Kotlin/ART 字节码；桌面仍为不含 JVM 的 Native 程序。
+
+从源码构建（已有 JDK 25、Android SDK API 37/Build Tools 37.0.0，并先检查不存在 `gradle-daemon-jvm.properties`）：
+
+```sh
+./gradlew -Plivephoto.android=true :verifyAndroidBuild :android:assembleDebug
+```
+
+Windows 使用 `.\gradlew.bat` 替换 `./gradlew`。Android 模式与桌面 `livephoto.nativeTarget` 分开，不能同时指定。APK 位于 `android/build/outputs/apk/debug/android-debug.apk`。用 Android Studio 导入时，在该 IDE 的 Gradle VM options 设置 `-Dorg.gradle.project.livephoto.android=true`，不要把模式写成所有平台共用的全局属性。
+
+CI 会重新执行宿主单元测试、API 37 模拟器测试和 lint，并检查 APK 签名、DEX、测试数及 SHA-256。`android-reports-...` 另含测试 APK、XML、报告与日志；真实原片只打进测试 APK，不打进应用 APK。
+
+可选通用签名通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复通用签名，PR 使用默认 debug 签名。未配置时 APK 仍可安装，但新 CI 默认 debug 证书可能不同，覆盖安装失败时需卸载旧测试版；不用于正式发布。产物证据记录实际签名模式与证书指纹。
 
 ## 前提与推荐
 
@@ -496,7 +521,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 
 ## 进度、已完成与 TODO
 
-最近完整验收基线：[提交 `32a3079` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38507488989)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查。此次 JVM/历史系统 API 清理的结果须以本提交的 [Build Actions](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml) 为准，不借用基线结果。
+桌面完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 是新工作包，结果以本提交的 [Android CI](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml) 为准；不将桌面测试数当成 Android 验证。
 
 已完成的有限范围：
 
@@ -513,7 +538,8 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [ ] 更多有规范证据的媒体时间线、容器/codec、AAC priming/复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
 - [ ] 其它显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
 - [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
-- [ ] **最后推进 Android/iOS**：移动 targets、真实构建、IO/URI、权限、事务和生命周期；只有移动端接系统媒体服务/API，不能拿桌面 FFmpeg 验收冒充移动支持。
+- [ ] **当前 Android 初始接入**：直接引用 Core 的 APK、最小手测界面、系统选择器/有界内存输入、单张 MediaStore 保存、宿主与模拟器回归及 CI 产物；以独立 CI 证据闭合，不能借桌面验收计为完成。
+- [ ] 后续移动工作：大文件/随机访问 IO、URI 生命周期、通用多资产事务、移动系统媒体后端及真机验收。iOS targets、构建/IO/媒体适配仍未实施；不复用桌面 FFmpeg 进程冒充移动支持。
 - [ ] Compose UI：未来规划，不属于当前 Core + CLI 范围。
 
 ### 诊断日志
@@ -548,6 +574,7 @@ macOS 在解压目录使用实际入口（终端 CLI，无需应用 bundle）：
 - `core/src/commonMain/`：公共模型、协议解析/写入、保留及原子操作逻辑。
 - `core/src/commonTest/`、`core/src/nativeTest/`：共用协议/素材回归与真实 Native 测试。
 - `cli-shared/`、`cli-native/`：薄 CLI 和原生入口。
+- `android/`：直接调用共用 Core 的 Android 应用和最小手测界面；无 JNI/Compose。
 - `file-io/`、`process/`：文件/事务、原生进程及 FFmpeg 适配。
 - `scripts/`：测试素材准备、Native 打包与证据检查。
 - `reference/`：三个测试媒体，供协议与往返测试使用。
