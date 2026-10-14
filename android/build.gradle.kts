@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -9,7 +10,7 @@ android {
         applicationId = "com.ohyooo.livephoto"
         minSdk = 29
         targetSdk = 37
-        versionCode = 1
+        versionCode = providers.environmentVariable("LIVEPHOTO_VERSION_CODE").map(String::toInt).orElse(1).get()
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -19,6 +20,7 @@ android {
     }
     // Test inputs belong only to the test APK, never to the application.
     sourceSets.named("androidTest") { assets.directories.add("build/test-assets") }
+    buildFeatures { compose = true }
     val suppliedKey = providers.environmentVariable("LIVEPHOTO_SIGNING_KEYSTORE").orNull
     if (suppliedKey != null) {
         signingConfigs.getByName("debug") {
@@ -30,16 +32,24 @@ android {
             enableV4Signing = true
         }
     }
+    buildTypes.named("release") {
+        signingConfig = signingConfigs.getByName("debug")
+        isDebuggable = false
+    }
 }
 
 dependencies {
     implementation(project(":core"))
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.android.activity)
+    implementation(libs.android.activity.compose)
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.material3)
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.kotlinx.coroutines)
     androidTestImplementation(libs.kotlin.test.junit)
     androidTestImplementation(libs.kotlinx.coroutines)
     androidTestImplementation(libs.android.test.runner)
     androidTestImplementation(libs.android.test.junit)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
 }

@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 45
     env:
       GRADLE_OPTS: -Dorg.gradle.project.livephoto.android=true
+      LIVEPHOTO_VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v7
 
@@ -63,7 +64,7 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-android-fixtures.ps1
 
-      - name: Restore optional private signing key
+      - name: Restore shared private signing key
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
@@ -73,8 +74,7 @@ jobs:
           SIGNING_KEY_ALIAS: ${{ secrets.LIVEPHOTO_SIGNING_KEY_ALIAS }}
         run: |
           if (-not $env:SIGNING_KEYSTORE_BASE64) {
-            Write-Host 'No custom key configured; using the Android debug key.'
-            exit 0
+            throw 'Main APK builds require the persistent shared signing key.'
           }
           if (-not $env:SIGNING_STORE_PASSWORD -or -not $env:SIGNING_KEY_PASSWORD -or -not $env:SIGNING_KEY_ALIAS) {
             throw 'Custom signing configuration is incomplete.'
@@ -85,12 +85,13 @@ jobs:
           "LIVEPHOTO_SIGNING_STORE_PASSWORD=$env:SIGNING_STORE_PASSWORD" | Add-Content $env:GITHUB_ENV
           "LIVEPHOTO_SIGNING_KEY_PASSWORD=$env:SIGNING_KEY_PASSWORD" | Add-Content $env:GITHUB_ENV
           "LIVEPHOTO_SIGNING_KEY_ALIAS=$env:SIGNING_KEY_ALIAS" | Add-Content $env:GITHUB_ENV
+          'LIVEPHOTO_EXPECTED_SIGNER=4a010b28ce4c266c3720fe3628d145b777c9960ade5d0b0f2e9f70f4efbfbcd8' | Add-Content $env:GITHUB_ENV
 
-      - name: Build installable APK, test APK, unit tests and lint
+      - name: Build debug and release APKs, test APK, unit tests and lint
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          ./gradlew :verifyAndroidBuild :android:assembleDebug :android:assembleDebugAndroidTest :android:testDebugUnitTest --rerun :android:lintDebug --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | Tee-Object -FilePath ci-output/android-build.log
+          ./gradlew :verifyAndroidBuild :android:assembleDebug :android:assembleRelease :android:assembleDebugAndroidTest :android:testDebugUnitTest --rerun :android:testReleaseUnitTest --rerun :android:lintDebug :android:lintRelease --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | Tee-Object -FilePath ci-output/android-build.log
           if ($LASTEXITCODE -ne 0) { throw 'Android compilation, unit tests or lint failed.' }
 
       - name: Enable emulator hardware acceleration
@@ -106,6 +107,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             bash -o pipefail -c './gradlew :android:connectedDebugAndroidTest --rerun --max-workers=2 --console=plain --warning-mode=all --stacktrace "-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m" 2>&1 | tee ci-output/android-device.log'
+            pwsh -File ./scripts/smoke-android-packages.ps1
 
       - name: Verify fresh tests and installable APK evidence
         shell: pwsh
@@ -115,10 +117,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-android-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            android/build/outputs/apk/debug/*.apk
-            ci-output/android-evidence.json
-            ci-output/android-signature.txt
+          path: ci-output/apks/*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -134,6 +133,32 @@ jobs:
             android/build/reports/
             ci-output/android-*.log
             ci-output/android-evidence.json
-            ci-output/android-signature.txt
+            ci-output/android-*-signature.txt
+            ci-output/android-install-evidence.json
+            ci-output/android-*-screen.png
           if-no-files-found: warn
           retention-days: 14
+
+  publish:
+    name: Publish direct APK downloads
+    needs: android
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download the verified APKs only
+        run: gh run download '${{ github.run_id }}' --name 'LivePhoto-android-${{ github.run_id }}-${{ github.run_attempt }}' --dir apks
+      - name: Publish immutable Android build
+        run: |
+          test -f apks/LivePhoto-debug.apk
+          test -f apks/LivePhoto-release.apk
+          gh release create 'android-${{ github.run_id }}-${{ github.run_attempt }}' \
+            apks/LivePhoto-debug.apk apks/LivePhoto-release.apk \
+            --target '${{ github.sha }}' --prerelease --latest=false \
+            --title 'Android build ${{ github.run_number }}' \
+            --notes 'Debug/release APKs share the persistent signing key. Commit: ${{ github.sha }}. Experimental Android application; device gallery compatibility requires manual testing.'

@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.kmp) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
 // Android uses ART bytecode, not the removed desktop JVM distribution or JNI.

@@ -3,6 +3,7 @@
         android:name=".LivePhotoApplication"
         android:allowBackup="false"
         android:label="LivePhoto"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
