@@ -1,12 +1,9 @@
-package livephoto.core.jvm
+package livephoto.core.compatibility
 
 import livephoto.core.*
 import livephoto.core.apple.*
 import livephoto.core.binary.*
 import livephoto.core.memory.*
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.UUID
 import kotlin.test.*
 
 /** Independently framed HEIF/Exif and MOV, not camera samples or decode evidence. */
@@ -81,13 +78,11 @@ class AppleHeifPortableFixtureTest {
             selected.video.close()
             input.image.close(); input.video.close()
         }
-        val directory = Path.of("build", "portable-apple-heif-fixtures")
-        Files.createDirectories(directory)
-        val manifest = StringBuilder("scope=synthetic-apple-heif-pair-framing-not-decoder-or-device-proof\nrunId=${UUID.randomUUID()}\n")
+        val manifest = StringBuilder("scope=synthetic-apple-heif-pair-framing-not-decoder-or-device-proof\nrunId=${fixtureRunId()}\n")
         for ((name, bytes) in fixtures) {
-            Files.write(directory.resolve(name), bytes.toByteArray())
+            exportSyntheticFixture("apple-heif", name, bytes.toByteArray())
             manifest.append("$name=${Sha256().also { it.update(bytes) }.finish().value}\n")
         }
-        Files.writeString(directory.resolve("manifest.txt"), manifest.toString())
+        exportSyntheticFixture("apple-heif", "manifest.txt", manifest.toString().encodeToByteArray())
     }
 }

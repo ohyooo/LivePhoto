@@ -203,6 +203,12 @@ jobs:
             core/build/reports/protocol-compatibility/
             core/build/portable-heic-fixtures/
             core/build/reports/huawei-heic-fixtures/
+            core/build/portable-apple-heif-fixtures/
+            core/build/portable-apple-ordinary-exif-fixtures/
+            core/build/reports/samsung-remux-fixtures/
+            core/build/reports/vivo-remux-fixtures/
+            core/build/reports/huawei-remux-fixtures/
+            core/build/encoded-media-fixtures/
             cli-shared/build/test-results/${{ matrix.target }}Test/
             cli-shared/build/reports/tests/${{ matrix.target }}Test/
             file-io/build/test-results/${{ matrix.target }}Test/

@@ -10,7 +10,8 @@ $expected = @(
     'FfmpegRemuxIntegrationTest', 'FfmpegTrimIntegrationTest',
     'FfmpegTranscodeIntegrationTest', 'FfmpegAudioTrimIntegrationTest',
     'FfmpegReplaceIntegrationTest', 'FfmpegCreateTrimIntegrationTest',
-    'FfmpegCreateReplacementIntegrationTest'
+    'FfmpegCreateReplacementIntegrationTest', 'HeifDecodePreservationIntegrationTest',
+    'SamsungRemuxRepairIntegrationTest', 'AppleConvertIntegrationTest'
 )
 $results = @()
 foreach ($name in $expected) {

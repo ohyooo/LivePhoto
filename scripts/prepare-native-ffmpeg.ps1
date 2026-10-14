@@ -26,6 +26,6 @@ if ($IsWindows) {
 & $ffmpeg -version | Set-Content ci-output/native-ffmpeg-version.txt
 if ($LASTEXITCODE -ne 0) { throw 'FFmpeg version check failed.' }
 $encoders = (& $ffmpeg -hide_banner -encoders 2>&1 | Out-String)
-if ($LASTEXITCODE -ne 0 -or $encoders -notmatch 'libx264' -or $encoders -notmatch '\baac\b') { throw 'Required fixture encoders unavailable.' }
+if ($LASTEXITCODE -ne 0 -or $encoders -notmatch 'libx264' -or $encoders -notmatch 'libx265' -or $encoders -notmatch '\baac\b') { throw 'Required fixture encoders unavailable.' }
 "LIVEPHOTO_FFMPEG=$ffmpeg" | Add-Content $env:GITHUB_ENV
 Write-Host 'Stable external FFmpeg available for mandatory Native validation.'

@@ -13,6 +13,7 @@ internal interface MediaTestHost {
     fun path(name: String): String
     fun reference(name: String): String
     fun read(path: String): ByteArray
+    fun write(path: String, bytes: ByteArray)
     suspend fun source(path: String): BinarySource
     suspend fun execute(arguments: List<String>, timeoutMillis: Long = 60_000): FfmpegProcessResult
 }

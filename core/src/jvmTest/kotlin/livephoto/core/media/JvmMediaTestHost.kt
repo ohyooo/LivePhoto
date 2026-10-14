@@ -5,6 +5,7 @@ import livephoto.core.ffmpeg.*
 import livephoto.core.jvm.*
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import org.junit.Assume.assumeTrue
 import kotlin.test.*
 
@@ -28,6 +29,11 @@ internal actual fun runMediaTest(block: suspend (MediaTestHost) -> Unit): Unit {
                 .map { it.resolve("reference/$name") }.first(Files::isRegularFile).toString()
         }
         override fun read(path: String): ByteArray = Files.readAllBytes(Path.of(path))
+        override fun write(path: String, bytes: ByteArray) {
+            val target = Path.of(path)
+            require(target in owned && path !in originals)
+            Files.write(target, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+        }
         override suspend fun source(path: String): BinarySource {
             originals.getOrPut(path) { mediaFileDigest(read(path)) }
             return FileBinarySource(Path.of(path))

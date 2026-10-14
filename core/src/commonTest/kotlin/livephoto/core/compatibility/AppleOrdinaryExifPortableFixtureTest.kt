@@ -1,36 +1,29 @@
-package livephoto.core.jvm
+package livephoto.core.compatibility
 
 import livephoto.core.*
 import livephoto.core.apple.*
 import livephoto.core.binary.*
 import livephoto.core.memory.*
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.UUID
-import java.util.Base64
 import kotlin.test.*
 
 class AppleOrdinaryExifPortableFixtureTest {
     @Test fun exportOrdinaryExifFixturesAfterStrictBothContainerPairValidation(): Unit = runImmediate {
         val context = Context(Limits(16_000_000uL, 16_000_000uL, maxMetadataBytes = 8_000_000uL))
-        val mov = Base64.getDecoder().decode(javaClass.getResourceAsStream("/windows-media/frame-high.mov.base64")!!
-            .use { it.readNBytes(40_000).toString(Charsets.US_ASCII).trim() })
+        val mov = encodedMediaFixture("frame-high-mov")
         assertEquals("5929ddf215c236013abb1dff65c2c3537a878fe4c2ad40fa0af7e46ada2efe19",
             Sha256().also { it.update(Bytes(mov)) }.finish().value)
-        val ordinaryMov = Base64.getDecoder().decode(javaClass.getResourceAsStream("/apple-media/ordinary-text.mov.base64")!!
-            .use { it.readNBytes(40_000).toString(Charsets.US_ASCII).trim() })
+        val ordinaryMov = encodedMediaFixture("ordinary-text-mov")
         assertEquals("9d2be28350c0c807ac7164c80968ef75ce875fb8d6da04b2a3d89165c82aa6a4",
             Sha256().also { it.update(Bytes(ordinaryMov)) }.finish().value)
-        val ordinaryMdta = Base64.getDecoder().decode(javaClass.getResourceAsStream("/apple-media/ordinary-mdta.mp4.base64")!!
-            .use { it.readNBytes(40_000).toString(Charsets.US_ASCII).trim() })
+        val ordinaryMdta = encodedMediaFixture("ordinary-mdta-mp4")
         assertEquals("0d32b1e5e477152a1b31e4e57ccd3ffc0bc1be725d0dc4a1f339b6b3d2956e2c",
             Sha256().also { it.update(Bytes(ordinaryMdta)) }.finish().value)
         val fixtures = linkedMapOf<String, ByteArray>(
             "ordinary-big.jpg" to AppleOrdinaryExifTest().image(Endian.Big),
             "ordinary-little.jpg" to AppleOrdinaryExifTest().image(Endian.Little),
             "private-note.jpg" to AppleFixtures.image(tag = 1),
-            "motion.mp4" to WindowsEncodedFixtures.bytes("remux-main"),
-            "ordinary-text.mp4" to OrdinaryMovieTextFixtures.movie(WindowsEncodedFixtures.bytes("remux-main")),
+            "motion.mp4" to encodedMediaFixture("remux-main"),
+            "ordinary-text.mp4" to OrdinaryMovieTextFixtures.movie(encodedMediaFixture("remux-main")),
             "ordinary-text.mov" to ordinaryMov,
             "ordinary-mdta.mp4" to ordinaryMdta,
             "motion.mov" to mov)
@@ -94,13 +87,11 @@ class AppleOrdinaryExifPortableFixtureTest {
             assertTrue(blocked.query().orThrow().assetIds.isEmpty())
             converted.output.assets.forEach { it.readableSource?.close() }; google.output.assets.forEach { it.readableSource?.close() }; image.close(); movie.close()
         }
-        val directory = Path.of("build", "portable-apple-ordinary-exif-fixtures")
-        Files.createDirectories(directory)
-        val manifest = StringBuilder("scope=synthetic-ordinary-exif-pair-not-device-proof\nrunId=${UUID.randomUUID()}\n")
+        val manifest = StringBuilder("scope=synthetic-ordinary-exif-pair-not-device-proof\nrunId=${fixtureRunId()}\n")
         for ((name, bytes) in fixtures) {
-            Files.write(directory.resolve(name), bytes)
+            exportSyntheticFixture("apple-ordinary-exif", name, bytes)
             manifest.append("$name=${Sha256().also { it.update(Bytes(bytes)) }.finish().value}\n")
         }
-        Files.writeString(directory.resolve("manifest.txt"), manifest.toString())
+        exportSyntheticFixture("apple-ordinary-exif", "manifest.txt", manifest.toString().encodeToByteArray())
     }
 }

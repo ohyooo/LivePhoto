@@ -32,6 +32,11 @@ internal actual fun protocolFixtureData(name: String): ByteArray {
     return listOf("build/protocol-fixtures/v1/$name", "core/build/protocol-fixtures/v1/$name")
         .firstNotNullOfOrNull(::readFixture) ?: error("Required expanded protocol fixture missing")
 }
+internal actual fun encodedFixtureData(name: String): ByteArray {
+    encodedFixtureResource(name) // Fixed whitelist, no arbitrary path interpretation.
+    return listOf("build/encoded-media-fixtures/$name.bin", "core/build/encoded-media-fixtures/$name.bin")
+        .firstNotNullOfOrNull(::readFixture) ?: error("Required expanded encoded fixture missing")
+}
 internal actual fun referenceFixtureData(name: String): ByteArray? {
     require(name.isNotBlank() && name.split('/').none { it == ".." } && '\\' !in name)
     return listOf("reference/$name", "../reference/$name").firstNotNullOfOrNull(::readFixture)

@@ -8,6 +8,7 @@ import livephoto.core.*
 import livephoto.core.ffmpeg.*
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import okio.use
 import kotlin.random.Random
 import kotlin.test.*
 
@@ -38,6 +39,14 @@ internal actual fun runMediaTest(block: suspend (MediaTestHost) -> Unit): Unit =
                     .first { fs.exists(it) }.let { fs.canonicalize(it).toString() }
             }
             override fun read(path: String): ByteArray = fs.read(path.toPath()) { readByteArray() }
+            override fun write(path: String, bytes: ByteArray) {
+                val target = path.toPath()
+                require(target in owned && path !in originals)
+                fs.openReadWrite(target, mustCreate = true).use { handle ->
+                    handle.write(0L, bytes, 0, bytes.size)
+                    handle.flush()
+                }
+            }
             override suspend fun source(path: String): BinarySource {
                 originals.getOrPut(path) { mediaFileDigest(read(path)) }
                 return success(session.capture(path))

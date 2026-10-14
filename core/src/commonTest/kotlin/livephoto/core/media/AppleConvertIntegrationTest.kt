@@ -1,0 +1,245 @@
+package livephoto.core.media
+
+import livephoto.core.*
+import livephoto.core.apple.AppleHeifFixtures
+import livephoto.core.apple.APPLE_CID
+import livephoto.core.binary.*
+import livephoto.core.bmff.*
+import livephoto.core.implementation.RangeSource
+import livephoto.core.memory.MemoryOutputTransaction
+import livephoto.core.memory.MemoryBinarySource
+import livephoto.core.compatibility.*
+import kotlin.test.*
+
+/** Existing optional FFmpeg, synthetic encodes explicitly outside the forbidden-encoding conversion. */
+class AppleConvertIntegrationTest {
+    private val context = Context(Limits(128_000_000uL, 128_000_000uL))
+    @Test fun realApplePairAndGoogleRoundtripDecodeAllOriginalVideoAndAudio(): Unit = runMediaTest { host ->
+        val core = DefaultLivePhotoCore(host.backend)
+        val video = host.path("explicit encoded video.mp4")
+        val audio = host.path("explicit encoded audio.aac")
+        val muxed = host.path("audio first mp4.mp4")
+        suspend fun command(args: List<String>) {
+            val result = host.execute(listOf(host.executable, "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + args, 60_000L)
+            assertEquals(0, result.code, result.output); assertFalse(result.ioFailed || result.timedOut || result.outputLimited)
+        }
+        suspend fun decode(path: String) = command(listOf("-err_detect", "explode", "-f", "mov", "-i", path.toString(), "-map", "0:v", "-map", "0:a?", "-sn", "-dn", "-f", "null", "-"))
+        suspend fun save(source: BinarySource, path: String) {
+            val reader = BinaryReader(source, context)
+            val size = reader.identity().orThrow().size
+            require(size <= 128_000_000uL)
+            host.write(path, reader.readExactly(0uL, size.toUInt()).orThrow().toByteArray())
+            reader.validateIdentity().orThrow()
+        }
+        command(listOf("-f", "lavfi", "-i", "testsrc2=size=32x32:rate=25", "-frames:v", "4", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "2", "-pix_fmt", "yuv420p",
+            "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", video.toString()))
+        command(listOf("-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.16", "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-flags:a", "+bitexact", "-f", "adts", audio.toString()))
+        command(listOf("-i", video.toString(), "-i", audio.toString(), "-map", "1:a:0", "-map", "0:v:0", "-c", "copy", "-bsf:a", "aac_adtstoasc",
+            "-streamid", "0:4", "-streamid", "1:17", "-use_stream_ids_as_track_ids", "1", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0", muxed.toString()))
+        val plainVideo = host.source(video)
+        val frame = try { core.extractFrame(ExtractFrameRequest(ResourceRef(SourceSet.Single(plainVideo)), CoverPosition.FrameIndex(1uL), ImageEncoding(ImageFormat.Jpeg), MemoryOutputTransaction(context, "apple-real-frame"), context)).orThrow() }
+            finally { plainVideo.close() }
+        try {
+            val movPath = host.path("explicit streamcopy fixture.mov")
+            command(listOf("-i", video.toString(), "-map", "0:v:0", "-c", "copy", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-write_btrt", "0", movPath.toString()))
+            val movInput = host.source(movPath)
+            try {
+                val original = BinaryReader(movInput, context)
+                val facts = BmffVideoProbe(original).probe(ByteRange(0uL, movInput.size().orThrow())).orThrow()
+                assertEquals(VideoContainer.Mov, facts.container)
+                val before = sha256Range(original, facts.range).orThrow()
+                val liveMov = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, movInput,
+                    ProtocolSelector(ProtocolIds.GoogleV2), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)),
+                    policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-mov-live-source"), context = context)).orThrow()
+                try {
+                    val converted = core.convert(ConvertRequest(SourceSet.Single(liveMov.output.assets.single().readableSource!!),
+                        ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                        output = MemoryOutputTransaction(context, "apple-real-mov-convert"), context = context)).orThrow()
+                    try {
+                        assertEquals(VideoContainer.Mov, converted.output.assets[1].videoContainer)
+                        assertTrue(converted.execution.none { it.transcoded || it.remuxed })
+                        val pair = SourceSet.Pair(converted.output.assets[0].readableSource!!, converted.output.assets[1].readableSource!!)
+                        assertEquals(0, core.inspect(ReadRequest(pair, context)).orThrow().keyPhoto.position!!.compareTo(Time(40, 1000u)))
+                        val reader = BinaryReader(pair.video, context)
+                        val convertedFacts = BmffVideoProbe(reader, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                        RemuxVerification.verify(original, facts, reader, convertedFacts.copy(tracks = convertedFacts.tracks.filter { it.handler != "meta" }))
+                        val path = host.path("converted Apple MOV.mov")
+                        save(pair.video, path); decode(path)
+                        // A real encoded MOV with one intentionally conflicting formal CID.
+                        // Re-pair must retain every sample and decode, not silently remux or encode.
+                        val movieBytes = reader.readExactly(0uL, pair.video.size().orThrow().toUInt()).orThrow().toByteArray()
+                        val cidField = core.inspect(ReadRequest(SourceSet.Single(pair.video), context)).orThrow().metadata.single { it.selector == APPLE_CID }.location.range!!
+                        "11112233-4455-6677-8899-aabbccddeeff".encodeToByteArray().copyInto(movieBytes, cidField.offset.toInt())
+                        val conflictingMovie = MemoryBinarySource(Bytes(movieBytes), SourceId("real-conflicting-apple-mov"))
+                        try {
+                            for (videoAuthority in listOf(false, true)) {
+                                val authority = core.inspect(ReadRequest(SourceSet.Single(if (videoAuthority) conflictingMovie else pair.image), context)).orThrow().pairing!!.evidence.single().id
+                                val repaired = core.repair(RepairRequest(SourceSet.Pair(pair.image, conflictingMovie), RepairMode.ExplicitRePair,
+                                    authority = authority, dryRun = false, policy = MutationPolicy(conflicts = ConflictPolicy.ExplicitAuthority, authority = authority),
+                                    output = MemoryOutputTransaction(context, "real-mov-repair-$videoAuthority"), context = context)).orThrow()
+                                try {
+                                    val operation = repaired.operation!!
+                                    assertEquals(1, repaired.changesApplied.size)
+                                    assertTrue(operation.execution.none { it.transcoded || it.remuxed })
+                                    val repairedReader = BinaryReader(operation.output.assets[1].readableSource!!, context)
+                                    val repairedFacts = BmffVideoProbe(repairedReader, allowTimedMetadata = true).probe(ByteRange(0uL, repairedReader.identity().orThrow().size)).orThrow()
+                                    RemuxVerification.verify(original, facts, repairedReader, repairedFacts.copy(tracks = repairedFacts.tracks.filter { it.handler != "meta" }))
+                                    val repairedPath = host.path("repaired real movie $videoAuthority.mov")
+                                    save(repairedReader.source, repairedPath); decode(repairedPath)
+                                    assertEquals(true, core.inspect(ReadRequest(SourceSet.Pair(operation.output.assets[0].readableSource!!, repairedReader.source), context)).orThrow().pairing!!.matches)
+                                } finally { repaired.operation!!.output.assets.forEach { it.readableSource?.close() } }
+                            }
+                        } finally { conflictingMovie.close() }
+                        // Real encoded movie; the HEIC primary is explicitly synthetic framing, not a decoded camera photo.
+                        val cid = core.inspect(ReadRequest(pair, context)).orThrow().pairing!!.imageIdentifier!!
+                        val heic = MemoryBinarySource(Bytes(AppleHeifFixtures.image(cid, idat = true)), SourceId("real-movie-synthetic-heic"))
+                        val heicBefore = sha256Range(BinaryReader(heic, context), ByteRange(0uL, heic.size().orThrow())).orThrow()
+                        val keyed = core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Pair(heic, pair.video), CoverPosition.FrameIndex(0uL),
+                            MutationPolicy(preservation = PreservationPolicy.Strict), MemoryOutputTransaction(context, "real-heic-mov-key"), context)).orThrow()
+                        try {
+                            assertEquals("image/heic", keyed.output.assets[0].mime)
+                            assertEquals(heicBefore, sha256Range(BinaryReader(keyed.output.assets[0].readableSource!!, context), ByteRange(0uL, heic.size().orThrow())).orThrow())
+                            assertEquals(Coverage.Partial, keyed.validation.coverage)
+                            val keyPath = host.path("keyed HEIC pair real movie.mov")
+                            save(keyed.output.assets[1].readableSource!!, keyPath); decode(keyPath)
+                        } finally { keyed.output.assets.forEach { it.readableSource?.close() } }
+                        val heicClean = core.split(SplitRequest(SourceSet.Pair(heic, pair.video), output = MemoryOutputTransaction(context, "real-heic-mov-clean"), context = context)).orThrow()
+                        try {
+                            assertEquals("image/heic", heicClean.output.assets[0].mime)
+                            val detected = core.detect(ReadRequest(SourceSet.Single(heicClean.output.assets[0].readableSource!!), context)).orThrow()
+                            assertEquals(Disposition.Unknown, detected.disposition); assertTrue(detected.matches.isEmpty())
+                            val cleanPath = host.path("clean HEIC pair real movie.mov")
+                            save(heicClean.output.assets[1].readableSource!!, cleanPath); decode(cleanPath)
+                            assertEquals(heicBefore, sha256Range(BinaryReader(heic, context), ByteRange(0uL, heic.size().orThrow())).orThrow())
+                        } finally { heicClean.output.assets.forEach { it.readableSource?.close() }; heic.close() }
+                        assertEquals(before, sha256Range(original, facts.range).orThrow())
+                    } finally { converted.output.assets.forEach { it.readableSource?.close() } }
+                } finally { liveMov.output.assets.forEach { it.readableSource?.close() } }
+                val defaultPath = host.path("apple default create.mov")
+                verifyDefaultCreate(core, frame.operation.output.assets.single().readableSource!!, movInput, defaultPath, ::save, ::decode)
+                val apple = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, movInput,
+                    ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mov")), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
+                    policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-mov-create"), context = context)).orThrow()
+                try {
+                    var pair = SourceSet.Pair(apple.output.assets[0].readableSource!!, apple.output.assets[1].readableSource!!)
+                    val firstMovie = BinaryReader(pair.video, context)
+                    val firstHash = sha256Range(firstMovie, ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                    val derived = mutableListOf<OperationResult>()
+                    try {
+                        for (index in listOf(1uL, 0uL)) {
+                            val changed = core.setKeyPhotoPosition(SetKeyRequest(pair, CoverPosition.FrameIndex(index), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                                output = MemoryOutputTransaction(context, "apple-real-mov-key-$index"), context = context)).orThrow()
+                            derived += changed
+                            assertEquals(VideoContainer.Mov, changed.output.assets[1].videoContainer)
+                            pair = SourceSet.Pair(changed.output.assets[0].readableSource!!, changed.output.assets[1].readableSource!!)
+                            val reader = BinaryReader(pair.video, context)
+                            val changedFacts = BmffVideoProbe(reader, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+                            RemuxVerification.verify(original, facts, reader, changedFacts.copy(tracks = changedFacts.tracks.filter { it.handler != "meta" }))
+                            val outputPath = host.path("apple mov key $index.mov")
+                            save(pair.video, outputPath); decode(outputPath)
+                        }
+                        assertEquals(firstHash, sha256Range(BinaryReader(pair.video, context), ByteRange(0uL, pair.video.size().orThrow())).orThrow())
+                        assertEquals(before, sha256Range(original, facts.range).orThrow())
+                    } finally { derived.forEach { result -> result.output.assets.forEach { it.readableSource?.close() } } }
+                } finally { apple.output.assets.forEach { it.readableSource?.close() } }
+            } finally { movInput.close() }
+            for ((index, inputPath) in listOf(video, muxed).withIndex()) {
+                val input = host.source(inputPath)
+                try {
+                    val original = BinaryReader(input, context)
+                    val originalFacts = BmffVideoProbe(original).probe(ByteRange(0uL, original.identity().orThrow().size)).orThrow()
+                    val before = sha256Range(original, originalFacts.range).orThrow()
+                    val createdApple = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, input,
+                        ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4")), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)),
+                        policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-create-$index"), context = context)).orThrow()
+                    try {
+                        val createdMovie = BinaryReader(createdApple.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!, context)
+                        val createdFacts = BmffVideoProbe(createdMovie, allowTimedMetadata = true).probe(ByteRange(0uL, createdMovie.identity().orThrow().size)).orThrow()
+                        RemuxVerification.verify(original, originalFacts, createdMovie, createdFacts.copy(tracks = createdFacts.tracks.filter { it.handler != "meta" }))
+                        val createdPath = host.path("created apple movie $index.mp4")
+                        save(createdMovie.source, createdPath); decode(createdPath)
+                        val createdPair = SourceSet.Pair(createdApple.output.assets[0].readableSource!!, createdMovie.source)
+                        assertEquals(0, core.inspect(ReadRequest(createdPair, context)).orThrow().keyPhoto.position!!.compareTo(Time(40, 1000u)))
+                        assertTrue(createdApple.execution.none { it.transcoded || it.remuxed })
+                        val changedKey = core.setKeyPhotoPosition(SetKeyRequest(createdPair, CoverPosition.FrameIndex(0uL),
+                            policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-key-$index"), context = context)).orThrow()
+                        try {
+                            val keyMovie = BinaryReader(changedKey.output.assets[1].readableSource!!, context)
+                            val keyFacts = BmffVideoProbe(keyMovie, allowTimedMetadata = true).probe(ByteRange(0uL, keyMovie.identity().orThrow().size)).orThrow()
+                            RemuxVerification.verify(original, originalFacts, keyMovie, keyFacts.copy(tracks = keyFacts.tracks.filter { it.handler != "meta" }))
+                            val keyPath = host.path("apple changed key $index.mp4")
+                            save(keyMovie.source, keyPath); decode(keyPath)
+                            val keyPair = SourceSet.Pair(changedKey.output.assets[0].readableSource!!, keyMovie.source)
+                            assertEquals(0, core.inspect(ReadRequest(keyPair, context)).orThrow().keyPhoto.position!!.compareTo(Time.Zero))
+                            val imageReader = BinaryReader(createdPair.image, context)
+                            val outputImage = BinaryReader(keyPair.image, context)
+                            assertEquals(sha256Range(imageReader, ByteRange(0uL, imageReader.identity().orThrow().size)).orThrow(),
+                                sha256Range(outputImage, ByteRange(0uL, outputImage.identity().orThrow().size)).orThrow())
+                        } finally { changedKey.output.assets.forEach { it.readableSource?.close() } }
+                    } finally { createdApple.output.assets.forEach { it.readableSource?.close() } }
+                    val carrier = core.create(CreateRequest(frame.operation.output.assets.single().readableSource!!, input, ProtocolSelector(ProtocolIds.GoogleV2),
+                        edits = EditSpec(keyPosition = CoverPosition.FrameIndex(1uL)), policy = MutationPolicy(preservation = PreservationPolicy.Strict),
+                        output = MemoryOutputTransaction(context, "apple-real-carrier-$index"), context = context)).orThrow()
+                    try {
+                        val apple = core.convert(ConvertRequest(SourceSet.Single(carrier.output.assets.single().readableSource!!), ProtocolSelector(ProtocolIds.Apple, ProfileId("jpeg-mp4")),
+                            policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-pair-$index"), context = context)).orThrow()
+                        try {
+                            assertTrue(apple.execution.none { it.transcoded })
+                            val movie = BinaryReader(apple.output.assets.single { it.role == AssetRole.MotionVideo }.readableSource!!, context)
+                            val facts = BmffVideoProbe(movie, allowTimedMetadata = true).probe(ByteRange(0uL, movie.identity().orThrow().size)).orThrow()
+                            RemuxVerification.verify(original, originalFacts, movie, facts.copy(tracks = facts.tracks.filter { it.handler != "meta" }))
+                            assertEquals(originalFacts.tracks.map { it.trackId }, facts.tracks.filter { it.handler != "meta" }.map { it.trackId })
+                            assertEquals(1, BmffReader(movie).readBoxes(facts.range).orThrow().count { it.type == "mdat" })
+                            val outputPath = host.path("apple movie $index.mp4")
+                            save(movie.source, outputPath); decode(outputPath)
+                            val pair = SourceSet.Pair(apple.output.assets[0].readableSource!!, movie.source)
+                            val roundtrip = core.convert(ConvertRequest(pair, ProtocolSelector(ProtocolIds.GoogleV2), output = MemoryOutputTransaction(context, "apple-real-roundtrip-$index"), context = context)).orThrow()
+                            try {
+                                val live = roundtrip.output.assets.single().readableSource!!
+                                val inspected = core.inspect(ReadRequest(SourceSet.Single(live), context)).orThrow()
+                                assertEquals(0, inspected.keyPhoto.position?.compareTo(Time(40, 1000u)))
+                                val extent = inspected.layout.resources.single { it.kind == ResourceKind.Video }.extents.single().range
+                                val videoSource = RangeSource(BinaryReader(live, context), extent)
+                                val roundtripReader = BinaryReader(videoSource, context)
+                                val roundtripFacts = BmffVideoProbe(roundtripReader).probe(ByteRange(0uL, extent.length)).orThrow()
+                                RemuxVerification.verify(original, originalFacts, roundtripReader, roundtripFacts)
+                                val roundtripPath = host.path("roundtrip movie $index.mp4")
+                                save(videoSource, roundtripPath); decode(roundtripPath)
+                            } finally { roundtrip.output.assets.forEach { it.readableSource?.close() } }
+                            assertEquals(before, sha256Range(original, originalFacts.range).orThrow())
+                        } finally { apple.output.assets.forEach { it.readableSource?.close() } }
+                    } finally { carrier.output.assets.forEach { it.readableSource?.close() } }
+                } finally { input.close() }
+            }
+        } finally { frame.operation.output.assets.forEach { it.readableSource?.close() } }
+    }
+    // Keep this coroutine separate: the round-trip test is already close to the JVM method-size limit.
+    private suspend fun verifyDefaultCreate(
+        core: DefaultLivePhotoCore,
+        image: BinarySource,
+        video: BinarySource,
+        outputPath: String,
+        save: suspend (BinarySource, String) -> Unit,
+        decode: suspend (String) -> Unit,
+    ) {
+        val original = BinaryReader(video, context)
+        val facts = BmffVideoProbe(original).probe(ByteRange(0uL, video.size().orThrow())).orThrow()
+        val before = sha256Range(original, facts.range).orThrow()
+        val defaultApple = core.create(CreateRequest(image, video,
+            ProtocolSelector(ProtocolIds.Apple), edits = EditSpec(keyPosition = CoverPosition.FrameIndex(0uL)),
+            policy = MutationPolicy(preservation = PreservationPolicy.Strict), output = MemoryOutputTransaction(context, "apple-real-default-create"), context = context)).orThrow()
+        try {
+            assertEquals(VideoContainer.Mov, defaultApple.output.assets[1].videoContainer)
+            assertTrue(defaultApple.execution.none { it.remuxed || it.transcoded })
+            val pair = SourceSet.Pair(defaultApple.output.assets[0].readableSource!!, defaultApple.output.assets[1].readableSource!!)
+            val created = BinaryReader(pair.video, context)
+            val after = BmffVideoProbe(created, allowTimedMetadata = true).probe(ByteRange(0uL, pair.video.size().orThrow())).orThrow()
+            RemuxVerification.verify(original, facts, created, after.copy(tracks = after.tracks.filter { it.handler != "meta" }))
+            val inspected = core.inspect(ReadRequest(pair, context)).orThrow()
+            assertEquals(true, inspected.pairing?.matches)
+            assertEquals(0, inspected.keyPhoto.position!!.compareTo(Time.Zero))
+            save(pair.video, outputPath); decode(outputPath)
+            assertEquals(before, sha256Range(original, facts.range).orThrow())
+        } finally { defaultApple.output.assets.forEach { it.readableSource?.close() } }
+    }
+}

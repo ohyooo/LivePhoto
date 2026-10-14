@@ -37,6 +37,8 @@ $mediaSuites = @{
     FfmpegCreateReplacementIntegrationTest = 1; FfmpegAudioTrimIntegrationTest = 4
     FfmpegTrimIntegrationTest = 2; FfmpegRemuxIntegrationTest = 5
     FfmpegTranscodeIntegrationTest = 2
+    HeifDecodePreservationIntegrationTest = 1; SamsungRemuxRepairIntegrationTest = 1
+    AppleConvertIntegrationTest = 1
 }
 $seenMedia = @{}
 foreach ($file in $reports) {
@@ -58,7 +60,13 @@ foreach ($file in $reports) {
         }
     }
 }
-if ($mediaTests -ne 20 -or $seenMedia.Count -ne $mediaSuites.Count) { throw 'Mandatory common real media regressions must all execute on Native.' }
+if ($mediaTests -ne 23 -or $seenMedia.Count -ne $mediaSuites.Count) { throw 'Mandatory common real media regressions must all execute on Native.' }
+foreach ($name in @('AppleHeifPortableFixtureTest', 'AppleOrdinaryExifPortableFixtureTest')) {
+    $matching = @($reports | Where-Object { $_.Name -eq "TEST-${Target}Test.livephoto.core.compatibility.$name.xml" })
+    if ($matching.Count -ne 1) { throw "Missing/duplicate shared portable fixture suite: $name" }
+    [xml]$xml = Get-Content $matching[0].FullName -Raw
+    if ([int]$xml.testsuite.tests -ne 1) { throw "Incomplete shared portable fixture suite: $name" }
+}
 if ($fixtureTests -ne 20) { throw 'Fixed protocol fixture regressions must all execute on Native.' }
 $fixtureEvidence = 'core/build/reports/protocol-compatibility/verified-captures.tsv'
 if (-not (Test-Path $fixtureEvidence) -or @(Get-Content $fixtureEvidence | Where-Object { $_.Trim() }).Count -ne 19) {

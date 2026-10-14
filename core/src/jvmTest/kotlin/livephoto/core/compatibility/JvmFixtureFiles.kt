@@ -3,8 +3,18 @@ package livephoto.core.compatibility
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.GZIPInputStream
+import java.util.Base64
 
 private const val MAX_FIXTURE_BYTES = 32_000_000
+internal actual fun encodedFixtureData(name: String): ByteArray {
+    val resource = "/${encodedFixtureResource(name)}"
+    val stream = requireNotNull(object {}.javaClass.getResourceAsStream(resource)) { "Required encoded fixture missing" }
+    return stream.use {
+        val encoded = it.readNBytes(40_001)
+        require(encoded.size <= 40_000)
+        Base64.getDecoder().decode(encoded.toString(Charsets.US_ASCII).trim())
+    }
+}
 internal actual fun protocolFixtureData(name: String): ByteArray {
     require(name.isNotBlank() && '/' !in name && '\\' !in name && name != "..")
     val resource = "/protocol-compatibility/v1/$name"
