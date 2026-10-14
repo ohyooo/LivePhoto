@@ -17,6 +17,9 @@ jobs:
     name: Core (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    env:
+      # Exercise the same property mechanism used by the Wrapper updater.
+      ORG_GRADLE_PROJECT_livephoto.nativeTarget: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
@@ -115,7 +118,6 @@ jobs:
           $binaryTarget = '${{ matrix.target }}'
           $binaryTarget = $binaryTarget.Substring(0, 1).ToUpperInvariant() + $binaryTarget.Substring(1)
           $gradleArgs = @(
-            '-Plivephoto.nativeTarget=${{ matrix.platform }}'
             ':verifyNativeOnlyBuild'
             ':core:${{ matrix.target }}MainKlibrary'
             ':core:${{ matrix.target }}Test'
