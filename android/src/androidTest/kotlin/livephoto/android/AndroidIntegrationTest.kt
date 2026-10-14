@@ -117,6 +117,8 @@ class AndroidIntegrationTest {
                 ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail"))))
             output = result.uri
             assertEquals(1, result.operation.output.assets.size)
+            assertNull(result.operation.output.assets.single().readableSource)
+            assertEquals(result.uri.toString(), result.operation.output.assets.single().accessReference)
             assertTrue(result.operation.execution.none { it.transcoded || it.remuxed })
             val saved = app.contentResolver.openInputStream(result.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
             assertEquals(result.operation.output.assets.single().digest.value, sha(saved))
@@ -131,8 +133,8 @@ class AndroidIntegrationTest {
             assertContentEquals(videoBytes, videoFile.readBytes())
         } finally {
             output?.let { app.contentResolver.delete(it, null, null) }
-            assertTrue(imageFile.delete())
-            assertTrue(videoFile.delete())
+            if (imageFile.exists()) assertTrue(imageFile.delete())
+            if (videoFile.exists()) assertTrue(videoFile.delete())
         }
     }
 }

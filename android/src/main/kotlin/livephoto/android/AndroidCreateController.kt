@@ -42,7 +42,13 @@ class AndroidCreateController(private val android: AndroidContext, private val c
                     currentCoroutineContext().ensureActive()
                     val bytes = output.committedAssets().getValue(asset.id).toByteArray()
                     val uri = AndroidPhotoExporter(android.contentResolver).publish(bytes, "LivePhoto-$token.jpg")
-                    CoreResult.Success(Created(uri, result.value))
+                    // Return the published URI, not a memory handle closed by this session.
+                    // Preserve the original conservative/volatile durability report.
+                    val published = result.value.copy(output = MediaOutput(
+                        listOf(asset.copy(readableSource = null, accessReference = uri.toString())),
+                        result.value.output.receipt,
+                    ))
+                    CoreResult.Success(Created(uri, published))
                 }
             }
         } finally {
