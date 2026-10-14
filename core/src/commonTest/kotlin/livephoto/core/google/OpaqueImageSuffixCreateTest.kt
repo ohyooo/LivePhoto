@@ -59,6 +59,17 @@ class OpaqueImageSuffixCreateTest {
             val extraction = success(core.extract(ExtractRequest(SourceSet.Single(source), emptyList(), output = extractionOutput, context = context)))
             extracted = extraction
             assertEquals(videoBytes, extractionOutput.committedAssets().values.single())
+            val splitOutput = MemoryOutputTransaction(context, "suffix-clean-must-not-drop")
+            val split = assertIs<CoreResult.Failure>(core.split(SplitRequest(SourceSet.Single(source), output = splitOutput, context = context)))
+            assertEquals("UNSAFE_METADATA_REWRITE", split.error.code.value)
+            assertEquals("jpeg:opaque-suffix", split.error.location?.selector)
+            assertTrue(splitOutput.committedAssets().isEmpty())
+            val convertedOutput = MemoryOutputTransaction(context, "suffix-convert-must-not-drop")
+            val other = if (protocol == ProtocolIds.GoogleV1) ProtocolIds.GoogleV2 else ProtocolIds.GoogleV1
+            val converted = assertIs<CoreResult.Failure>(core.convert(ConvertRequest(SourceSet.Single(source),
+                ProtocolSelector(other, ProfileId("jpeg")), output = convertedOutput, context = context)))
+            assertEquals("UNSAFE_METADATA_REWRITE", converted.error.code.value)
+            assertTrue(convertedOutput.committedAssets().isEmpty())
             assertEquals(imageBytes, success(image.readAt(0uL, imageBytes.size.toUInt())))
             assertEquals(videoBytes, success(video.readAt(0uL, videoBytes.size.toUInt())))
         } finally {

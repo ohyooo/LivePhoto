@@ -95,6 +95,7 @@ internal object ConvertOperations {
             video = RangeSource(pair.videoReader, ByteRange(0uL, pair.uuid.range.offset))
         } else {
             if (session.gainMaps.isNotEmpty()) fail("GAINMAP_PRESERVATION_UNAVAILABLE", "Conversion cannot discard auxiliary resources", Stage.Plan)
+            requireDiscardablePrimaryPadding(session)
             val rewrite = if (session.sef != null) {
                 val clean = SamsungJpegWriter.cleanPlan(session, request.context, budget).orThrow()
                 if (clean.suffix.length != 0uL) fail("CAPABILITY_UNSUPPORTED", "Conversion with ordinary SEF requires a target suffix relocation implementation", Stage.Plan)

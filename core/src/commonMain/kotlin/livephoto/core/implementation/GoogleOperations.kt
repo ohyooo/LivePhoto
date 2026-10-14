@@ -185,6 +185,7 @@ internal object GoogleOperations {
         if (session.heifItems != null) return@attempt GoogleHeicSplitOperations.split(request, session, budget).orThrow()
         if (NeutralMovieClean.accepts(session)) return@attempt NeutralMovieClean.split(request, session, budget).orThrow()
         if (session.inspection.detection.disposition == Disposition.Ambiguous) fail("AMBIGUOUS_PROTOCOL", "Clean needs one trusted resource graph")
+        requireDiscardablePrimaryPadding(session)
         val oplus = session.bindings.any { it.protocol == ProtocolIds.Oplus }
         val vivo = session.bindings.any { it.protocol == ProtocolIds.VivoModern } || session.gainMaps.isNotEmpty()
         val samsungPlan = if (session.sef != null) SamsungJpegWriter.cleanPlan(session, request.context, budget).orThrow() else null
