@@ -72,7 +72,7 @@ Compose 界面使用无原生 ActionBar 的窗口和 Material 3 `Scaffold` 安�
 
 Windows 使用 `.\gradlew.bat` 替换 `./gradlew`。Android 模式与桌面 `livephoto.nativeTarget` 分开，不能同时指定。APK 分别位于 `android/build/outputs/apk/debug/android-debug.apk` 和 `android/build/outputs/apk/release/android-release.apk`。用 Android Studio 导入时，在该 IDE 的 Gradle VM options 设置 `-Dorg.gradle.project.livephoto.android=true`，不要把模式写成所有平台共用的全局属性。
 
-CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。`android-reports-...` 单独保留测试 APK、XML、报告、日志和截图；真实原片只打进测试 APK，不打进应用 APK。CI artifact 仍由 GitHub 包装为 ZIP；直接安装请使用 Releases 的 APK 附件。
+CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 产物中的 **`LivePhoto-debug.apk`、`LivePhoto-release.apk` 分别直接上传单文件**，使用 `upload-artifact@v7` 的 `archive: false`，没有外层 ZIP；`compression-level: 0` 只控制压缩等级，单独设置不能移除 ZIP。发布任务用 `download-artifact@v8` 的 `skip-decompress: true` 保留 APK 自身结构。`android-reports-...` 仍是单独的报告 ZIP，包含测试 APK、XML、报告、日志和截图；真实原片只打进测试 APK，不打进应用 APK。
 
 主分支 debug/release 共用固定签名，通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复，缺少签名时拒绝发布。PR 使用默认 debug 签名且不发布 Releases；本地未传入签名时也使用本地 debug key，不能据此覆盖 CI 安装版。CI 的 `versionCode` 随构建递增，签名保持一致。**以前使用随机 CI debug key 的版本可能需卸载一次**；之后本仓库固定签名的 debug/release 可互相更新。产物证据记录实际证书指纹。
 

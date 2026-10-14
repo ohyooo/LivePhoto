@@ -113,11 +113,21 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-android-evidence.ps1
 
-      - name: Upload application APK
+      - name: Upload debug APK without ZIP wrapping
         uses: actions/upload-artifact@v7
         with:
-          name: LivePhoto-android-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ci-output/apks/*.apk
+          path: ci-output/apks/LivePhoto-debug.apk
+          archive: false
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release APK without ZIP wrapping
+        uses: actions/upload-artifact@v7
+        with:
+          path: ci-output/apks/LivePhoto-release.apk
+          archive: false
+          compression-level: 0
           if-no-files-found: error
           retention-days: 14
 
@@ -151,8 +161,20 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Download the verified APKs only
-        run: gh run download '${{ github.run_id }}' --name 'LivePhoto-android-${{ github.run_id }}-${{ github.run_attempt }}' --dir apks
+      - name: Download verified debug APK without unpacking it
+        uses: actions/download-artifact@v8
+        with:
+          name: LivePhoto-debug.apk
+          path: apks
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Download verified release APK without unpacking it
+        uses: actions/download-artifact@v8
+        with:
+          name: LivePhoto-release.apk
+          path: apks
+          skip-decompress: true
+          digest-mismatch: error
       - name: Publish immutable Android build
         run: |
           test -f apks/LivePhoto-debug.apk

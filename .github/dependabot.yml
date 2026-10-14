@@ -1,5 +1,5 @@
 version: 2
-# Includes Android Compose/release tooling and desktop Native workflows.
+# Includes Android Compose/raw-APK upload/download tooling and desktop Native workflows.
 updates:
   - package-ecosystem: gradle
     directory: /
