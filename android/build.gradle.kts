@@ -38,6 +38,12 @@ android {
     }
 }
 
+androidComponents {
+    beforeVariants(selector().all()) { variant ->
+        variant.hostTests.getValue(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE).enable = true
+    }
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(libs.kotlinx.coroutines.android)
