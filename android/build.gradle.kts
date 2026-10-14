@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "livephoto.android"
-    compileSdk = 37
+    compileSdk { version = release(37) { minorApiLevel = 2 } }
     defaultConfig {
         applicationId = "com.ohyooo.livephoto"
         minSdk = 29

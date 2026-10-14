@@ -61,7 +61,7 @@ Linux，在解压位置运行：
 
 应用直接依赖 `implementation(project(":core"))`，Gradle 自动编译同一份 `commonMain` 并打入 APK；不需要手动打包、发布或导入 AAR，也不生成 `.so`。Android 使用常规 Kotlin/ART 字节码；桌面仍为不含 JVM 的 Native 程序。
 
-从源码构建（已有 JDK 25、Android SDK API 37/Build Tools 37.0.0，并先检查不存在 `gradle-daemon-jvm.properties`）：
+从源码构建（已有 JDK 25、Android SDK **37.2** / Build Tools **37.0.0**，并先检查不存在 `gradle-daemon-jvm.properties`）：
 
 ```sh
 ./gradlew -Plivephoto.android=true :verifyAndroidBuild :android:assembleDebug
@@ -69,7 +69,7 @@ Linux，在解压位置运行：
 
 Windows 使用 `.\gradlew.bat` 替换 `./gradlew`。Android 模式与桌面 `livephoto.nativeTarget` 分开，不能同时指定。APK 位于 `android/build/outputs/apk/debug/android-debug.apk`。用 Android Studio 导入时，在该 IDE 的 Gradle VM options 设置 `-Dorg.gradle.project.livephoto.android=true`，不要把模式写成所有平台共用的全局属性。
 
-CI 会重新执行宿主单元测试、API 37 模拟器测试和 lint，并检查 APK 签名、DEX、测试数及 SHA-256。`android-reports-...` 另含测试 APK、XML、报告与日志；真实原片只打进测试 APK，不打进应用 APK。
+CI 使用 SDK 37.2 编译，重新执行宿主单元测试、**API 36 模拟器**测试和 lint，并检查 APK 签名、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。`android-reports-...` 另含测试 APK、XML、报告与日志；真实原片只打进测试 APK，不打进应用 APK。
 
 可选通用签名通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复通用签名，PR 使用默认 debug 签名。未配置时 APK 仍可安装，但新 CI 默认 debug 证书可能不同，覆盖安装失败时需卸载旧测试版；不用于正式发布。产物证据记录实际签名模式与证书指纹。
 

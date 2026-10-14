@@ -50,19 +50,14 @@ jobs:
       - name: Cache stable Android emulator image
         uses: actions/cache@v6
         with:
-          path: ${{ steps.environment.outputs.sdk }}/system-images/android-37
-          key: livephoto-android-system-image-${{ runner.os }}-37-google-apis-x86-64
+          path: ${{ steps.environment.outputs.sdk }}/system-images/android-36
+          key: livephoto-android-system-image-${{ runner.os }}-36-google-apis-x86-64
 
       - name: Install required Android SDK components
-        shell: pwsh
-        run: |
-          $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager'
-          if (-not (Test-Path -LiteralPath $manager -PathType Leaf)) {
-            throw 'Missing preinstalled Android command-line tools.'
-          }
-          & $manager 'platforms;android-37' 'build-tools;37.0.0'
-          if ($LASTEXITCODE -ne 0) { throw 'Required stable Android SDK components unavailable.' }
-          (Split-Path $manager -Parent) | Add-Content $env:GITHUB_PATH
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-37.2 build-tools;37.0.0'
+          log-accepted-android-sdk-licenses: false
 
       - name: Prepare fixed test-only media
         shell: pwsh
@@ -104,7 +99,7 @@ jobs:
       - name: Run real Android instrumentation tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 37
+          api-level: 36
           target: google_apis
           arch: x86_64
           disable-animations: true

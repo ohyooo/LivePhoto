@@ -9,7 +9,7 @@ kotlin {
     jvmToolchain(25)
     android {
         namespace = "livephoto.core"
-        compileSdk = 37
+        compileSdk { version = release(37) { minorApiLevel = 2 } }
         minSdk = 29
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
     }

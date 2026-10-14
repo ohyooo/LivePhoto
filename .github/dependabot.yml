@@ -1,4 +1,5 @@
 version: 2
+# Includes the Android application/tooling and desktop Native workflows.
 updates:
   - package-ecosystem: gradle
     directory: /
