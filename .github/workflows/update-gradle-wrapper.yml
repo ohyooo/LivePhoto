@@ -16,6 +16,8 @@ concurrency:
 jobs:
   update-gradle-wrapper:
     runs-on: ubuntu-latest
+    env:
+      ORG_GRADLE_PROJECT_livephoto.nativeTarget: linux-x64
 
     steps:
       - uses: actions/checkout@v7

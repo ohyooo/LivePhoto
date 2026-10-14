@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$source = Join-Path (Get-Location) 'core/src/jvmTest/resources/protocol-compatibility/v1'
+$source = Join-Path (Get-Location) 'core/src/commonTest/resources/protocol-compatibility/v1'
 $destination = Join-Path (Get-Location) 'core/build/protocol-fixtures/v1'
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 New-Item -ItemType Directory -Path 'core/build/reports/protocol-compatibility' -Force | Out-Null
@@ -49,7 +49,7 @@ $encoded = @{
     'ordinary-mdta-mp4' = @('apple-media/ordinary-mdta.mp4.base64', '0d32b1e5e477152a1b31e4e57ccd3ffc0bc1be725d0dc4a1f339b6b3d2956e2c')
 }
 foreach ($name in $encoded.Keys) {
-    $resource = Join-Path 'core/src/jvmTest/resources' $encoded[$name][0]
+    $resource = Join-Path 'core/src/commonTest/resources' $encoded[$name][0]
     $text = [IO.File]::ReadAllText($resource, [Text.Encoding]::ASCII).Trim()
     if ($text.Length -gt 40000) { throw 'Encoded fixture exceeds bound.' }
     $bytes = [Convert]::FromBase64String($text)

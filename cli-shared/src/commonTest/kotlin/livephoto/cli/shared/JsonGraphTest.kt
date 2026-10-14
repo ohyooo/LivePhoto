@@ -3,7 +3,7 @@ package livephoto.cli.shared
 import livephoto.core.*
 import kotlin.test.*
 
-/** Exercise every command's nested output graph on JVM and all Native hosts. */
+/** Exercise every command's nested output graph on all Native hosts. */
 class JsonGraphTest {
     private val source = SourceId("private-source")
     private val resourceId = ResourceId("resource")

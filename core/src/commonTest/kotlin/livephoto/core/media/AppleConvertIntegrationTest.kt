@@ -213,7 +213,7 @@ class AppleConvertIntegrationTest {
             }
         } finally { frame.operation.output.assets.forEach { it.readableSource?.close() } }
     }
-    // Keep this coroutine separate: the round-trip test is already close to the JVM method-size limit.
+    // Keep this export step separate from the full round-trip coroutine.
     private suspend fun verifyDefaultCreate(
         core: DefaultLivePhotoCore,
         image: BinarySource,

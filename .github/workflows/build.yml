@@ -50,6 +50,15 @@ jobs:
           if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
             throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
           }
+          $sources = git ls-files '*.kt' '*.java'
+          if ($sources | Where-Object { $_ -match '/src/jvm(Main|Test)/|\.java$' }) {
+            throw 'Legacy JVM sources must not return to the Native-only project.'
+          }
+          foreach ($source in $sources) {
+            if (Select-String -LiteralPath $source -Pattern '^\s*import\s+(java|javax)\.' -Quiet) {
+              throw 'Native application sources must not import Java runtime APIs.'
+            }
+          }
           New-Item -ItemType Directory -Path ci-output -Force | Out-Null
           $catalog = Get-Content gradle/libs.versions.toml -Raw
           if ($catalog -notmatch '(?m)^kotlin\s*=\s*"([0-9.]+)"') { throw 'Missing stable Kotlin version.' }
@@ -106,7 +115,6 @@ jobs:
           $binaryTarget = '${{ matrix.target }}'
           $binaryTarget = $binaryTarget.Substring(0, 1).ToUpperInvariant() + $binaryTarget.Substring(1)
           $gradleArgs = @(
-            '-Plivephoto.jvm=false'
             '-Plivephoto.nativeTarget=${{ matrix.platform }}'
             ':verifyNativeOnlyBuild'
             ':core:${{ matrix.target }}MainKlibrary'

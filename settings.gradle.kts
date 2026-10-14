@@ -13,22 +13,15 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "LivePhoto"
-val jvmEnabled = providers.gradleProperty("livephoto.jvm").orNull.let {
-    when (it) {
-        null, "true" -> true
-        "false" -> false
-        else -> error("livephoto.jvm must be true or false")
-    }
+require(providers.gradleProperty("livephoto.jvm").orNull in setOf(null, "false")) {
+    "JVM runtime targets have been removed; select a Native host instead"
 }
-if (!jvmEnabled) {
-    require(providers.gradleProperty("livephoto.nativeTarget").orNull in
-        setOf("linux-x64", "macos-arm64", "windows-x64")) {
-        "Native-only builds require a supported livephoto.nativeTarget"
-    }
+require(providers.gradleProperty("livephoto.nativeTarget").orNull in
+    setOf("linux-x64", "macos-arm64", "windows-x64")) {
+    "Use -Plivephoto.nativeTarget=linux-x64, macos-arm64 or windows-x64 for your host"
 }
 include(":core")
-if (jvmEnabled) include(":cli")
 include(":cli-shared")
 include(":file-io")
 include(":cli-native")
-if (providers.gradleProperty("livephoto.nativeTarget").isPresent) include(":process")
+include(":process")
