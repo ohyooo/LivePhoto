@@ -22,15 +22,21 @@ internal fun LivePhotoScreen(create: suspend (Uri, Uri, ProtocolSelector) -> Cor
     var image by rememberSaveable { mutableStateOf<String?>(null) }
     var video by rememberSaveable { mutableStateOf<String?>(null) }
     var profile by rememberSaveable { mutableIntStateOf(0) }
-    var status by rememberSaveable { mutableStateOf("请选择一张 JPEG 图片和一个 MP4 视频。当前不自动从视频抽取封面。") }
+    var status by rememberSaveable { mutableStateOf("当前不自动从视频抽取封面；需要 JPEG 图片＋MP4 视频。不裁剪或转码。") }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         // Cancelling a picker must not erase an earlier valid selection.
-        if (uri != null) image = uri.toString()
+        if (uri != null) {
+            image = uri.toString()
+            status = "图片已更新"
+        }
     }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) video = uri.toString()
+        if (uri != null) {
+            video = uri.toString()
+            status = "视频已更新"
+        }
     }
     Scaffold(topBar = {
         TopAppBar(title = { Text("LivePhoto") }, modifier = Modifier.testTag("app-bar"))
