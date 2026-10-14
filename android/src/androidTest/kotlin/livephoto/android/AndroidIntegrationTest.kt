@@ -37,10 +37,12 @@ class AndroidIntegrationTest {
     @Test fun oplusCreateExtractPreservesOriginalVideo() = runBlocking { roundTrip(ProtocolIds.Oplus, "jpeg-no-tail") }
     @Test fun googleV2CreateExtractPreservesOriginalVideo() = runBlocking { roundTrip(ProtocolIds.GoogleV2, "jpeg") }
     @Test fun googleV1CreateExtractPreservesOriginalVideo() = runBlocking { roundTrip(ProtocolIds.GoogleV1, "jpeg") }
+    @Test fun cameraStartOffsetRoundTripsWithoutRewritingMovieHeaders() = runBlocking {
+        roundTrip(ProtocolIds.Oplus, "jpeg-no-tail", cameraOffsetVideo())
+    }
 
-    private suspend fun roundTrip(protocol: ProtocolId, profile: String) {
+    private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4")) {
         val imageBytes = fixture("video.jpg")
-        val videoBytes = fixture("video.mp4")
         val imageHash = sha(imageBytes)
         val videoHash = sha(videoBytes)
         val image = MemoryBinarySource(Bytes(imageBytes), SourceId("android-image"))

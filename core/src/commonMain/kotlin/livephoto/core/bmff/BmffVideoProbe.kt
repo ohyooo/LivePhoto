@@ -15,6 +15,8 @@ internal data class VideoTrack(
     val audioChannels: UInt? = null, val audioSampleRateFixed: UInt? = null, val audioSampleSize: UInt? = null,
     val audioActualSampleRate: UInt? = null, val audioActualChannelCount: UInt? = null,
     val metadataKeys: Map<UInt, TimedMetadataKey> = emptyMap(),
+    // Keep the encoded mdhd declaration separate from the verified decode-delta sum.
+    val headerDuration: ULong = duration,
 )
 internal data class VideoStructure(val container: VideoContainer, val range: ByteRange, val tracks: List<VideoTrack>, val movieTimescale: UInt, val movieDuration: ULong, val decoderValidated: Boolean = false)
 
@@ -235,7 +237,8 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
                 dts = checkedAdd(dts, delta.toULong()); cursor = checkedAdd(cursor, size); sampleIndex++
             }
         }
-        if (sampleIndex != n || dts != duration) corrupt("Sample counts/duration disagree with media header")
+        if (sampleIndex != n || dts != duration && !cameraStartOffsetDuration(handler, edit, cttsBox != null, duration, dts, timescale))
+            corrupt("Sample counts/duration disagree with media header")
         if (edit != null) {
             // elst media_time is in the composition domain, whereas mdhd duration is
             // the sum of decoding deltas. Positive ctts (e.g. B-frame delay) can put
@@ -247,14 +250,34 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             // Movie-duration fields can round the final boundary by one movie tick.
             if (requested > available && requested - available > timescale.toULong()) corrupt("Edit exceeds the sample presentation duration")
         }
-        return VideoTrack(id, handler, timescale, duration, codec, entry.type, config, samples.toList(), audio, presentationDuration, edit,
+        return VideoTrack(id, handler, timescale, dts, codec, entry.type, config, samples.toList(), audio, presentationDuration, edit,
             if (handler == "vide") u16(entryBytes, 24).toUInt() else null,
             if (handler == "vide") u16(entryBytes, 26).toUInt() else null,
             transform, displayWidth, displayHeight,
             if (handler == "soun") u16(entryBytes, 16).toUInt() else null,
             if (handler == "soun") u32(entryBytes, 24) else null,
             if (handler == "soun") u16(entryBytes, 18).toUInt() else null,
-            aacConfiguration?.actualSampleRate, aacConfiguration?.channelCount, metadataKeys)
+            aacConfiguration?.actualSampleRate, aacConfiguration?.channelCount, metadataKeys, duration)
+    }
+
+    private fun cameraStartOffsetDuration(handler: String, edit: VideoEdit?, composition: Boolean,
+        declared: ULong, decoded: ULong, scale: UInt): Boolean {
+        // AOSP MPEG4Writer writes getDurationUs() (including track start offset) to
+        // mdhd, but stts contains only sample deltas and elst signals that offset.
+        // https://android.googlesource.com/platform/frameworks/av/+/master/media/libstagefright/MPEG4Writer.cpp
+        // This is not a general duration tolerance: require the explicit leading
+        // empty edit, zero media start, no composition offsets, and agreement of
+        // all three independently rounded timeline fields within one movie tick.
+        if (handler != "vide" || composition || edit == null || edit.emptyDuration == 0uL || edit.mediaStart != 0L || declared <= decoded) return false
+        fun agrees(mediaTicks: ULong, movieTicks: ULong): Boolean {
+            val left = checkedMultiply(mediaTicks, edit.movieTimescale.toULong())
+            val right = checkedMultiply(movieTicks, scale.toULong())
+            val difference = if (left > right) left - right else right - left
+            return difference <= scale.toULong()
+        }
+        return agrees(decoded, edit.segmentDuration) &&
+            agrees(declared, checkedAdd(edit.emptyDuration, edit.segmentDuration)) &&
+            agrees(declared - decoded, edit.emptyDuration)
     }
 
     private fun timeTable(bytes: Bytes, count: Int, composition: Boolean): LongArray {

@@ -145,6 +145,51 @@ class BmffVideoProbeTest {
     }
 
     @Test
+    fun cameraStartOffsetInHeaderIsNotAnExtraDecodedSample(): Unit = runImmediate {
+        val bytes = cameraOffsetVideo()
+        val before = Bytes(bytes)
+        val track = probe(bytes).tracks.single()
+        assertEquals(119982uL, track.duration)
+        assertEquals(120015uL, track.headerDuration)
+        assertEquals(VideoEdit(10000u, 4uL, 13331uL, 0), track.edit)
+        assertEquals(Time(13335, 10000u), track.presentationDuration)
+        assertEquals(listOf(0uL, 59991uL), track.samples.map { it.decodeTime })
+        assertEquals(listOf(36L, 60027L), track.samples.map { it.presentationTime })
+        assertTrue(track.codecConfiguration.size > 0)
+        assertFalse(probe(bytes).decoderValidated)
+        assertEquals(before, Bytes(bytes)) // Read compatibility never repairs or rewrites mdhd.
+    }
+
+    @Test
+    fun cameraOffsetCompatibilityRequiresAllExplicitTimelineEvidence(): Unit = runImmediate {
+        for (declared in listOf(119981u, 119983u, 120005u, 120025u, 121482u)) {
+            val bytes = cameraOffsetVideo()
+            put32(bytes, payloadOffset(bytes, "mdhd") + 16, declared)
+            failure("CORRUPTED_CONTAINER", result(bytes))
+        }
+        for (type in listOf("edts", "elst")) {
+            val bytes = cameraOffsetVideo()
+            replaceType(bytes, type, "free")
+            assertIs<CoreResult.Failure>(result(bytes))
+        }
+        val nonzeroStart = cameraOffsetVideo()
+        put32(nonzeroStart, payloadOffset(nonzeroStart, "elst") + 24, 1u)
+        failure("CORRUPTED_CONTAINER", result(nonzeroStart))
+        val composition = GoogleFixtures.fullBox("ctts", GoogleFixtures.u32(1u) + GoogleFixtures.u32(2u) + GoogleFixtures.u32(0u))
+        failure("CORRUPTED_CONTAINER", result(cameraOffsetVideo(composition)))
+    }
+
+    @Test
+    fun ordinaryExactDecodeDurationWithLeadingEditRemainsUnchanged(): Unit = runImmediate {
+        val bytes = cameraOffsetVideo()
+        put32(bytes, payloadOffset(bytes, "mdhd") + 16, 119982u)
+        val track = probe(bytes).tracks.single()
+        assertEquals(119982uL, track.duration)
+        assertEquals(track.duration, track.headerDuration)
+        assertEquals(listOf(36L, 60027L), track.samples.map { it.presentationTime })
+    }
+
+    @Test
     fun embeddedMovieChunkOffsetsAreRelativeToVideoNotOuterSource(): Unit = runImmediate {
         val fixture = GoogleFixtures.video()
         val prefix = ByteArray(37) { 0x55 }
