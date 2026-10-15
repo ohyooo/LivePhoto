@@ -135,4 +135,3 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
         }
     }
 }
-

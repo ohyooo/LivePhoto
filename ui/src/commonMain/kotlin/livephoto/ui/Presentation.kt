@@ -77,4 +77,3 @@ private fun displayValue(value: Value, depth: Int = 0): String = (if (depth >= 3
         "${key.take(128)}: ${displayValue(item, depth + 1)}"
     }
 }).take(1024)
-
