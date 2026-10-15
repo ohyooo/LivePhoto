@@ -235,7 +235,9 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
                 dts = checkedAdd(dts, delta.toULong()); cursor = checkedAdd(cursor, size); sampleIndex++
             }
         }
-        if (sampleIndex != n || dts != duration && !cameraStartOffsetDuration(handler, edit, cttsBox != null, duration, dts, timescale))
+        if (sampleIndex != n || dts != duration &&
+            !cameraStartOffsetDuration(handler, edit, cttsBox != null, duration, dts, timescale) &&
+            !cameraSampleRoundingDuration(handler, edit, cttsBox != null, duration, dts, timescale, movieScale, trackDuration, samples))
             corrupt("Sample counts/duration disagree with media header")
         if (edit != null) {
             // elst media_time is in the composition domain, whereas mdhd duration is
@@ -276,6 +278,28 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         return agrees(decoded, edit.segmentDuration) &&
             agrees(declared, checkedAdd(edit.emptyDuration, edit.segmentDuration)) &&
             agrees(declared - decoded, edit.emptyDuration)
+    }
+
+    private fun cameraSampleRoundingDuration(handler: String, edit: VideoEdit?, composition: Boolean,
+        declared: ULong, decoded: ULong, scale: UInt, movieScale: UInt, trackDuration: ULong, samples: List<VideoSample>): Boolean {
+        // AOSP MPEG4Writer::threadEntry may merge near-identical deltas by
+        // adjusting timestampUs (<100 us), after recording mTrackDurationUs.
+        // EOS and mdhd independently quantize the final duration. This finite
+        // read compatibility envelope is NOT proof of a particular vendor/muxer.
+        // Keep the declared presentation end and every sample delta unchanged.
+        // https://android.googlesource.com/platform/frameworks/av/+/master/media/libstagefright/MPEG4Writer.cpp
+        if (handler != "vide" || edit != null || composition || scale <= movieScale || samples.size < 2 ||
+            declared >= decoded || declared <= samples.last().decodeTime) return false
+        // At most 100 us plus one media tick of endpoint quantization. Integer
+        // products only; never turn this into a per-frame/percentage tolerance.
+        val difference = decoded - declared
+        val bound = checkedAdd(checkedMultiply(scale.toULong(), 100uL), 1_000_000uL)
+        if (difference > bound / 1_000_000uL) return false
+        // The earlier no-edit check independently bound mdhd against tkhd.
+        // The verified stts endpoint must ALSO agree with tkhd within one movie tick.
+        val left = checkedMultiply(decoded, movieScale.toULong())
+        val right = checkedMultiply(trackDuration, scale.toULong())
+        return (if (left > right) left - right else right - left) <= scale.toULong()
     }
 
     private fun timeTable(bytes: Bytes, count: Int, composition: Boolean): LongArray {

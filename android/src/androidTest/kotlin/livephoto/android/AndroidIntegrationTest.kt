@@ -45,8 +45,13 @@ class AndroidIntegrationTest {
             roundTrip(protocol, profile, fractionalAudioVideo())
         }
     }
+    @Test fun boundedVideoDurationVarianceIsReportedAndVideoBytesStayExact() = runBlocking {
+        for ((protocol, profile) in listOf(ProtocolIds.Oplus to "jpeg-no-tail", ProtocolIds.GoogleV2 to "jpeg", ProtocolIds.GoogleV1 to "jpeg")) {
+            roundTrip(protocol, profile, durationVarianceVideo(), timingWarning = true)
+        }
+    }
 
-    private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4"), suffix: ByteArray = byteArrayOf()) {
+    private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4"), suffix: ByteArray = byteArrayOf(), timingWarning: Boolean = false) {
         val imageBytes = fixture("video.jpg") + suffix
         val imageHash = sha(imageBytes)
         val videoHash = sha(videoBytes)
@@ -58,6 +63,11 @@ class AndroidIntegrationTest {
             val output = MemoryOutputTransaction(context, "android-create-$profile-${protocol.value}")
             val result = success(app.core.create(CreateRequest(image, video, ProtocolSelector(protocol, ProfileId(profile)), output = output, context = context)))
             created = result
+            if (timingWarning) {
+                assertEquals(Verdict.Warning, result.validation.verdict)
+                assertTrue(result.validation.issues.any { it.code.value == "VIDEO_DURATION_HEADER_SAMPLE_VARIANCE" })
+                assertEquals(Verdict.Valid, result.validation.checks.single { it.id.endsWith(":jpeg.frame") }.verdict)
+            }
             if (suffix.isNotEmpty()) {
                 val bytes = output.committedAssets().values.single().toByteArray()
                 val start = bytes.size - videoBytes.size - suffix.size

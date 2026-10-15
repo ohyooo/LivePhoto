@@ -115,7 +115,12 @@ internal fun LivePhotoScreen(
                         status = "正在生成与验证…"
                         try {
                             status = when (val result = create(chosenImage, chosenVideo, target)) {
-                                is CoreResult.Success -> "已保存到 Pictures/LivePhoto。\nCore 验证：${result.value.operation.validation.verdict}；问题报告：${result.value.operation.issues.size} 项。\n默认 BestEffortWithReport，不保证全部 metadata 无损。请在相册测试动态播放与声音；生成成功不等于相册兼容。"
+                                is CoreResult.Success -> {
+                                    val issues = (result.value.operation.issues + result.value.operation.validation.issues).distinct()
+                                    "已保存到 Pictures/LivePhoto。\nCore 验证：${result.value.operation.validation.verdict}；问题报告：${issues.size} 项。" +
+                                        (if (issues.isEmpty()) "" else "\n报告代码：${issues.take(8).joinToString { it.code.value }}") +
+                                        "\n默认 BestEffortWithReport，不保证全部 metadata 无损。请在相册测试动态播放与声音；生成成功不等于相册兼容。"
+                                }
                                 is CoreResult.Failure -> { failed = true; formatCoreFailure(result.error, chosenImageName, chosenVideoName) }
                             }
                         } catch (cancelled: CancellationException) { throw cancelled }

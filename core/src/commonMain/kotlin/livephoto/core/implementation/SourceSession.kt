@@ -200,6 +200,7 @@ internal class SourceSession internal constructor(
                 issues += profileIssues
                 binding.copy(issues = binding.issues + profileIssues)
             }
+            issues += videos.values.flatMap(::videoTimingIssues).distinct()
             val matches = bindings.map { binding -> Match(binding.selector,
                 if (binding.protocol == ProtocolIds.Fusion && binding.structurallyValid && binding.protocol in videos) MatchStrength.Legacy else if (binding.protocol == ProtocolIds.Samsung && sef?.legacyDialect == true && binding.protocol in videos) MatchStrength.Legacy else if (binding.compatibleBaseOf != null && binding.protocol in videos) MatchStrength.CompatibleBase else if (binding.protocol in videos && binding.structurallyValid && binding.issues.none { it.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNSUPPORTED_CONTAINER", "UNKNOWN_PROTOCOL_VARIANT") }) MatchStrength.Strong else MatchStrength.Weak,
                 evidence = if (binding.protocol == ProtocolIds.Apple) appleEvidence else emptyList(),
@@ -345,7 +346,18 @@ internal fun videoFacts(video: VideoStructure): MediaFacts = MediaFacts(
         codecConfiguration = track.codecConfiguration, duration = track.presentationDuration,
         frameCount = if (track.handler == "vide") track.samples.size.toULong() else null,
         width = track.width, height = track.height, origin = FactOrigin.Parsed) }, coverage = Coverage.Partial,
+    issues = videoTimingIssues(video),
 )
+
+internal const val VIDEO_DURATION_VARIANCE: String = "VIDEO_DURATION_HEADER_SAMPLE_VARIANCE"
+
+/** A structural compatibility warning, not a claim that sample times were rounded or repaired. */
+internal fun videoTimingIssues(video: VideoStructure): List<Issue> = video.tracks.filter {
+    it.edit == null && it.headerDuration < it.duration
+}.map { track -> Issue(IssueCode(VIDEO_DURATION_VARIANCE), Severity.Warning, Layer.Structure,
+    Location(track = TrackId(track.trackId.toString()), selector = "bmff:mdhd/stts-duration"),
+    expected = Value.ObjectValue(mapOf("value" to Value.Text(track.headerDuration.toString()), "timescale" to Value.Number(track.timescale.toString()))),
+    observed = Value.ObjectValue(mapOf("value" to Value.Text(track.duration.toString()), "timescale" to Value.Number(track.timescale.toString())))) }
 
 internal suspend fun jpegFacts(reader: BinaryReader, jpeg: JpegStructure): MediaFacts {
     val frames = jpeg.segments.filter { it.marker in setOf(0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf) }

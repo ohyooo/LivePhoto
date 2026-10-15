@@ -45,3 +45,31 @@ internal fun fractionalAudioVideo(): ByteArray {
     put32(bytes, position(bytes, "stco") + 8, mdat + audio.size + 13)
     return bytes
 }
+
+/** Same synthetic audio gap plus a video header 10/90000 s shorter than stts. */
+internal fun durationVarianceVideo(): ByteArray {
+    val base = fractionalAudioVideo()
+    fun payload(bytes: ByteArray, type: String): Int {
+        val tag = type.encodeToByteArray()
+        return (4..bytes.size - 4).first { start -> tag.indices.all { bytes[start + it] == tag[it] } } + 4
+    }
+    fun u32(bytes: ByteArray, offset: Int): Int = (0..3).fold(0) { value, i -> (value shl 8) or (bytes[offset + i].toInt() and 255) }
+    fun put32(bytes: ByteArray, offset: Int, value: Int) {
+        for (i in 0..3) bytes[offset + i] = (value ushr ((3 - i) * 8)).toByte()
+    }
+    val moovStart = payload(base, "moov") - 8
+    val trackStart = payload(base, "trak") - 8
+    val editStart = payload(base, "edts") - 8
+    val editSize = u32(base, editStart)
+    // Only remove the first (video) edit. The audio's fractional edit remains.
+    val bytes = base.copyOfRange(0, editStart) + base.copyOfRange(editStart + editSize, base.size)
+    put32(bytes, moovStart, u32(base, moovStart) - editSize)
+    put32(bytes, trackStart, u32(base, trackStart) - editSize)
+    put32(bytes, payload(bytes, "tkhd") + 20, 13331)
+    put32(bytes, payload(bytes, "mdhd") + 16, 119972)
+    val videoOffset = payload(bytes, "co64") + 12
+    val audioOffset = payload(bytes, "stco") + 8
+    put32(bytes, videoOffset, u32(bytes, videoOffset) - editSize)
+    put32(bytes, audioOffset, u32(bytes, audioOffset) - editSize)
+    return bytes
+}

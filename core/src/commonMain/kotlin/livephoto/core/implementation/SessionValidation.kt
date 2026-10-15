@@ -12,7 +12,8 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
     val selectedTarget = target ?: session.inspection.detection.primaryProtocol?.takeIf { it.protocol !in setOf(ProtocolIds.GoogleV1, ProtocolIds.GoogleV2) }
     val selectedBindings = if (selectedTarget == null) session.bindings else session.bindings.filter { it.protocol == selectedTarget.protocol && (selectedTarget.profile == null || it.profile == selectedTarget.profile) }
     val scopedProtocol = selectedBindings.flatMap { it.issues }.filter { it.layer == Layer.Protocol }
-    val issues = session.inspection.issues.filter { it.layer != Layer.Protocol } + scopedProtocol
+    val issues = (session.inspection.issues.filter { it.layer != Layer.Protocol } +
+        session.videos.values.flatMap(::videoTimingIssues)).distinct() + scopedProtocol
     val checks = mutableListOf<CheckResult>()
     val auxiliaryRanges = session.inspection.layout.resources.filter { it.kind == ResourceKind.GainMap }.flatMap { it.extents }.map { it.range }.toSet()
     val verifiedAuxiliary = session.gainMaps.map { it.range }.toSet()
@@ -27,7 +28,7 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
         if (session.heifItems != null) {
             // A parsed item graph is not a JPEG, and primary NAL framing is a separate media check.
             checks += CheckResult("heif.item-locations", Layer.Structure, Verdict.Valid, Coverage.Complete)
-            val imageIssues = issues.filter { it.layer == Layer.Structure }
+            val imageIssues = issues.filter { it.layer == Layer.Structure && it.code.value != VIDEO_DURATION_VARIANCE }
             checks += CheckResult("heif.item-graph", Layer.Structure,
                 if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (imageIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
                 if (imageIssues.any { it.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.Partial else Coverage.Complete, imageIssues)
@@ -39,7 +40,7 @@ internal fun validateSession(session: SourceSession, layers: List<Layer>, requir
         } else {
             checks += CheckResult("jpeg.markers", Layer.Structure, if (session.jpeg == null) Verdict.Warning else Verdict.Valid,
                 if (session.jpeg == null) Coverage.NotRun else Coverage.Complete)
-            val imageIssues = issues.filter { it.layer == Layer.Structure }
+            val imageIssues = issues.filter { it.layer == Layer.Structure && it.code.value != VIDEO_DURATION_VARIANCE }
             checks += CheckResult("jpeg.frame", Layer.Structure, if (imageIssues.any { it.severity == Severity.Error }) Verdict.Invalid else if (imageIssues.isNotEmpty()) Verdict.Warning else Verdict.Valid,
                 if (session.jpeg == null || imageIssues.any { it.code.value in setOf("UNSUPPORTED_CONTAINER", "CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT") }) Coverage.NotRun else Coverage.Complete, imageIssues)
         }

@@ -22,7 +22,7 @@ internal object RemuxEnvelopeRestoration {
             if (video.container != VideoContainer.Mp4 || video.tracks.size != 1)
                 fail("CAPABILITY_UNSUPPORTED", "Restoration requires one AVC track in MP4", Stage.Plan)
             val track = video.tracks.single()
-            if (track.handler != "vide" || track.codec != VideoCodec.Avc || track.sampleEntry != "avc1" || track.presentationTimescale != track.timescale ||
+            if (track.handler != "vide" || track.codec != VideoCodec.Avc || track.sampleEntry != "avc1" || track.headerDuration != track.duration || track.presentationTimescale != track.timescale ||
                 track.samples.size !in 1..64 || track.samples.any { it.presentationTime < 0 || it.decodeTime != it.presentationTime.toULong() })
                 fail("CAPABILITY_UNSUPPORTED", "Restoration does not support reordered or non-AVC packets", Stage.Plan)
             return track

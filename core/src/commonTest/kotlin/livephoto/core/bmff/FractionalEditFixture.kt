@@ -3,10 +3,12 @@ package livephoto.core.bmff
 import livephoto.core.google.GoogleFixtures
 
 /** Independent tiny framing fixture, not a recording or a decoder/phone claim. */
-internal fun fractionalAudioVideo(declaredDuration: UInt = 147750u): ByteArray {
+internal fun fractionalAudioVideo(declaredDuration: UInt = 147750u, videoVariance: Boolean = false): ByteArray {
     val edits = GoogleFixtures.u32(2u) + GoogleFixtures.u32(2408u) + GoogleFixtures.u32(UInt.MAX_VALUE) + byteArrayOf(0, 1, 0, 0) +
         GoogleFixtures.u32(28373u) + GoogleFixtures.u32(0u) + byteArrayOf(0, 1, 0, 0)
-    val bytes = GoogleFixtures.video(hevc = true, aac = true, sampleDurations = 135000u to 135000u, trackDuration = 30000u,
+    val bytes = GoogleFixtures.video(hevc = true, aac = true,
+        sampleDurations = if (videoVariance) 59991u to 59991u else 135000u to 135000u,
+        trackDuration = if (videoVariance) 13331u else 30000u,
         audioSampleCount = 133u, audioEditList = GoogleFixtures.fullBox("elst", edits),
         audioTrackDuration = 30781u, audioHeaderDuration = declaredDuration).bytes
     fun field(type: String, offset: Int, value: UInt) {
@@ -17,7 +19,7 @@ internal fun fractionalAudioVideo(declaredDuration: UInt = 147750u): ByteArray {
     field("mvhd", 12, 10000u)
     field("mvhd", 16, 30781u)
     field("mdhd", 12, 90000u)
-    field("mdhd", 16, 270000u)
+    field("mdhd", 16, if (videoVariance) 119972u else 270000u)
     return bytes
 }
 
