@@ -131,13 +131,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Android test APK and reports
+      - name: Upload Android reports without media-bearing test APK
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: android-reports-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            android/build/outputs/apk/androidTest/debug/*.apk
             android/build/test-results/
             android/build/outputs/androidTest-results/
             android/build/reports/

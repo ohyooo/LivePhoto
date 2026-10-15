@@ -13,7 +13,7 @@ import livephoto.core.xmp.*
 internal object OplusJpegWriter {
     suspend fun createPlan(
         session: SourceSession, videoLength: ULong, timestamp: Long, strip: Boolean,
-        context: Context, budget: ParseBudget, primaryPadding: ULong = 0uL, replaceCameraComment: Boolean = false,
+        context: Context, budget: ParseBudget, primaryPadding: ULong = 0uL, authorizedCameraComments: Set<String> = emptySet(),
     ): CoreResult<JpegRewritePlan> = attempt {
         checkCancelled(context)
         val jpeg = session.jpeg ?: fail("UNSUPPORTED_CONTAINER", "Oplus creation requires JPEG image content")
@@ -24,7 +24,7 @@ internal object OplusJpegWriter {
             fail("SOURCE_ALREADY_LIVE", "Image contains source protocol bindings")
         }
         reserveXmp(jpeg, budget, mergingVendor = true)
-        val additional = markerPatch(session, ExifMarkerAction.AddCanonical, budget, replaceCameraComment)
+        val additional = markerPatch(session, ExifMarkerAction.AddCanonical, budget, authorizedCameraComments)
         val base = GoogleJpegWriter.createPlan(session, ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("jpeg")),
             videoLength, "video/mp4", timestamp, false, context, additional,
             primaryPadding = primaryPadding, preservePrimarySuffix = primaryPadding != 0uL).orThrow()
@@ -76,7 +76,7 @@ internal object OplusJpegWriter {
         result
     }
 
-    internal suspend fun markerPatch(session: SourceSession, action: ExifMarkerAction, budget: ParseBudget, replaceCameraComment: Boolean = false): List<JpegPatch> {
+    internal suspend fun markerPatch(session: SourceSession, action: ExifMarkerAction, budget: ParseBudget, authorizedCameraComments: Set<String> = emptySet()): List<JpegPatch> {
         val jpeg = session.jpeg!!
         val segments = jpeg.segments.filter { it.payloadKind == AppPayloadKind.Exif }
         if (segments.size > 1) fail("CONFLICTING_METADATA", "Multiple EXIF APP1 blocks cannot authorize one Oplus marker")
@@ -86,7 +86,7 @@ internal object OplusJpegWriter {
         val proof = if (existing == null) writer.createMarkerAppPayload(upstreamWire = true).orThrow() else {
             val payload = existing.payload ?: fail("CORRUPTED_CONTAINER", "EXIF APP1 payload is missing")
             if (payload.length < 6uL) fail("CORRUPTED_CONTAINER", "EXIF APP1 identifier is truncated")
-            writer.rewriteMarker(ByteRange(checkedAdd(payload.offset, 6uL), payload.length - 6uL), action, replaceCameraComment).orThrow()
+            writer.rewriteMarker(ByteRange(checkedAdd(payload.offset, 6uL), payload.length - 6uL), action, authorizedCameraComments).orThrow()
         }
         if (proof.isNoOp) return emptyList() // No change never grants authority to relocate opaque EXIF.
         budget.retain(checkedMultiply(checkedAdd(proof.replacementPayload.size.toULong(), 4uL), 2uL))

@@ -52,9 +52,15 @@ class AndroidIntegrationTest {
     }
 
     @Test fun controllerReplacesOnlyAuthorizedCameraCommentAndPreservesOpaqueExif() = runBlocking {
+        controllerCommentRoundTrip(false)
+    }
+    @Test fun controllerReplacesTiffAsciiCommentWithoutMovingOtherExifValues() = runBlocking {
+        controllerCommentRoundTrip(true)
+    }
+    private suspend fun controllerCommentRoundTrip(ascii: Boolean) {
         val token = UUID.randomUUID().toString()
         val original = fixture("video.jpg")
-        val exif = cameraCommentExif()
+        val exif = if (ascii) asciiCameraCommentExif() else cameraCommentExif()
         val suffix = ByteArray(435) { ((it * 37 + 11) and 255).toByte() }
         val imageBytes = original.copyOfRange(0, 2) + exif + original.copyOfRange(2, original.size) + suffix
         val videoBytes = durationVarianceVideo()
@@ -67,12 +73,17 @@ class AndroidIntegrationTest {
                 ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail"))))
             output = result.uri
             val saved = app.contentResolver.openInputStream(result.uri)!!.use { it.readBytes() }
-            for (i in exif.indices) if (i !in 42..45 && i !in 90..111) assertEquals(exif[i], saved[2 + i], "EXIF byte $i changed")
-            assertContentEquals("ASCII\u0000\u0000\u0000oplus_10485792".encodeToByteArray(), saved.copyOfRange(92, 114))
+            if (ascii) {
+                for (i in exif.indices) if (i !in 2..3 && i !in 40..49 && i !in 90..103) assertEquals(exif[i], saved[2 + i], "EXIF byte $i changed")
+                assertContentEquals("ASCII\u0000\u0000\u0000oplus_10485792".encodeToByteArray(), saved.copyOfRange(172, 194))
+            } else {
+                for (i in exif.indices) if (i !in 42..45 && i !in 90..111) assertEquals(exif[i], saved[2 + i], "EXIF byte $i changed")
+                assertContentEquals("ASCII\u0000\u0000\u0000oplus_10485792".encodeToByteArray(), saved.copyOfRange(92, 114))
+            }
             assertContentEquals(suffix, saved.copyOfRange(saved.size - videoBytes.size - suffix.size, saved.size - videoBytes.size))
             assertContentEquals(videoBytes, saved.takeLast(videoBytes.size).toByteArray())
             val change = result.operation.preservation.changes.single { it.selector == "exif:UserComment" }
-            assertEquals(Value.Text("oplus_1048576"), change.before)
+            assertEquals(Value.Text(if (ascii) "oplus_1056768" else "oplus_1048576"), change.before)
             assertEquals(Value.Text("oplus_10485792"), change.after)
             assertEquals(GuaranteeOutcome.Changed, result.operation.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
             assertTrue(result.operation.execution.none { it.transcoded || it.remuxed })

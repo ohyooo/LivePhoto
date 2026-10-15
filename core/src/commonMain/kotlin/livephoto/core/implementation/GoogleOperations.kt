@@ -52,7 +52,12 @@ internal object GoogleOperations {
         val timestamp = if (huawei) 0L else key.position?.let(::microseconds) ?: -1L
         val mime = if (video.container == VideoContainer.Mov) "video/quicktime" else "video/mp4"
         val oplus = request.target.protocol == ProtocolIds.Oplus
-        val replaceCameraComment = oplus && request.policy.loss == LossPolicy.AllowListed && MetadataLoss.OplusCameraUserComment in request.policy.allowedLosses
+        val authorizedCameraComments = buildSet {
+            if (oplus && request.policy.loss == LossPolicy.AllowListed) {
+                if (MetadataLoss.OplusCameraUserComment in request.policy.allowedLosses) add("oplus_1048576")
+                if (MetadataLoss.OplusAsciiCameraUserComment in request.policy.allowedLosses) add("oplus_1056768")
+            }
+        }
         // Retain ordinary JPEG suffix bytes before the movie, never reinterpret
         // them as a vendor motion trailer or silently remove them. Only the
         // three plain JPEG profiles use this opaque, byte-verified preservation.
@@ -67,7 +72,7 @@ internal object GoogleOperations {
         val samsungPlan = if (samsung) SamsungJpegWriter.createPlan(image, videoReader, ByteRange(0uL, videoIdentity.size), timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else null
         if (oplus && request.target.profile != null && request.target.profile != ProfileId("jpeg-no-tail")) fail("UNSUPPORTED_PROTOCOL", "Oplus writer only implements jpeg-no-tail")
         val rewrite = if (huaweiPlan != null) huaweiPlan.image else if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.createPlan(image, videoIdentity.size, timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.createPlan(image, videoIdentity.size, timestamp,
-            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget, primaryPadding, replaceCameraComment).orThrow()
+            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget, primaryPadding, authorizedCameraComments).orThrow()
             else GoogleJpegWriter.createPlan(image, request.target, videoIdentity.size, mime, timestamp,
                 request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context,
                 primaryPadding = primaryPadding, preservePrimarySuffix = preservedSuffix != null).orThrow()

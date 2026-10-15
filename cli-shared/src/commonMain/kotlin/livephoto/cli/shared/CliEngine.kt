@@ -11,7 +11,7 @@ Capabilities: capabilities --target PROTOCOL [--profile PROFILE] | media-capabil
 
 Read/source: --input FILE [--pair-video FILE]
 Create: --image FILE --video FILE --target PROTOCOL
-Create Oplus: [--replace-oplus-user-comment] authorizes only oplus_1048576 -> oplus_10485792
+Create Oplus: [--replace-oplus-user-comment] authorizes supported camera comments -> oplus_10485792
 Write: --output-dir NEW_DIRECTORY (assets published together under assets/)
 Convert: --target PROTOCOL [--profile PROFILE]
 Create/convert edits: [--start-us N --end-us N --mode LosslessPreferred] [--frame-index N | --time-us N]
@@ -158,7 +158,7 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
             }
             val policy = MutationPolicy(preservation = if (options.containsKey("strict")) PreservationPolicy.Strict else PreservationPolicy.BestEffortWithReport,
                 loss = if ("replace-oplus-user-comment" in options) LossPolicy.AllowListed else LossPolicy.RejectUnrequested,
-                allowedLosses = if ("replace-oplus-user-comment" in options) listOf(MetadataLoss.OplusCameraUserComment) else emptyList(),
+                allowedLosses = if ("replace-oplus-user-comment" in options) listOf(MetadataLoss.OplusCameraUserComment, MetadataLoss.OplusAsciiCameraUserComment) else emptyList(),
                 transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid,
                 conflicts = if (command == "repair" && "authority" in options) ConflictPolicy.ExplicitAuthority else ConflictPolicy.Reject,
                 authority = if (command == "repair") options["authority"]?.let(::EvidenceId) else null)

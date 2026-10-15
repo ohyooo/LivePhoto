@@ -26,9 +26,9 @@ internal class ExifMarkerPatch private constructor(
             ExifMarkerPatch(identity, null, null, payload, ExifMarkerAction.AddCanonical, ExifCommentChange(null, OplusCommentMarker.Modern), false)
         }
 
-        internal suspend fun rewrite(reader: BinaryReader, budget: ParseBudget, range: ByteRange, action: ExifMarkerAction, replaceCameraComment: Boolean): CoreResult<ExifMarkerPatch> = attempt {
+        internal suspend fun rewrite(reader: BinaryReader, budget: ParseBudget, range: ByteRange, action: ExifMarkerAction, authorizedCameraComments: Set<String>): CoreResult<ExifMarkerPatch> = attempt {
             val identity = reader.identity().orThrow()
-            val built = ExifPatchBuilder(reader, budget).rewrite(range, action, replaceCameraComment)
+            val built = ExifPatchBuilder(reader, budget).rewrite(range, action, authorizedCameraComments)
             val readback = verify(built.payload, built.change.resulting, reader.context, budget)
             if (ordinary(built.document, budget) != ordinary(readback.document, budget)) fail("UNSAFE_METADATA_REWRITE", "Ordinary EXIF fields failed final preservation readback")
             val digest = sha256Range(reader, range).orThrow()
@@ -76,7 +76,7 @@ internal class ExifMarkerPatch private constructor(
 
 internal class ExifMarkerWriter(private val reader: BinaryReader, private val budget: ParseBudget = ParseBudget(reader.context)) {
     suspend fun createMarkerAppPayload(upstreamWire: Boolean = false): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.create(reader, budget, upstreamWire)
-    suspend fun rewriteMarker(tiffRange: ByteRange, action: ExifMarkerAction, replaceCameraComment: Boolean = false): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.rewrite(reader, budget, tiffRange, action, replaceCameraComment)
+    suspend fun rewriteMarker(tiffRange: ByteRange, action: ExifMarkerAction, authorizedCameraComments: Set<String> = emptySet()): CoreResult<ExifMarkerPatch> = ExifMarkerPatch.rewrite(reader, budget, tiffRange, action, authorizedCameraComments)
 }
 
 /** Bounded proof for unchanged TIFF bytes containing only standardized position-independent fields. */
@@ -192,13 +192,15 @@ private class ExifPatchBuilder(private val reader: BinaryReader, private val bud
         return payload(tiff)
     }
 
-    suspend fun rewrite(range: ByteRange, action: ExifMarkerAction, replaceCameraComment: Boolean): BuiltPatch {
+    suspend fun rewrite(range: ByteRange, action: ExifMarkerAction, authorizedCameraComments: Set<String>): BuiltPatch {
         if (range.length > MAX_TIFF_LENGTH.toULong()) unsafe("EXIF exceeds one APP1 payload")
         val facts = ExifUserCommentReader(reader, budget).read(range).orThrow()
         val document = facts.document
         val comment = facts.comments.singleOrNull()
-        if (action == ExifMarkerAction.AddCanonical && replaceCameraComment && comment?.encoding == UserCommentEncoding.Ascii && comment.text == "oplus_1048576") {
-            return replaceCameraCommentInPlace(document, comment)
+        if (action == ExifMarkerAction.AddCanonical && comment != null && comment.encoding == UserCommentEncoding.Ascii &&
+            comment.text != null && comment.text in authorizedCameraComments) {
+            if (comment.entry.type == 7u.toUShort() && comment.text == "oplus_1048576") return replaceCameraCommentInPlace(document, comment)
+            if (comment.entry.type == 2u.toUShort() && comment.text == "oplus_1056768") return replaceAsciiCameraComment(document, comment)
         }
         if (action == ExifMarkerAction.AddCanonical && comment != null && comment.marker == null) fail("CONFLICTING_METADATA", "Ordinary or undecodable UserComment requires explicit preservation authorization")
         val previous = comment?.marker
@@ -270,6 +272,41 @@ private class ExifPatchBuilder(private val reader: BinaryReader, private val bud
         val value = ByteRange(old.offset, marker.size.toULong())
         if (value.endExclusive > range.endExclusive) unsafe("Camera UserComment has no room for the replacement")
         val count = ByteRange(checkedAdd(entry.entryRange.offset, 4uL), 4uL)
+        verifyCameraReplacement(document, entry, count, value)
+        budget.retain(checkedMultiply(checkedAdd(range.length, 6uL), 4uL))
+        val original = reader.readExactly(range.offset, checkedInt(range.length).toUInt()).orThrow()
+        // A 21-byte unterminated value may consume exactly one unowned zero alignment byte.
+        if (old.length < value.length && original[checkedInt(old.endExclusive - range.offset)] != 0.toByte()) unsafe("UserComment expansion would overwrite nonzero EXIF bytes")
+        val output = original.toByteArray()
+        marker.copyInto(output, checkedInt(value.offset - range.offset))
+        put(output, checkedInt(count.offset - range.offset), marker.size.toULong(), 4, document.endian)
+        return BuiltPatch(payload(output), ExifCommentChange(null, OplusCommentMarker.Modern, comment.text), false, document, true)
+    }
+
+    /** Append only the authorized value; keep all existing TIFF directories and ordinary allocations fixed. */
+    private suspend fun replaceAsciiCameraComment(document: TiffDocument, comment: ExifUserComment): BuiltPatch {
+        val range = document.range
+        val entry = comment.entry
+        val old = entry.valueRange ?: unsafe("Camera ASCII comment has no bounded allocation")
+        if (entry.count != 14u || old.length != 14uL) unsafe("Camera ASCII comment allocation is outside the supported replacement profile")
+        val mutation = ByteRange(checkedAdd(entry.entryRange.offset, 2uL), 10uL)
+        verifyCameraReplacement(document, entry, mutation, old)
+        val marker = markerBytes(terminated = false)
+        val offset = checkedAdd(range.length, range.length and 1uL)
+        val length = checkedAdd(offset, marker.size.toULong())
+        if (length > MAX_TIFF_LENGTH.toULong()) unsafe("Camera comment append exceeds one EXIF APP1 allocation")
+        budget.retain(checkedMultiply(checkedAdd(length, 6uL), 4uL))
+        val original = reader.readExactly(range.offset, checkedInt(range.length).toUInt()).orThrow()
+        val output = ByteArray(checkedInt(length))
+        original.copyInto(output, 0)
+        output.fill(0, checkedInt(old.offset - range.offset), checkedInt(old.endExclusive - range.offset))
+        field(output, checkedInt(entry.entryRange.offset - range.offset), 0x9286u, 7u, marker.size.toUInt(), offset, document.endian)
+        marker.copyInto(output, checkedInt(offset))
+        return BuiltPatch(payload(output), ExifCommentChange(null, OplusCommentMarker.Modern, comment.text), false, document, true)
+    }
+
+    private fun verifyCameraReplacement(document: TiffDocument, entry: TiffEntry, mutation: ByteRange, value: ByteRange) {
+        val range = document.range
         val tables = document.ifds.map { ByteRange(checkedAdd(range.offset, it.relativeOffset.toULong()), checkedAdd(6uL, checkedMultiply(it.entries.size.toULong(), 12uL))) }
         for ((index, table) in tables.withIndex()) {
             budget.item(1u)
@@ -280,18 +317,10 @@ private class ExifPatchBuilder(private val reader: BinaryReader, private val bud
             for (other in ifd.entries) {
                 budget.item(1u)
                 val allocation = other.valueRange ?: unsafe("Unknown TIFF allocation prevents UserComment replacement")
-                if (overlaps(allocation, count)) unsafe("Metadata aliases the UserComment count")
+                if (overlaps(allocation, mutation)) unsafe("Metadata aliases the UserComment entry")
             }
         }
         exclusive(value, entry, document)
-        budget.retain(checkedMultiply(checkedAdd(range.length, 6uL), 4uL))
-        val original = reader.readExactly(range.offset, checkedInt(range.length).toUInt()).orThrow()
-        // A 21-byte unterminated value may consume exactly one unowned zero alignment byte.
-        if (old.length < value.length && original[checkedInt(old.endExclusive - range.offset)] != 0.toByte()) unsafe("UserComment expansion would overwrite nonzero EXIF bytes")
-        val output = original.toByteArray()
-        marker.copyInto(output, checkedInt(value.offset - range.offset))
-        put(output, checkedInt(count.offset - range.offset), marker.size.toULong(), 4, document.endian)
-        return BuiltPatch(payload(output), ExifCommentChange(null, OplusCommentMarker.Modern, comment.text), false, document, true)
     }
 
     private fun safe(document: TiffDocument, root: TiffIfd) {

@@ -18,3 +18,11 @@ internal fun cameraCommentExif(): ByteArray {
     val payload = "Exif\u0000\u0000".encodeToByteArray() + tiff
     return byteArrayOf(0xff.toByte(), 0xe1.toByte(), ((payload.size + 2) ushr 8).toByte(), (payload.size + 2).toByte()) + payload
 }
+
+/** Same artificial directories with an unprefixed, ordinary TIFF ASCII camera comment. */
+internal fun asciiCameraCommentExif(): ByteArray = cameraCommentExif().also { app ->
+    app[40] = 2; app[41] = 0 // TIFF field type, not an EXIF character-set prefix.
+    app[42] = 14; app[43] = 0; app[44] = 0; app[45] = 0
+    app.fill(0, 90, 111)
+    "oplus_1056768\u0000".encodeToByteArray().copyInto(app, 90)
+}

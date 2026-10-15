@@ -35,6 +35,13 @@ internal class ExifUserCommentReader(private val reader: BinaryReader, private v
         for (entry in commentEntries) {
             sharedBudget.item(1u)
             val value = entry.value
+            // Some camera JPEGs store an ordinary, unprefixed TIFF ASCII comment.
+            // Expose its text for explicit replacement, but never grant it live-marker ownership.
+            if (entry.type == 2u.toUShort() && value != null) {
+                sharedBudget.retain(checkedMultiply(value.size.toULong(), 2uL))
+                comments.add(ExifUserComment(exif.relativeOffset, entry, UserCommentEncoding.Ascii, ascii(value, 0), null))
+                continue
+            }
             // UserComment is UNDEFINED; nonstandard field types are preserved without interpretation.
             if (entry.type != 7u.toUShort() || value == null || value.size < 8) {
                 comments.add(ExifUserComment(exif.relativeOffset, entry, UserCommentEncoding.Unknown, null, null)); continue
@@ -57,13 +64,13 @@ internal class ExifUserCommentReader(private val reader: BinaryReader, private v
     }
 
     private fun header(bytes: Bytes, expected: String): Boolean = expected.indices.all { bytes[it].toInt() and 255 == expected[it].code }
-    private fun ascii(bytes: Bytes): String? {
+    private fun ascii(bytes: Bytes, start: Int = 8): String? {
         checkCancelled(reader.context)
         var end = bytes.size
         var iterations = 0
-        while (end > 8 && bytes[end - 1] == 0.toByte()) { if (iterations++ and 4095 == 0) checkCancelled(reader.context); end-- }
-        return buildString(end - 8) {
-            for (index in 8 until end) {
+        while (end > start && bytes[end - 1] == 0.toByte()) { if (iterations++ and 4095 == 0) checkCancelled(reader.context); end-- }
+        return buildString(end - start) {
+            for (index in start until end) {
                 if (iterations++ and 4095 == 0) checkCancelled(reader.context)
                 val char = bytes[index].toInt() and 255
                 if (char > 127 || char == 0) return null

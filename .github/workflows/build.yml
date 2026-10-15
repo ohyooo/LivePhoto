@@ -212,15 +212,15 @@ jobs:
           path: |
             core/build/test-results/${{ matrix.target }}Test/
             core/build/reports/tests/${{ matrix.target }}Test/
-            core/build/reports/protocol-compatibility/
-            core/build/portable-heic-fixtures/
-            core/build/reports/huawei-heic-fixtures/
-            core/build/portable-apple-heif-fixtures/
-            core/build/portable-apple-ordinary-exif-fixtures/
-            core/build/reports/samsung-remux-fixtures/
-            core/build/reports/vivo-remux-fixtures/
-            core/build/reports/huawei-remux-fixtures/
-            core/build/encoded-media-fixtures/
+            core/build/reports/protocol-compatibility/verified-captures.tsv
+            core/build/reports/protocol-compatibility/asset-manifest.json
+            core/build/portable-heic-fixtures/manifest.txt
+            core/build/reports/huawei-heic-fixtures/manifest.txt
+            core/build/portable-apple-heif-fixtures/manifest.txt
+            core/build/portable-apple-ordinary-exif-fixtures/manifest.txt
+            core/build/reports/samsung-remux-fixtures/manifest.txt
+            core/build/reports/vivo-remux-fixtures/manifest.txt
+            core/build/reports/huawei-remux-fixtures/manifest.txt
             cli-shared/build/test-results/${{ matrix.target }}Test/
             cli-shared/build/reports/tests/${{ matrix.target }}Test/
             file-io/build/test-results/${{ matrix.target }}Test/
@@ -229,10 +229,6 @@ jobs:
             cli-native/build/reports/tests/${{ matrix.target }}Test/
             process/build/test-results/${{ matrix.target }}Test/
             process/build/reports/tests/${{ matrix.target }}Test/
-            process/build/classes/kotlin/${{ matrix.target }}/main/
-            file-io/build/classes/kotlin/${{ matrix.target }}/main/
-            core/build/libs/
-            core/build/classes/kotlin/${{ matrix.target }}/main/
             ci-output/native-core.log
             ci-output/native-core-evidence.json
             ci-output/shared-cli-evidence.json

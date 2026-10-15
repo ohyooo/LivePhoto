@@ -62,7 +62,7 @@ Compose 界面使用无原生 ActionBar 的窗口和 Material 3 `Scaffold` 安�
 
 普通 JPEG 的未知尾部在这三个 Create profile 中原字节保留于图片和 MP4 之间，Google V2 / OPPO 的目录会记录相应 Primary Padding，并回读核对尾部哈希和视频起点。不会把它冒充已解析的厂商动态视频尾标；其私有含义和偏移依赖仍为未知，不能据此承诺原厂编辑功能或严格 metadata 无损。Clean Split 和需要重建图片的 Convert 若会丢弃这段非零数据，则明确拒绝；Raw Extract 仍可原样提取视频。`UNSUPPORTED_CONTAINER(Parse)` 不能仅凭扩展名确定原因，请反馈卡片中的定位和具体原因。
 
-Android 的 OPPO/OnePlus 生成会将新图片中精确匹配的 ASCII UserComment `oplus_1048576` 更新为 `oplus_10485792`。只在原 EXIF 空间足够、字段没有重叠且 EXIF 位置保持不变时执行，保留其它字段、MakerNote、图片尾部及输入原片。结果显示替换记录，`MetadataPreserving=Changed`；其它普通注释仍按冲突拒绝。Core 默认不授权此替换，调用方须设置 `loss=AllowListed` 和 `allowedLosses=[MetadataLoss.OplusCameraUserComment]`；CLI 的 Oplus `create` 使用 `--replace-oplus-user-comment` 显式启用，不能同时要求严格 metadata 保留。
+Android 的 OPPO/OnePlus 生成支持两种精确相机注释替换：UNDEFINED 类型、带 ASCII 前缀的 `oplus_1048576`，以及 TIFF ASCII 类型的 `oplus_1056768`，目标均为标准 `oplus_10485792`。前者使用原字段空间；后者在 EXIF 末尾追加新值，只更新该字段的类型、长度和指针。保留 EXIF 起点、其它目录与值的位置、MakerNote、图片尾部及输入原片；字段重叠、空间超限等不安全结构继续拒绝。结果显示替换记录，`MetadataPreserving=Changed`；其它普通注释仍按冲突拒绝，非标准 ASCII 文本不会被检测为 Live 标记。Core 默认不授权替换；两种写法分别使用 `loss=AllowListed` 和 `MetadataLoss.OplusCameraUserComment` / `MetadataLoss.OplusAsciiCameraUserComment` 加入 `allowedLosses`。CLI 的 Oplus `create` 使用 `--replace-oplus-user-comment` 显式启用，不能同时要求严格 metadata 保留。
 
 输入合计上限 **32 MiB**，输出上限 **48 MiB**；此首版使用冻结的内存输入和内存事务，不是大视频工具。Core 完成验证后，把单张 JPEG 原字节写入 MediaStore 的 pending 项，回读确认一致再发布到 `Pictures/LivePhoto`，不会覆盖原片。不申请全盘读写、联网或相册遍历权限；输入由系统文件选择器授权。未完成的 pending 项只按本次创建的 URI 清理；已发布或状态不确定的项不盲删。
 
@@ -78,7 +78,7 @@ Android 的 OPPO/OnePlus 生成会将新图片中精确匹配的 ASCII UserComme
 
 Windows 使用 `.\gradlew.bat` 替换 `./gradlew`。Android 模式与桌面 `livephoto.nativeTarget` 分开，不能同时指定。APK 分别位于 `android/build/outputs/apk/debug/android-debug.apk` 和 `android/build/outputs/apk/release/android-release.apk`。用 Android Studio 导入时，在该 IDE 的 Gradle VM options 设置 `-Dorg.gradle.project.livephoto.android=true`，不要把模式写成所有平台共用的全局属性。
 
-CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 产物中的 **`LivePhoto-debug.apk`、`LivePhoto-release.apk` 分别直接上传单文件**，使用 `upload-artifact@v7` 的 `archive: false`，没有外层 ZIP；`compression-level: 0` 只控制压缩等级，单独设置不能移除 ZIP。发布任务用 `download-artifact@v8` 的 `skip-decompress: true` 保留 APK 自身结构。`android-reports-...` 仍是单独的报告 ZIP，包含测试 APK、XML、报告、日志和截图；真实原片只打进测试 APK，不打进应用 APK。
+CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 产物中的 **`LivePhoto-debug.apk`、`LivePhoto-release.apk` 分别直接上传单文件**，使用 `upload-artifact@v7` 的 `archive: false`，没有外层 ZIP；`compression-level: 0` 只控制压缩等级，单独设置不能移除 ZIP。发布任务用 `download-artifact@v8` 的 `skip-decompress: true` 保留 APK 自身结构。`android-reports-...` 是单独的报告 ZIP，保留 XML、日志、启动截图及混淆映射，不附带含素材的测试 APK。Native 报告只保留测试结果及素材哈希清单，不附带导出的图片、视频或媒体 fixture。手机原片与其生成结果不提交到仓库或上传 artifacts；应用 APK 不包含测试素材。
 
 主分支 debug/release 共用固定签名，通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复，缺少签名时拒绝发布。PR 使用默认 debug 签名且不发布 Releases；本地未传入签名时也使用本地 debug key，不能据此覆盖 CI 安装版。CI 的 `versionCode` 随构建递增，签名保持一致。**以前使用随机 CI debug key 的版本可能需卸载一次**；之后本仓库固定签名的 debug/release 可互相更新。产物证据记录实际证书指纹。
 
@@ -401,7 +401,7 @@ AAC-LC 配置读取包括基础 ASC，以及已知 `0x2b7 / AOT=5 / sbrPresentFl
 | `--container` | remux/transcode：`Mp4` 或 `Mov` |
 | `--codec` | transcode：`Avc` 或 `Hevc` |
 | `--allow-transcode` | 仅 create/convert/trim/transcode；显式授权，不保证操作可用 |
-| `--replace-oplus-user-comment` | 仅 create；授权 Oplus 输出把精确匹配的相机注释 `oplus_1048576` 改为动态标记，保留原片和其它字段 |
+| `--replace-oplus-user-comment` | 仅 create；授权 Oplus 输出替换上述两种精确相机注释，保留原片和其它字段 |
 | `--ffmpeg` | 仅 media-capabilities/probe/create/convert/extract-frame/replace-cover/trim/remux/transcode；可执行文件路径，不是目录 |
 | `--decode-check` | 仅 probe：请求实际解码检查；失败不自动降级成“解码成功” |
 | `--update-key` | 仅 replace-cover：独立请求更新 key metadata |

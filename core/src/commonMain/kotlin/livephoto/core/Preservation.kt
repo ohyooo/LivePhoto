@@ -27,6 +27,8 @@ public data class PreservationReport(
 public object MetadataLoss {
     /** Authorizes only ASCII UserComment `oplus_1048576` -> `oplus_10485792` during Oplus Create. */
     public const val OplusCameraUserComment: String = "exif:UserComment:oplus_1048576"
+    /** Separately authorizes TIFF ASCII `oplus_1056768` -> canonical EXIF marker during Oplus Create. */
+    public const val OplusAsciiCameraUserComment: String = "exif:UserComment:oplus_1056768"
 }
 
 public class MutationPolicy(

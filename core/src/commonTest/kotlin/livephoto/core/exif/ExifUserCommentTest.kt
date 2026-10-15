@@ -8,6 +8,19 @@ import kotlin.test.*
 class ExifUserCommentTest {
     private val context = Context(Limits(100_000uL, 100_000uL, maxMetadataBytes = 100_000uL))
 
+    @Test fun tiffAsciiTextNeverAcquiresLiveMarkerOwnership(): Unit = runImmediate {
+        for (little in listOf(true, false)) for (text in listOf("oplus_1056768", "oplus_10485792", "oplus_8388608", "ordinary text")) {
+            val bytes = (text + "\u0000").encodeToByteArray()
+            val comment = value(read(tiff(bytes, little, type = 2))).comments.single()
+            assertEquals(UserCommentEncoding.Ascii, comment.encoding)
+            assertEquals(text, comment.text)
+            assertNull(comment.marker)
+            assertEquals(Bytes(bytes), comment.entry.value)
+        }
+        val mixed = "oplus_1056768\u0000extra".encodeToByteArray()
+        assertNull(value(read(tiff(mixed, type = 2))).comments.single().text)
+    }
+
     @Test
     fun exactAsciiMarkersFollowPrimaryExifPointerInBothByteOrders(): Unit = runImmediate {
         for (little in listOf(true, false)) for (marker in listOf("oplus_10485792", "oplus_8388608")) {

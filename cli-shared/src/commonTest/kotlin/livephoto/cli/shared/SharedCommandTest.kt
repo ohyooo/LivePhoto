@@ -24,7 +24,7 @@ class SharedCommandTest {
         assertTrue(assertNotNull(policy).allowedLosses.isEmpty())
         assertEquals(3, TestCli(core).run(args + "--replace-oplus-user-comment") {})
         assertEquals(LossPolicy.AllowListed, assertNotNull(policy).loss)
-        assertEquals(listOf(MetadataLoss.OplusCameraUserComment), assertNotNull(policy).allowedLosses)
+        assertEquals(listOf(MetadataLoss.OplusCameraUserComment, MetadataLoss.OplusAsciiCameraUserComment), assertNotNull(policy).allowedLosses)
         assertEquals(TranscodePolicy.Forbid, assertNotNull(policy).transcode)
     }
     @Test fun explicitRePairForwardsModePairAndAuthorityWithoutProtocolLogic(): Unit = synchronous {
