@@ -51,6 +51,40 @@ class AndroidIntegrationTest {
         }
     }
 
+    @Test fun controllerReplacesOnlyAuthorizedCameraCommentAndPreservesOpaqueExif() = runBlocking {
+        val token = UUID.randomUUID().toString()
+        val original = fixture("video.jpg")
+        val exif = cameraCommentExif()
+        val suffix = ByteArray(435) { ((it * 37 + 11) and 255).toByte() }
+        val imageBytes = original.copyOfRange(0, 2) + exif + original.copyOfRange(2, original.size) + suffix
+        val videoBytes = durationVarianceVideo()
+        val imageFile = app.getFileStreamPath("comment-$token.jpg")
+        val videoFile = app.getFileStreamPath("comment-$token.mp4")
+        var output: Uri? = null
+        try {
+            imageFile.writeBytes(imageBytes); videoFile.writeBytes(videoBytes)
+            val result = success(AndroidCreateController(app, app.core).create(Uri.fromFile(imageFile), Uri.fromFile(videoFile),
+                ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail"))))
+            output = result.uri
+            val saved = app.contentResolver.openInputStream(result.uri)!!.use { it.readBytes() }
+            for (i in exif.indices) if (i !in 42..45 && i !in 90..111) assertEquals(exif[i], saved[2 + i], "EXIF byte $i changed")
+            assertContentEquals("ASCII\u0000\u0000\u0000oplus_10485792".encodeToByteArray(), saved.copyOfRange(92, 114))
+            assertContentEquals(suffix, saved.copyOfRange(saved.size - videoBytes.size - suffix.size, saved.size - videoBytes.size))
+            assertContentEquals(videoBytes, saved.takeLast(videoBytes.size).toByteArray())
+            val change = result.operation.preservation.changes.single { it.selector == "exif:UserComment" }
+            assertEquals(Value.Text("oplus_1048576"), change.before)
+            assertEquals(Value.Text("oplus_10485792"), change.after)
+            assertEquals(GuaranteeOutcome.Changed, result.operation.preservation.records.single { it.guarantee == Guarantee.MetadataPreserving }.outcome)
+            assertTrue(result.operation.execution.none { it.transcoded || it.remuxed })
+            assertContentEquals(imageBytes, imageFile.readBytes())
+            assertContentEquals(videoBytes, videoFile.readBytes())
+        } finally {
+            output?.let { app.contentResolver.delete(it, null, null) }
+            if (imageFile.exists()) assertTrue(imageFile.delete())
+            if (videoFile.exists()) assertTrue(videoFile.delete())
+        }
+    }
+
     private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4"), suffix: ByteArray = byteArrayOf(), timingWarning: Boolean = false) {
         val imageBytes = fixture("video.jpg") + suffix
         val imageHash = sha(imageBytes)

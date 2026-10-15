@@ -52,6 +52,7 @@ internal object GoogleOperations {
         val timestamp = if (huawei) 0L else key.position?.let(::microseconds) ?: -1L
         val mime = if (video.container == VideoContainer.Mov) "video/quicktime" else "video/mp4"
         val oplus = request.target.protocol == ProtocolIds.Oplus
+        val replaceCameraComment = oplus && request.policy.loss == LossPolicy.AllowListed && MetadataLoss.OplusCameraUserComment in request.policy.allowedLosses
         // Retain ordinary JPEG suffix bytes before the movie, never reinterpret
         // them as a vendor motion trailer or silently remove them. Only the
         // three plain JPEG profiles use this opaque, byte-verified preservation.
@@ -66,15 +67,18 @@ internal object GoogleOperations {
         val samsungPlan = if (samsung) SamsungJpegWriter.createPlan(image, videoReader, ByteRange(0uL, videoIdentity.size), timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else null
         if (oplus && request.target.profile != null && request.target.profile != ProfileId("jpeg-no-tail")) fail("UNSUPPORTED_PROTOCOL", "Oplus writer only implements jpeg-no-tail")
         val rewrite = if (huaweiPlan != null) huaweiPlan.image else if (samsungPlan != null) samsungPlan.image else if (vivo) VivoJpegWriter.createPlan(image, videoIdentity.size, timestamp, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget).orThrow() else if (oplus) OplusJpegWriter.createPlan(image, videoIdentity.size, timestamp,
-            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget, primaryPadding).orThrow()
+            request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context, budget, primaryPadding, replaceCameraComment).orThrow()
             else GoogleJpegWriter.createPlan(image, request.target, videoIdentity.size, mime, timestamp,
                 request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.context,
                 primaryPadding = primaryPadding, preservePrimarySuffix = preservedSuffix != null).orThrow()
+        val replacedComment = rewrite.patches.mapNotNull { it.exifProof?.ownedChangedComment?.ordinaryBefore }.singleOrNull()
+        if (replacedComment != null && (request.policy.preservation == PreservationPolicy.Strict || Guarantee.MetadataPreserving in request.policy.requiredGuarantees))
+            fail("PRESERVATION_REQUIREMENT_FAILED", "Authorized UserComment replacement changes ordinary metadata", Stage.Plan)
         diagnostic.at("verify-input", "video", videoIdentity.id)
         val videoDigest = sha256Range(videoReader, ByteRange(0uL, videoIdentity.size)).orThrow()
         diagnostic.at("verify-input", "image", imageId)
         val coding = codingDigest(image)
-        val metadata = ordinaryDigest(image, if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS, oplus)
+        val metadata = ordinaryDigest(image, if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS, oplus, requestedUserComment = replacedComment)
         val suffixDigest = preservedSuffix?.let { sha256Range(image.reader, it).orThrow() }
         val asset = StagedAsset(OutputAssetSpec(AssetRole.Composite, mime = "image/jpeg"), ImageFormat.Jpeg,
             write = { writer ->
@@ -105,8 +109,9 @@ internal object GoogleOperations {
                     GuaranteeRecord(id, Guarantee.ExactExtraction, GuaranteeOutcome.NotApplicable, proof = "Create constructs a new composite carrier; no whole-carrier exact extraction claim"),
                     GuaranteeRecord(id, Guarantee.BitstreamPreserving, GuaranteeOutcome.Verified, videoDigest, extractedDigest, "Embedded resource ${videoId(binding.protocol).value}: complete encoded video suffix bytes unchanged"),
                     GuaranteeRecord(id, Guarantee.ImageDataPreserving, GuaranteeOutcome.Verified, coding, outputCoding, "JPEG frame/tables/scan headers/entropy bytes unchanged"),
-                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (!metadataUnproven && preservedSuffix == null && opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata,
-                        if (preservedSuffix == null) "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately"
+                    GuaranteeRecord(id, Guarantee.MetadataPreserving, if (replacedComment != null) GuaranteeOutcome.Changed else if (!metadataUnproven && preservedSuffix == null && opaqueOffsetsPreserved(image, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata,
+                        if (replacedComment != null) "Authorized UserComment replacement; remaining EXIF values and offsets, other metadata and copied suffix bytes unchanged; private suffix semantics remain unverified"
+                        else if (preservedSuffix == null) "Ordinary XMP and raw APP/COM unchanged; opaque APP positions checked separately"
                         else "Ordinary metadata and opaque JPEG suffix bytes unchanged; private suffix semantics and offset dependencies remain unverified")), if (huawei || sourceKey != null) staged.inspection.keyPhoto else key.copy(position = Time(timestamp, 1_000_000u)))
             })
         val targetFields = if (huawei) emptySet() else if (request.target.protocol == ProtocolIds.GoogleV1) V1_FIELDS else V2_FIELDS
@@ -129,7 +134,7 @@ internal object GoogleOperations {
             Change("{$OPLUS_URI}MotionPhotoPrimaryPresentationTimestampUs", after = Value.Text(timestamp.toString()), reason = "Synchronize the Oplus timestamp", requested = true),
             Change("{$OPLUS_URI}MotionPhotoOwner", after = Value.Text("oplus"), reason = "Write Oplus ownership", requested = true),
             Change("{$OPLUS_URI}OLivePhotoVersion", after = Value.Text("2"), reason = "Write the implemented Oplus version", requested = true),
-            Change("exif:UserComment", after = Value.Text(OPLUS_MARKER), reason = "Write the requested vendor recognition marker", requested = true)) else emptyList()
+            Change("exif:UserComment", before = replacedComment?.let { Value.Text(it) }, after = Value.Text(OPLUS_MARKER), reason = if (replacedComment == null) "Write the requested vendor recognition marker" else "Replace the explicitly authorized camera UserComment", requested = true)) else emptyList()
         diagnostic.at("publish-output", "output")
         publish(request.output, request.policy, request.context, originalInputs + image.readers + videoReader, listOf(asset), sourceChanges + allChanges).orThrow()
     }

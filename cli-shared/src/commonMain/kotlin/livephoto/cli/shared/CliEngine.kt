@@ -11,6 +11,7 @@ Capabilities: capabilities --target PROTOCOL [--profile PROFILE] | media-capabil
 
 Read/source: --input FILE [--pair-video FILE]
 Create: --image FILE --video FILE --target PROTOCOL
+Create Oplus: [--replace-oplus-user-comment] authorizes only oplus_1048576 -> oplus_10485792
 Write: --output-dir NEW_DIRECTORY (assets published together under assets/)
 Convert: --target PROTOCOL [--profile PROFILE]
 Create/convert edits: [--start-us N --end-us N --mode LosslessPreferred] [--frame-index N | --time-us N]
@@ -91,7 +92,7 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
             val writes = setOf("create", "convert", "extract", "split", "repair", "set-key", "extract-frame", "replace-cover", "trim", "remux", "transcode")
             require(command in read + writes + setOf("capabilities", "media-capabilities")) { "Unknown command: $command" }
             val options = linkedMapOf<String, String>()
-            val flags = setOf("apply", "strict", "raw-carrier", "allow-transcode", "decode-check", "update-key")
+            val flags = setOf("apply", "strict", "raw-carrier", "allow-transcode", "decode-check", "update-key", "replace-oplus-user-comment")
             var i = 1
             while (i < args.size) {
                 val key = args[i++].removePrefix("--")
@@ -108,7 +109,7 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
             val allowed = common + (if (command in mediaCommands + setOf("create", "convert", "repair")) setOf("ffmpeg") else emptySet()) + when (command) {
                 "capabilities" -> targetKeys
                 "media-capabilities" -> emptySet()
-                "create" -> setOf("image", "video", "output-dir", "strict", "allow-transcode") + targetKeys + trimKeys + positionKeys + replacementKeys
+                "create" -> setOf("image", "video", "output-dir", "strict", "allow-transcode", "replace-oplus-user-comment") + targetKeys + trimKeys + positionKeys + replacementKeys
                 "convert" -> inputKeys + targetKeys + setOf("output-dir", "strict", "same-target", "allow-transcode") + trimKeys + positionKeys + replacementKeys
                 "extract" -> inputKeys + setOf("output-dir", "resources", "raw-carrier")
                 "split" -> inputKeys + setOf("output-dir", "strict")
@@ -156,6 +157,8 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
                 return if (trim == null && key == null && replacement == null) null else EditSpec(trim = trim, keyPosition = key, replacementFrame = replacement)
             }
             val policy = MutationPolicy(preservation = if (options.containsKey("strict")) PreservationPolicy.Strict else PreservationPolicy.BestEffortWithReport,
+                loss = if ("replace-oplus-user-comment" in options) LossPolicy.AllowListed else LossPolicy.RejectUnrequested,
+                allowedLosses = if ("replace-oplus-user-comment" in options) listOf(MetadataLoss.OplusCameraUserComment) else emptyList(),
                 transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid,
                 conflicts = if (command == "repair" && "authority" in options) ConflictPolicy.ExplicitAuthority else ConflictPolicy.Reject,
                 authority = if (command == "repair") options["authority"]?.let(::EvidenceId) else null)

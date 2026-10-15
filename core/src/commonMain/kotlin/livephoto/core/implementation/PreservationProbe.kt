@@ -35,7 +35,7 @@ internal suspend fun codingDigest(session: SourceSession): Digest {
 }
 
 /** Ordinary XMP meaning and each non-XMP APP/COM byte string, without protocol bindings. */
-internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraFields: Set<String> = emptySet(), verifiedExifRewrite: Boolean = false, verifiedJfifHeader: ByteRange? = null): Digest {
+internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraFields: Set<String> = emptySet(), verifiedExifRewrite: Boolean = false, verifiedJfifHeader: ByteRange? = null, requestedUserComment: String? = null): Digest {
     val hash = Sha256()
     fun text(value: String) { val bytes = Bytes(value.encodeToByteArray()); hash.update(unsignedBytes(bytes.size.toULong(), 8, Endian.Big)); hash.update(bytes) }
     for (segment in session.jpeg!!.segments) if ((segment.marker in 0xe0..0xef || segment.marker == 0xfe) && segment.payloadKind != AppPayloadKind.Xmp && !(verifiedExifRewrite && segment.payloadKind == AppPayloadKind.Exif) && segment.range != verifiedJfifHeader) {
@@ -54,7 +54,7 @@ internal suspend fun ordinaryDigest(session: SourceSession, requestedCameraField
         } ?: emptyMap()
         for (ifd in document.ifds) for (entry in ifd.entries.sortedBy { it.tag }) {
             if (entry.tag in setOf(0x8769u.toUShort(), 0x8825u.toUShort(), 0xa005u.toUShort(), 0x014au.toUShort())) continue
-            if (facts.comments.any { it.entry.entryRange == entry.entryRange && it.marker != null }) continue
+            if (facts.comments.any { it.entry.entryRange == entry.entryRange && (it.marker != null || requestedUserComment != null && it.text == requestedUserComment) }) continue
             text("exif"); text(if (ifd.relativeOffset == document.firstIfdOffset) "primary" else "ifd:${pointers[ifd.relativeOffset] ?: 0u}")
             text(entry.tag.toString()); text(entry.type.toString()); text(entry.count.toString())
             val value = entry.value ?: entry.rawValueField

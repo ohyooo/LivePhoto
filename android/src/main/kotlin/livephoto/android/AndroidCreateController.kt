@@ -34,7 +34,9 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         var created: OperationResult? = null
         try {
             when (val result = androidOperation("invoke-core", "request") {
-                core.create(CreateRequest(imageSource, videoSource, target, output = output, context = context))
+                val policy = if (target.protocol == ProtocolIds.Oplus) MutationPolicy(loss = LossPolicy.AllowListed,
+                    allowedLosses = listOf(MetadataLoss.OplusCameraUserComment)) else MutationPolicy()
+                core.create(CreateRequest(imageSource, videoSource, target, policy = policy, output = output, context = context))
             }) {
                 is CoreResult.Failure -> result
                 is CoreResult.Success -> {

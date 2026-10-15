@@ -44,6 +44,8 @@ internal object JpegRewrite {
                         apple.originalTiffRange != ByteRange(segment.payload.offset + 6uL, segment.payload.length - 6uL))))
                 fail("UNSAFE_METADATA_REWRITE", "Apple EXIF authorization does not match this exact APP segment", Stage.Plan)
             if (proof != null) {
+                if (proof.preservePosition && (outputLength != structure.primary.length || patch.replacement.size.toULong() != patch.range.length))
+                    fail("UNSAFE_METADATA_REWRITE", "Authorized UserComment replacement must retain the EXIF position and allocation")
                 val expected = appSegment(0xe1, proof.replacementPayload).orThrow()
                 if (patch.replacement != expected || proof.originalTiffRange == null && (!insertion || structure.hasExif) ||
                     proof.originalTiffRange != null && (segment?.payloadKind != AppPayloadKind.Exif || segment.payload == null ||

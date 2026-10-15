@@ -119,6 +119,8 @@ internal fun LivePhotoScreen(
                                     val issues = (result.value.operation.issues + result.value.operation.validation.issues).distinct()
                                     "已保存到 Pictures/LivePhoto。\nCore 验证：${result.value.operation.validation.verdict}；问题报告：${issues.size} 项。" +
                                         (if (issues.isEmpty()) "" else "\n报告代码：${issues.take(8).joinToString { it.code.value }}") +
+                                        (if (result.value.operation.preservation.changes.any { it.selector == "exif:UserComment" && it.before != null })
+                                            "\n已将新图片的相机 UserComment 更新为动态照片标记。" else "") +
                                         "\n默认 BestEffortWithReport，不保证全部 metadata 无损。请在相册测试动态播放与声音；生成成功不等于相册兼容。"
                                 }
                                 is CoreResult.Failure -> { failed = true; formatCoreFailure(result.error, chosenImageName, chosenVideoName) }

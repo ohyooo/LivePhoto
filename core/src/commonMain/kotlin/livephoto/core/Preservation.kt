@@ -23,6 +23,12 @@ public data class PreservationReport(
     public val issues: List<Issue> = emptyList(),
 )
 
+/** Exact, opt-in ordinary metadata replacements; these are not live-photo detection markers. */
+public object MetadataLoss {
+    /** Authorizes only ASCII UserComment `oplus_1048576` -> `oplus_10485792` during Oplus Create. */
+    public const val OplusCameraUserComment: String = "exif:UserComment:oplus_1048576"
+}
+
 public class MutationPolicy(
     public val preservation: PreservationPolicy = PreservationPolicy.BestEffortWithReport,
     requiredGuarantees: List<Guarantee> = emptyList(),

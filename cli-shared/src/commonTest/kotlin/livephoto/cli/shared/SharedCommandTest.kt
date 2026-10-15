@@ -13,6 +13,20 @@ class SharedCommandTest {
         assertFalse(json.contains("private-adapter-reference"))
     }
     private val failure = CoreResult.Failure(CoreError(IssueCode("TEST_SENTINEL"), Stage.Plan, "test"))
+    @Test fun cameraCommentReplacementForwardsOnlyTheExplicitLoss() = synchronous {
+        var policy: MutationPolicy? = null
+        val core = object : LivePhotoCore by DefaultLivePhotoCore() {
+            override suspend fun create(request: CreateRequest): CoreResult<OperationResult> { policy = request.policy; return failure }
+        }
+        val args = listOf("create", "--image", "unopened image", "--video", "unopened video", "--target", "oplus.olive", "--output-dir", "not-created")
+        assertEquals(3, TestCli(core).run(args) {})
+        assertEquals(LossPolicy.RejectUnrequested, assertNotNull(policy).loss)
+        assertTrue(assertNotNull(policy).allowedLosses.isEmpty())
+        assertEquals(3, TestCli(core).run(args + "--replace-oplus-user-comment") {})
+        assertEquals(LossPolicy.AllowListed, assertNotNull(policy).loss)
+        assertEquals(listOf(MetadataLoss.OplusCameraUserComment), assertNotNull(policy).allowedLosses)
+        assertEquals(TranscodePolicy.Forbid, assertNotNull(policy).transcode)
+    }
     @Test fun explicitRePairForwardsModePairAndAuthorityWithoutProtocolLogic(): Unit = synchronous {
         var received: RepairRequest? = null
         val core = object : LivePhotoCore by DefaultLivePhotoCore() {
