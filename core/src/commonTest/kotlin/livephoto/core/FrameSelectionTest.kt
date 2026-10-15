@@ -29,7 +29,7 @@ class FrameSelectionTest {
     }
     @Test fun ninetyKhzSelectionNeverRoundsToMicroseconds(): Unit = runImmediate {
         val original = video(); val track = original.tracks.single()
-        val changed = track.copy(timescale = 90000u, presentationDuration = Time(4, 90000u),
+        val changed = track.copy(timescale = 90000u, presentationTimescale = 90000u, presentationDuration = Time(4, 90000u),
             samples = listOf(track.samples[0].copy(presentationTime = 0), track.samples[1].copy(presentationTime = 2)))
         val source = original.copy(tracks = listOf(changed))
         val nearest = selectFrame(source, CoverPosition.Timestamp(Time(1, 90000u), Selection.Nearest, Time(1, 90000u)))
@@ -40,11 +40,11 @@ class FrameSelectionTest {
     @Test fun differingFractionScalesAndLargeValuesDoNotOverflow(): Unit = runImmediate {
         val original = video(); val track = original.tracks.single()
         val scale = UInt.MAX_VALUE
-        val changed = track.copy(timescale = scale, presentationDuration = Time(Long.MAX_VALUE, 1u),
+        val changed = track.copy(timescale = scale, presentationTimescale = scale, presentationDuration = Time(Long.MAX_VALUE, 1u),
             samples = listOf(track.samples[0].copy(presentationTime = Long.MAX_VALUE - 3), track.samples[1].copy(presentationTime = Long.MAX_VALUE - 1)))
         val source = original.copy(tracks = listOf(changed))
         assertEquals(0uL, selectFrame(source, CoverPosition.Timestamp(Time(Long.MAX_VALUE - 2, scale), Selection.Nearest, Time(1, scale))).index)
-        val small = track.copy(timescale = 3u, presentationDuration = Time(1, 1u),
+        val small = track.copy(timescale = 3u, presentationTimescale = 3u, presentationDuration = Time(1, 1u),
             samples = listOf(track.samples[0].copy(presentationTime = 0), track.samples[1].copy(presentationTime = 1)))
         assertEquals(1uL, selectFrame(original.copy(tracks = listOf(small)), CoverPosition.Timestamp(Time(1, 4u), Selection.Nearest, Time(1, 12u))).index)
     }

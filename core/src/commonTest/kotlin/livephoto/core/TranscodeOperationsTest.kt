@@ -89,7 +89,7 @@ class TranscodeOperationsTest {
             video.copy(tracks = video.tracks + audio.copy(trackId = 3u) + audio.copy(trackId = 4u)),
             video.copy(tracks = video.tracks + audio.copy(trackId = 3u, handler = "meta")),
             video.copy(tracks = video.tracks.map { if (it.handler == "soun") it.copy(trackId = UInt.MAX_VALUE) else it }),
-            video.copy(tracks = video.tracks.map { if (it.handler == "soun") it.copy(timescale = UInt.MAX_VALUE) else it }))
+            video.copy(tracks = video.tracks.map { if (it.handler == "soun") it.copy(timescale = UInt.MAX_VALUE, presentationTimescale = UInt.MAX_VALUE) else it }))
         for (variant in variants) assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(attemptNow {
             transcodeProfile(variant, encoding, allowCopiedAudio = true)
         }).error.code.value)

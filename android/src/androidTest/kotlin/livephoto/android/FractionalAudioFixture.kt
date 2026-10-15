@@ -40,6 +40,7 @@ internal fun fractionalAudioVideo(): ByteArray {
     val bytes = base.copyOfRange(0, moov - 8) + box("moov", base.copyOfRange(moov, mdat - 8) + audio) +
         box("mdat", base.copyOfRange(mdat, base.size) + samples)
     put32(bytes, position(bytes, "mvhd") + 16, 30781)
+    put32(bytes, position(bytes, "mvhd") + 96, 3)
     put32(bytes, position(bytes, "co64") + 12, mdat + audio.size)
     put32(bytes, position(bytes, "stco") + 8, mdat + audio.size + 13)
     return bytes
