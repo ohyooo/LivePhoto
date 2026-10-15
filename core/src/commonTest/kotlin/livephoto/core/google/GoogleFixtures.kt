@@ -14,8 +14,9 @@ internal object GoogleFixtures {
             segment(0xc4, dcTable + acTable) + segment(0xda, scanHeader) + bytes(0x3f, 0xff, 0xd9)
     }
 
-    fun video(editList: ByteArray? = null, composition: ByteArray? = null, trackDuration: UInt = 80u, hevc: Boolean = false, co64: Boolean = false, aac: Boolean = false, audioConfig: ByteArray = bytes(0x11, 0x90), sampleDurations: Pair<UInt, UInt>? = null, audioGroups: ByteArray = byteArrayOf(), audioSampleCount: UInt = 1u): Video {
-        require(audioSampleCount in 1u..16u)
+    fun video(editList: ByteArray? = null, composition: ByteArray? = null, trackDuration: UInt = 80u, hevc: Boolean = false, co64: Boolean = false, aac: Boolean = false, audioConfig: ByteArray = bytes(0x11, 0x90), sampleDurations: Pair<UInt, UInt>? = null, audioGroups: ByteArray = byteArrayOf(), audioSampleCount: UInt = 1u,
+        audioEditList: ByteArray? = null, audioTrackDuration: UInt? = null, audioHeaderDuration: UInt? = null): Video {
+        require(audioSampleCount in 1u..256u)
         val samples = if (hevc) listOf(bytes(0, 0, 0, 2, 0x26, 1), bytes(0, 0, 0, 3, 2, 1, 0x22))
             else listOf(bytes(0, 0, 0, 2, 0x65, 0x88), bytes(0, 0, 0, 3, 0x41, 0x9a, 0x22))
         val configuration = if (hevc) {
@@ -80,12 +81,12 @@ internal object GoogleFixtures {
                 val audioStbl = box("stbl", audioStsd + audioStts + audioStsc + audioStsz + audioStco + audioGroups)
                 val audioMinf = box("minf", fullBox("smhd", ByteArray(4)) + box("dinf", dref) + audioStbl)
                 val audioMdhd = mdhd.copyOf()
-                put32(audioMdhd, 12, 48000u); put32(audioMdhd, 16, 1024u * audioSampleCount)
+                put32(audioMdhd, 12, 48000u); put32(audioMdhd, 16, audioHeaderDuration ?: (1024u * audioSampleCount))
                 val audioHdlr = fullBox("hdlr", u32(0u) + "soun".encodeToByteArray() + ByteArray(12) + "Audio\u0000".encodeToByteArray())
                 val audioTkhd = tkhd.copyOf()
-                put32(audioTkhd, 12, 2u); put32(audioTkhd, 20, 1024u * audioSampleCount / 48u)
+                put32(audioTkhd, 12, 2u); put32(audioTkhd, 20, audioTrackDuration ?: (1024u * audioSampleCount / 48u))
                 put16(audioTkhd, 36, 0x100); put32(audioTkhd, 76, 0u); put32(audioTkhd, 80, 0u)
-                box("trak", box("tkhd", audioTkhd) + box("mdia", box("mdhd", audioMdhd) + audioHdlr + audioMinf))
+                box("trak", box("tkhd", audioTkhd) + (audioEditList?.let { box("edts", it) } ?: byteArrayOf()) + box("mdia", box("mdhd", audioMdhd) + audioHdlr + audioMinf))
             }
             return box("moov", box("mvhd", mvhd) + videoTrack + audioTrack)
         }

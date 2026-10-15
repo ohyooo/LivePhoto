@@ -107,7 +107,7 @@ internal object AppleVideoReader {
                     if (marker.size > 1) fail("CONFLICTING_METADATA", "Metadata sample has duplicate still-image markers")
                     val value = marker.singleOrNull() ?: continue
                     if (value.payload.length != 1uL) fail("CORRUPTED_CONTAINER", "Still-image marker payload must be one signed byte")
-                    val time = Time(sample.presentationTime, track.timescale)
+                    val time = Time(sample.presentationTime, track.presentationTimescale)
                     val videoEnd = video.tracks.filter { it.handler == "vide" }.maxOf { it.presentationDuration }
                     if (time < Time.Zero || time >= track.presentationDuration || time >= videoEnd) fail("INVALID_PRESENTATION_TIMESTAMP", "Still-image sample lies outside the presented movie")
                     val raw = reader.readBuffer(value.payload.offset, 1u).orThrow()[0].toInt()

@@ -54,12 +54,12 @@ internal suspend fun planLosslessTrim(reader: BinaryReader, video: VideoStructur
         fail("LOSSLESS_TRIM_UNAVAILABLE", "Audio trim currently requires MP4 and at most two AAC-LC tracks; no track may be dropped", Stage.Plan)
     if (audio.isNotEmpty()) RemuxRollGroups.canonical(reader, video, "LOSSLESS_TRIM_UNAVAILABLE")
     for (entry in audio) {
-        if (entry.samples.any { it.decodeTime > Long.MAX_VALUE.toULong() || it.presentationTime != it.decodeTime.toLong() } ||
+        if (entry.presentationTimescale != entry.timescale || entry.samples.any { it.decodeTime > Long.MAX_VALUE.toULong() || it.presentationTime != it.decodeTime.toLong() } ||
             entry.edit?.let { it.emptyDuration != 0uL || it.mediaStart != 0L || Time(it.segmentDuration.toLong(), it.movieTimescale).compareTo(Time(entry.duration.toLong(), entry.timescale)) != 0 } == true ||
             validateEsds(entry.codecConfiguration, ParseBudget(reader.context)).esDescriptorFlags != 0)
             fail("LOSSLESS_TRIM_UNAVAILABLE", "AAC trim cannot discard existing priming edits or referenced descriptors", Stage.Plan)
     }
-    if (track.samples.any { it.decodeTime > Long.MAX_VALUE.toULong() || it.presentationTime != it.decodeTime.toLong() } ||
+    if (track.presentationTimescale != track.timescale || track.samples.any { it.decodeTime > Long.MAX_VALUE.toULong() || it.presentationTime != it.decodeTime.toLong() } ||
         track.edit?.let { it.emptyDuration != 0uL || it.mediaStart != 0L || Time(it.segmentDuration.toLong(), it.movieTimescale).compareTo(Time(track.duration.toLong(), track.timescale)) != 0 } == true)
         fail("LOSSLESS_TRIM_UNAVAILABLE", "Reordered frames and nontrivial edits need a different dependency/timeline proof", Stage.Plan)
     val sourceEnd = Time(track.duration.toLong(), track.timescale)

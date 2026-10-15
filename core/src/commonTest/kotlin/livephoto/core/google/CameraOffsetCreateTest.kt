@@ -2,6 +2,8 @@ package livephoto.core.google
 
 import livephoto.core.*
 import livephoto.core.bmff.cameraOffsetVideo
+import livephoto.core.bmff.fractionalAudioVideo
+import livephoto.core.bmff.nonMicrosecondVideo
 import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.memory.MemoryOutputTransaction
 import kotlin.test.*
@@ -10,12 +12,20 @@ class CameraOffsetCreateTest {
     @Test fun oplusCopyPackagingPreservesStartOffsetMovie(): Unit = runImmediate { roundTrip(ProtocolIds.Oplus, "jpeg-no-tail") }
     @Test fun googleV2CopyPackagingPreservesStartOffsetMovie(): Unit = runImmediate { roundTrip(ProtocolIds.GoogleV2, "jpeg") }
     @Test fun googleV1CopyPackagingPreservesStartOffsetMovie(): Unit = runImmediate { roundTrip(ProtocolIds.GoogleV1, "jpeg") }
+    @Test fun oplusCopyPackagingPreservesFractionalAudioEdit(): Unit = runImmediate { roundTrip(ProtocolIds.Oplus, "jpeg-no-tail", fractionalAudioVideo()) }
+    @Test fun googleV2CopyPackagingPreservesFractionalAudioEdit(): Unit = runImmediate { roundTrip(ProtocolIds.GoogleV2, "jpeg", fractionalAudioVideo()) }
+    @Test fun googleV1CopyPackagingPreservesFractionalAudioEdit(): Unit = runImmediate { roundTrip(ProtocolIds.GoogleV1, "jpeg", fractionalAudioVideo()) }
+    @Test fun defaultKeyWithFiniteProtocolPrecisionDoesNotRequireVideoEncoding(): Unit = runImmediate {
+        for ((protocol, profile) in listOf(ProtocolIds.Oplus to "jpeg-no-tail", ProtocolIds.GoogleV2 to "jpeg", ProtocolIds.GoogleV1 to "jpeg")) {
+            roundTrip(protocol, profile, nonMicrosecondVideo())
+        }
+    }
 
-    private suspend fun roundTrip(protocol: ProtocolId, profile: String) {
+    private suspend fun roundTrip(protocol: ProtocolId, profile: String, movie: ByteArray = cameraOffsetVideo()) {
         val context = Context(Limits(1_000_000u, 1_000_000u))
         val core = DefaultLivePhotoCore()
         val imageBytes = Bytes(GoogleFixtures.jpeg())
-        val videoBytes = Bytes(cameraOffsetVideo())
+        val videoBytes = Bytes(movie)
         val image = MemoryBinarySource(imageBytes, SourceId("camera-offset-image"))
         val video = MemoryBinarySource(videoBytes, SourceId("camera-offset-video"))
         var created: OperationResult? = null

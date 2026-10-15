@@ -68,7 +68,7 @@ internal object CreateTrimOperations {
         if (time < trim.start || time >= trim.end) when (outside) {
             KeyOutsidePolicy.Reject -> fail("KEY_PHOTO_OUTSIDE_TRIM", "Source key lies outside the actual retained source range", Stage.Plan)
             KeyOutsidePolicy.ClearIfSupported -> return KeyPhotoResult(source = KeySource.Unknown) // write unspecified -1; V2 may expose a separately labelled DerivedDefault display position
-            KeyOutsidePolicy.ClampExplicitly -> time = if (time < trim.start) trim.start else Time(trim.samples.last().presentationTime, trim.track.timescale)
+            KeyOutsidePolicy.ClampExplicitly -> time = if (time < trim.start) trim.start else Time(trim.samples.last().presentationTime, trim.track.presentationTimescale)
         }
         return KeyPhotoResult(Time(microseconds(time) - microseconds(trim.start), 1_000_000u), source = KeySource.ProtocolField)
     }

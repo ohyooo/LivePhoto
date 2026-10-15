@@ -211,7 +211,7 @@ internal object RemuxVerification {
             for ((a, b) in left.samples.zip(right.samples)) {
                 checkCancelled(input.context)
                 unchanged(Time(a.decodeTime.toLong(), left.timescale).compareTo(Time(b.decodeTime.toLong(), right.timescale)) == 0 &&
-                    Time(a.presentationTime, left.timescale).compareTo(Time(b.presentationTime, right.timescale)) == 0 &&
+                    Time(a.presentationTime, left.presentationTimescale).compareTo(Time(b.presentationTime, right.presentationTimescale)) == 0 &&
                     Time(a.duration.toLong(), left.timescale).compareTo(Time(b.duration.toLong(), right.timescale)) == 0, "sampleDtsPtsDuration")
                 unchanged(a.isSync == b.isSync && a.dependencyByte == b.dependencyByte, "sampleDependencies")
                 val hash = sha256Range(input, a.range).orThrow()

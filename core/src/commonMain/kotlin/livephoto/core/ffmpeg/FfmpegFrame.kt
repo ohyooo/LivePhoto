@@ -34,16 +34,9 @@ internal object FfmpegFrame {
         if (track.samples.map { it.presentationTime }.distinct().size != track.samples.size)
             fail("CAPABILITY_UNSUPPORTED", "Duplicate frame PTS requires a decoder ordinal proof not implemented by this backend", Stage.Plan)
         val edit = track.edit
-        val emptyTicks = if (edit == null) 0uL else {
-            val product = checkedMultiply(edit.emptyDuration, track.timescale.toULong())
-            if (product % edit.movieTimescale.toULong() != 0uL) fail("VALUE_NOT_REPRESENTABLE", "Empty edit cannot be expressed in media ticks", Stage.Plan)
-            product / edit.movieTimescale.toULong()
-        }
-        if (emptyTicks > Long.MAX_VALUE.toULong() || selected.sample.presentationTime < emptyTicks.toLong())
+        if (selected.time < (edit?.let { Time(it.emptyDuration.toLong(), it.movieTimescale) } ?: Time.Zero))
             fail("CAPABILITY_UNSUPPORTED", "Frame is outside the visible nonempty edit", Stage.Plan)
-        val shifted = selected.sample.presentationTime - emptyTicks.toLong()
-        if (shifted > Long.MAX_VALUE - (edit?.mediaStart ?: 0L)) fail("INTEGER_OVERFLOW", "Frame media PTS exceeds signed time domain", Stage.Plan)
-        val mediaPts = shifted + (edit?.mediaStart ?: 0L)
+        val mediaPts = PresentationClock.create(track.timescale, edit).mediaTime(selected.sample.presentationTime)
         // FFmpeg filter expressions use doubles: integers up to 2^53 are exactly representable.
         if (mediaPts > 9_007_199_254_740_992L || track.timescale > Int.MAX_VALUE.toUInt())
             fail("VALUE_NOT_REPRESENTABLE", "Frame PTS cannot be selected exactly by this filter profile", Stage.Plan)

@@ -40,6 +40,11 @@ class AndroidIntegrationTest {
     @Test fun cameraStartOffsetRoundTripsWithoutRewritingMovieHeaders() = runBlocking {
         roundTrip(ProtocolIds.Oplus, "jpeg-no-tail", cameraOffsetVideo(), ByteArray(435) { ((it * 37 + 11) and 255).toByte() })
     }
+    @Test fun fractionalAudioEditRoundTripsWithoutRoundingOrEncoding() = runBlocking {
+        for ((protocol, profile) in listOf(ProtocolIds.Oplus to "jpeg-no-tail", ProtocolIds.GoogleV2 to "jpeg", ProtocolIds.GoogleV1 to "jpeg")) {
+            roundTrip(protocol, profile, fractionalAudioVideo())
+        }
+    }
 
     private suspend fun roundTrip(protocol: ProtocolId, profile: String, videoBytes: ByteArray = fixture("video.mp4"), suffix: ByteArray = byteArrayOf()) {
         val imageBytes = fixture("video.jpg") + suffix

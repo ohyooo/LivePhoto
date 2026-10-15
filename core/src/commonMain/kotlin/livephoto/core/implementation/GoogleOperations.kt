@@ -43,7 +43,7 @@ internal object GoogleOperations {
         diagnostic.at("prepare-image-metadata", "image", imageId)
         val huaweiPlan = if (huawei) HuaweiJpegWriter.createPlan(image, video, videoIdentity.size, request.sourceBindings == SourceBindingPolicy.StripSourceBindings, request.edits?.keyPosition, budget).orThrow() else null
         diagnostic.at("plan-target", "request")
-        val key = if (huawei) KeyPhotoResult() else if (request.edits?.keyPosition == null && sourceKey != null) sourceKey else selectKey(video, request.edits?.keyPosition)
+        val key = if (huawei) KeyPhotoResult() else if (request.edits?.keyPosition == null && sourceKey != null) sourceKey else selectKey(video, request.edits?.keyPosition, 1_000_000u)
         key.position?.let { position ->
             val duration = video.tracks.filter { it.handler == "vide" }.maxOfOrNull { it.presentationDuration }
                 ?: fail("FRAME_INDEX_UNAVAILABLE", "Target video has no presentation timeline")
@@ -247,7 +247,7 @@ internal object GoogleOperations {
             if (request.preference.imageFormat != null && request.preference.imageFormat != ImageFormat.Jpeg || request.preference.videoContainer != null && request.preference.videoContainer != video.container ||
                 request.preference.videoCodec != null && video.tracks.filter { it.handler == "vide" }.any { it.codec != request.preference.videoCodec } ||
                 request.preference.audioCodec != null && video.tracks.filter { it.handler == "soun" }.any { it.audioCodec != request.preference.audioCodec } || request.preference.dynamicRange != DynamicRangePolicy.Preserve) fail("CAPABILITY_UNSUPPORTED", "Plan requires an unimplemented media transformation")
-            val key = if (request.target.protocol == ProtocolIds.Huawei) KeyPhotoResult() else selectKey(video, request.edits?.keyPosition)
+            val key = if (request.target.protocol == ProtocolIds.Huawei) KeyPhotoResult() else selectKey(video, request.edits?.keyPosition, 1_000_000u)
             if (request.target.protocol == ProtocolIds.Huawei) {
                 if (!basicMediaEnvelope(videoReader, ByteRange(0uL, identity.size), budget)) fail("UNKNOWN_PROTOCOL_VARIANT", "Huawei plan cannot bind unknown media extensions", Stage.Plan)
                 if (request.target.profile != null && request.target.profile != ProfileId("basic60")) fail("UNSUPPORTED_PROTOCOL", "Huawei plan only implements basic60")
@@ -334,12 +334,27 @@ internal fun checkResourceAliases(session: SourceSession, selected: List<Resourc
             "length" to Value.Number(aliases.first().extents.first().range.length.toString()))))
 }
 
-internal fun selectKey(video: VideoStructure, requested: CoverPosition?): KeyPhotoResult {
+internal fun selectKey(video: VideoStructure, requested: CoverPosition?, protocolTimescale: UInt? = null): KeyPhotoResult {
     if (requested != null) return KeyPhotoResult(selectFrame(video, requested).time, source = KeySource.ProtocolField)
     val track = video.tracks.filter { it.handler == "vide" }.singleOrNull() ?: fail("FRAME_INDEX_UNAVAILABLE", "No unique presentation video track")
     val first = selectFrame(video, CoverPosition.FrameIndex(0uL))
     val middle = Time(track.presentationDuration.value / 2, track.presentationDuration.timescale)
-    val position = if (middle < first.time) first.time else selectFrame(video, CoverPosition.Timestamp(middle, Selection.AtOrBefore, track.presentationDuration)).time
+    var position = if (middle < first.time) first.time else selectFrame(video, CoverPosition.Timestamp(middle, Selection.AtOrBefore, track.presentationDuration)).time
+    if (protocolTimescale != null) {
+        fun representable(time: Time): Boolean =
+            (time.value % time.timescale.toLong()).toULong() * protocolTimescale.toULong() % time.timescale.toULong() == 0uL
+        if (!representable(position)) {
+            // A default is a derived choice, not a request to round a particular
+            // frame. Choose a real visible frame the target can express exactly.
+            // Explicit positions and inherited metadata never use this fallback.
+            val visibleStart = track.edit?.let { Time(it.emptyDuration.toLong(), it.movieTimescale) } ?: Time.Zero
+            val candidates = track.samples.asSequence().filter { it.presentationTime >= 0 }
+                .map { Time(it.presentationTime, track.presentationTimescale) }
+                .filter { it >= visibleStart && it < track.presentationDuration && representable(it) }.toList()
+            position = candidates.filter { it <= middle }.maxOrNull() ?: candidates.minOrNull()
+                ?: fail("VALUE_NOT_REPRESENTABLE", "No visible frame can be expressed exactly in the target timestamp clock", Stage.Plan)
+        }
+    }
     return KeyPhotoResult(position, source = KeySource.DerivedDefault)
 }
 

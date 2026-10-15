@@ -17,6 +17,8 @@ internal data class VideoTrack(
     val metadataKeys: Map<UInt, TimedMetadataKey> = emptyMap(),
     // Keep the encoded mdhd declaration separate from the verified decode-delta sum.
     val headerDuration: ULong = duration,
+    // Only sample.presentationTime uses this clock. DTS/duration keep timescale.
+    val presentationTimescale: UInt = timescale,
 )
 internal data class VideoStructure(val container: VideoContainer, val range: ByteRange, val tracks: List<VideoTrack>, val movieTimescale: UInt, val movieDuration: ULong, val decoderValidated: Boolean = false)
 
@@ -92,7 +94,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             if (u32(mediaHeader, 0) != 1u) unsupported("Video media header version/flags are not implemented")
         } else { fullVersion(mediaHeader, setOf(0)); exact(mediaHeader, if (metadata) 16uL else 8uL) }
         val edit = optional(children, "edts")?.let { parseEdit(it, movieScale, metadata) }
-        val emptyTicks = if (edit == null) 0uL else convertTicks(edit.emptyDuration, movieScale, timescale)
+        val presentationClock = PresentationClock.create(timescale, edit)
         val presentationDuration = if (edit == null) Time(duration.toLong(), timescale) else {
             val ticks = checkedAdd(edit.emptyDuration, edit.segmentDuration)
             if (ticks > Long.MAX_VALUE.toULong()) fail("INTEGER_OVERFLOW", "Edit duration exceeds the exact signed timeline domain")
@@ -221,11 +223,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
                 val base = dts.toLong()
                 if (offset > 0 && base > Long.MAX_VALUE - offset) fail("INTEGER_OVERFLOW", "Presentation time overflows")
                 val mediaPts = base + offset
-                val mediaStart = edit?.mediaStart ?: 0L
-                if (mediaPts < Long.MIN_VALUE + mediaStart) fail("INTEGER_OVERFLOW", "Edited presentation time underflows")
-                val shifted = mediaPts - mediaStart
-                if (emptyTicks > Long.MAX_VALUE.toULong() || shifted > Long.MAX_VALUE - emptyTicks.toLong()) fail("INTEGER_OVERFLOW", "Edited presentation time overflows")
-                val pts = shifted + emptyTicks.toLong()
+                val pts = presentationClock.map(mediaPts)
                 val sampleRange = ByteRange(cursor, size)
                 if (codec != null) validateNalSample(sampleRange, nalWidth, codec)
                 val delta = durations[sampleIndex].toUInt()
@@ -257,7 +255,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             if (handler == "soun") u16(entryBytes, 16).toUInt() else null,
             if (handler == "soun") u32(entryBytes, 24) else null,
             if (handler == "soun") u16(entryBytes, 18).toUInt() else null,
-            aacConfiguration?.actualSampleRate, aacConfiguration?.channelCount, metadataKeys, duration)
+            aacConfiguration?.actualSampleRate, aacConfiguration?.channelCount, metadataKeys, duration, presentationClock.timescale)
     }
 
     private fun cameraStartOffsetDuration(handler: String, edit: VideoEdit?, composition: Boolean,
@@ -268,7 +266,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         // This is not a general duration tolerance: require the explicit leading
         // empty edit, zero media start, no composition offsets, and agreement of
         // all three independently rounded timeline fields within one movie tick.
-        if (handler != "vide" || composition || edit == null || edit.emptyDuration == 0uL || edit.mediaStart != 0L || declared <= decoded) return false
+        if (handler !in setOf("vide", "soun") || composition || edit == null || edit.emptyDuration == 0uL || edit.mediaStart != 0L || declared <= decoded) return false
         fun agrees(mediaTicks: ULong, movieTicks: ULong): Boolean {
             val left = checkedMultiply(mediaTicks, edit.movieTimescale.toULong())
             val right = checkedMultiply(movieTicks, scale.toULong())
@@ -326,15 +324,6 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             else unsupported("Multiple/negative media edit mapping is not implemented")
         }
         return VideoEdit(movieScale, empty, segmentDuration, mediaStart)
-    }
-
-    private fun convertTicks(value: ULong, from: UInt, to: UInt): ULong {
-        // Cancel scale factors first so an otherwise representable exact conversion does not overflow.
-        var a = from.toULong(); var b = to.toULong()
-        while (b != 0uL) { val remainder = a % b; a = b; b = remainder }
-        val divisor = from.toULong() / a
-        if (value % divisor != 0uL) unsupported("Fractional edit mapping is not implemented")
-        return checkedMultiply(value / divisor, to.toULong() / a)
     }
 
     private suspend fun validateNalSample(range: ByteRange, width: Int, codec: VideoCodec) {

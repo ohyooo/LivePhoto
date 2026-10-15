@@ -20,7 +20,7 @@ internal object HuaweiJpegWriter {
         var count = 0uL
         for (sample in track.samples) {
             budget.poll()
-            if (sample.presentationTime >= 0 && Time(sample.presentationTime, track.timescale) < track.presentationDuration) count++
+            if (sample.presentationTime >= 0 && Time(sample.presentationTime, track.presentationTimescale) < track.presentationDuration) count++
         }
         if (count == 0uL) fail("FRAME_INDEX_UNAVAILABLE", "Huawei video has no presented samples")
         val tail = HuaweiTail.create(videoLength, "v6_f0", "0:$count", budget).orThrow()

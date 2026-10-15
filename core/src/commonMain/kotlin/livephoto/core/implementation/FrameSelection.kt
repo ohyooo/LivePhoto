@@ -6,7 +6,7 @@ import livephoto.core.bmff.*
 
 /** Exact source-domain selection. Equal PTS is ordered by DTS, then original sample ordinal. */
 internal data class SelectedFrame(val track: VideoTrack, val sample: VideoSample, val sampleOrdinal: Int, val index: ULong) {
-    val time: Time get() = Time(sample.presentationTime, track.timescale)
+    val time: Time get() = Time(sample.presentationTime, track.presentationTimescale)
 }
 
 internal fun selectFrame(video: VideoStructure, position: CoverPosition): SelectedFrame {
@@ -14,7 +14,7 @@ internal fun selectFrame(video: VideoStructure, position: CoverPosition): Select
     val track = video.tracks.filter { it.handler == "vide" && (requestedTrack == null || TrackId(it.trackId.toString()) == requestedTrack) }.singleOrNull()
         ?: fail("FRAME_INDEX_UNAVAILABLE", "Select one unambiguous presentation video track", Stage.Plan)
     val visibleStart = track.edit?.let { Time(it.emptyDuration.toLong(), it.movieTimescale) } ?: Time.Zero
-    val presented = track.samples.withIndex().filter { it.value.presentationTime >= 0 && Time(it.value.presentationTime, track.timescale) >= visibleStart && Time(it.value.presentationTime, track.timescale) < track.presentationDuration }
+    val presented = track.samples.withIndex().filter { it.value.presentationTime >= 0 && Time(it.value.presentationTime, track.presentationTimescale) >= visibleStart && Time(it.value.presentationTime, track.presentationTimescale) < track.presentationDuration }
         .sortedWith(compareBy<IndexedValue<VideoSample>> { it.value.presentationTime }.thenBy { it.value.decodeTime }.thenBy { it.index })
     if (presented.isEmpty()) fail("FRAME_INDEX_UNAVAILABLE", "Video has no presented samples", Stage.Plan)
     val index = when (position) {
@@ -25,18 +25,18 @@ internal fun selectFrame(video: VideoStructure, position: CoverPosition): Select
         is CoverPosition.Timestamp -> {
             if (position.time < Time.Zero || position.time >= track.presentationDuration) fail("INVALID_PRESENTATION_TIMESTAMP", "Position is outside the presentation domain", Stage.Plan)
             val chosen = when (position.selection) {
-                Selection.Exact -> presented.indexOfFirst { Time(it.value.presentationTime, track.timescale).compareTo(position.time) == 0 }
+                Selection.Exact -> presented.indexOfFirst { Time(it.value.presentationTime, track.presentationTimescale).compareTo(position.time) == 0 }
                 Selection.AtOrBefore -> {
-                    val last = presented.indexOfLast { Time(it.value.presentationTime, track.timescale) <= position.time }
+                    val last = presented.indexOfLast { Time(it.value.presentationTime, track.presentationTimescale) <= position.time }
                     if (last < 0) -1 else presented.indexOfFirst { it.value.presentationTime == presented[last].value.presentationTime }
                 }
                 Selection.Nearest -> presented.indices.minWithOrNull { left, right ->
-                    distance(Time(presented[left].value.presentationTime, track.timescale), position.time)
-                        .compareTo(distance(Time(presented[right].value.presentationTime, track.timescale), position.time))
+                    distance(Time(presented[left].value.presentationTime, track.presentationTimescale), position.time)
+                        .compareTo(distance(Time(presented[right].value.presentationTime, track.presentationTimescale), position.time))
                 } ?: -1
             }
             if (chosen < 0) fail("INVALID_PRESENTATION_TIMESTAMP", "No presentation frame satisfies selection", Stage.Plan)
-            if (distance(Time(presented[chosen].value.presentationTime, track.timescale), position.time) > distance(position.tolerance, Time.Zero))
+            if (distance(Time(presented[chosen].value.presentationTime, track.presentationTimescale), position.time) > distance(position.tolerance, Time.Zero))
                 fail("INVALID_PRESENTATION_TIMESTAMP", "Selected frame exceeds the explicit tolerance", Stage.Plan)
             chosen
         }

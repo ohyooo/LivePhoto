@@ -22,7 +22,7 @@ internal object RemuxEnvelopeRestoration {
             if (video.container != VideoContainer.Mp4 || video.tracks.size != 1)
                 fail("CAPABILITY_UNSUPPORTED", "Restoration requires one AVC track in MP4", Stage.Plan)
             val track = video.tracks.single()
-            if (track.handler != "vide" || track.codec != VideoCodec.Avc || track.sampleEntry != "avc1" ||
+            if (track.handler != "vide" || track.codec != VideoCodec.Avc || track.sampleEntry != "avc1" || track.presentationTimescale != track.timescale ||
                 track.samples.size !in 1..64 || track.samples.any { it.presentationTime < 0 || it.decodeTime != it.presentationTime.toULong() })
                 fail("CAPABILITY_UNSUPPORTED", "Restoration does not support reordered or non-AVC packets", Stage.Plan)
             return track
@@ -41,7 +41,7 @@ internal object RemuxEnvelopeRestoration {
             checkCancelled(context)
             unchanged(a.range.length == b.range.length && sha256Range(source, a.range).orThrow() == sha256Range(packets, b.range).orThrow())
             unchanged(Time(a.decodeTime.toLong(), left.timescale).compareTo(Time(b.decodeTime.toLong(), right.timescale)) == 0 &&
-                Time(a.presentationTime, left.timescale).compareTo(Time(b.presentationTime, right.timescale)) == 0 &&
+                Time(a.presentationTime, left.presentationTimescale).compareTo(Time(b.presentationTime, right.presentationTimescale)) == 0 &&
                 Time(a.duration.toLong(), left.timescale).compareTo(Time(b.duration.toLong(), right.timescale)) == 0)
             unchanged(a.isSync == b.isSync && a.dependencyByte == b.dependencyByte)
         }

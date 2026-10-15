@@ -10,7 +10,7 @@ internal fun transcodeProfile(video: VideoStructure, encoding: VideoEncoding, al
         ?: fail("CAPABILITY_UNSUPPORTED", "Transcode requires exactly one video track", Stage.Plan)
     val audio = video.tracks.filter { it.handler == "soun" }
     if ((!allowCopiedAudio && audio.isNotEmpty()) || audio.size > 2 ||
-        video.tracks.any { it.handler !in setOf("vide", "soun") || it.edit != null || it.trackId > Int.MAX_VALUE.toUInt() || it.timescale > Int.MAX_VALUE.toUInt() } ||
+        video.tracks.any { it.handler !in setOf("vide", "soun") || it.edit != null || it.presentationTimescale != it.timescale || it.trackId > Int.MAX_VALUE.toUInt() || it.timescale > Int.MAX_VALUE.toUInt() } ||
         audio.any { it.audioCodec != AudioCodec.Aac || it.sampleEntry != "mp4a" })
         fail("CAPABILITY_UNSUPPORTED", "This profile refuses extra tracks/edits; only explicit transcode can preserve at most two unchanged AAC-LC tracks", Stage.Plan)
     if (encoding.codec != VideoCodec.Avc || encoding.container != VideoContainer.Mp4 || encoding.bitrate != null ||
