@@ -1,13 +1,13 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$source = Join-Path (Get-Location) 'core/src/commonTest/resources/protocol-compatibility/v1'
-$destination = Join-Path (Get-Location) 'core/build/protocol-fixtures/v1'
+$source = Join-Path (Get-Location) 'shared/src/commonTest/resources/protocol-compatibility/v1'
+$destination = Join-Path (Get-Location) 'shared/build/protocol-fixtures/v1'
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
-New-Item -ItemType Directory -Path 'core/build/reports/protocol-compatibility' -Force | Out-Null
-New-Item -ItemType Directory -Path 'core/build/portable-heic-fixtures','core/build/reports/huawei-heic-fixtures' -Force | Out-Null
-New-Item -ItemType Directory -Path 'core/build/portable-apple-heif-fixtures','core/build/portable-apple-ordinary-exif-fixtures',
-    'core/build/reports/samsung-remux-fixtures','core/build/reports/vivo-remux-fixtures','core/build/reports/huawei-remux-fixtures',
-    'core/build/encoded-media-fixtures' -Force | Out-Null
+New-Item -ItemType Directory -Path 'shared/build/reports/protocol-compatibility' -Force | Out-Null
+New-Item -ItemType Directory -Path 'shared/build/portable-heic-fixtures','shared/build/reports/huawei-heic-fixtures' -Force | Out-Null
+New-Item -ItemType Directory -Path 'shared/build/portable-apple-heif-fixtures','shared/build/portable-apple-ordinary-exif-fixtures',
+    'shared/build/reports/samsung-remux-fixtures','shared/build/reports/vivo-remux-fixtures','shared/build/reports/huawei-remux-fixtures',
+    'shared/build/encoded-media-fixtures' -Force | Out-Null
 foreach ($file in Get-ChildItem -LiteralPath $source -File) {
     $name = $file.Name
     $bytes = $null
@@ -49,13 +49,13 @@ $encoded = @{
     'ordinary-mdta-mp4' = @('apple-media/ordinary-mdta.mp4.base64', '0d32b1e5e477152a1b31e4e57ccd3ffc0bc1be725d0dc4a1f339b6b3d2956e2c')
 }
 foreach ($name in $encoded.Keys) {
-    $resource = Join-Path 'core/src/commonTest/resources' $encoded[$name][0]
+    $resource = Join-Path 'shared/src/commonTest/resources' $encoded[$name][0]
     $text = [IO.File]::ReadAllText($resource, [Text.Encoding]::ASCII).Trim()
     if ($text.Length -gt 40000) { throw 'Encoded fixture exceeds bound.' }
     $bytes = [Convert]::FromBase64String($text)
     $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
     if ($hash -ne $encoded[$name][1]) { throw 'Encoded fixture differs from fixed digest.' }
-    $path = Join-Path 'core/build/encoded-media-fixtures' "$name.bin"
+    $path = Join-Path 'shared/build/encoded-media-fixtures' "$name.bin"
     if (Test-Path -LiteralPath $path) {
         if ((Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant() -ne $hash) { throw 'Existing encoded fixture differs; no overwrite allowed.' }
     } else { [IO.File]::WriteAllBytes($path, $bytes) }

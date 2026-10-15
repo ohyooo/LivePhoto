@@ -31,11 +31,11 @@ function Test-Reports([string]$Directory, [int]$Expected) {
 }
 $hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 18
 $releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 18
-$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 20
+$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 21
 $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
 if ($compile -notmatch 'BUILD SUCCESSFUL' -or $device -notmatch 'BUILD SUCCESSFUL' -or
-    $compile -notmatch 'Android projects: \[:, :android, :core\]' -or $compile -notmatch 'android:androidJvm' -or
+    $compile -notmatch 'Android projects: \[:, :android, :shared, :ui\]' -or $compile -notmatch 'android:androidJvm' -or
     $compile -notmatch ':android:testDebugUnitTest(?:\s|$)' -or
     $compile -match ':android:testDebugUnitTest (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)' -or
     $compile -notmatch ':android:testReleaseUnitTest(?:\s|$)' -or

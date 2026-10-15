@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$directory = Join-Path (Get-Location) 'file-io/build/io-link-fixtures'
+$directory = Join-Path (Get-Location) 'shared/build/io-link-fixtures'
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $target = Join-Path $directory 'target.bin'
 $link = Join-Path $directory 'link.bin'

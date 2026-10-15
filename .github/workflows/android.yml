@@ -30,6 +30,11 @@ jobs:
             throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
           }
           if (-not $env:ANDROID_HOME -or -not (Test-Path -LiteralPath $env:ANDROID_HOME)) { throw 'Existing Android SDK required.' }
+          Get-ChildItem ui/src/commonMain -Recurse -File -Filter '*.kt' | ForEach-Object {
+            if (Select-String -LiteralPath $_.FullName -Pattern '^\s*import\s+(android|java|javax)\.' -Quiet) {
+              throw 'Shared Compose UI must not import platform APIs.'
+            }
+          }
           "sdk=$env:ANDROID_HOME" | Add-Content $env:GITHUB_OUTPUT
           New-Item -ItemType Directory -Path ci-output -Force | Out-Null
 

@@ -68,7 +68,7 @@ Android 的 OPPO/OnePlus 生成支持两种精确相机注释替换：UNDEFINED 
 
 请在系统相册检查动态识别、播放、声音与 key；**保存成功、模拟器通过都不等于你的手机相册兼容**。Android 当前没有 FFmpeg、抽帧、裁剪、remux 或 transcode 后端。保存只支持本节的单 JPEG，不宣称实现通用配对/多资产相册事务。
 
-应用直接依赖 `implementation(project(":core"))`，Gradle 自动编译同一份 `commonMain` 并打入 APK；不需要手动打包、发布或导入 AAR，也不把 Core 编译为 `.so`。Compose 依赖可携带官方 AndroidX 图形库，不是 Core JNI。Android 使用常规 Kotlin/ART 字节码；桌面仍为不含 JVM 的 Native 程序。
+应用直接依赖 `shared` 和 `ui`，Gradle 编译公共 Core 与共享 Compose 界面并打入 APK；不需要手动打包、发布或导入 AAR，也不把 Core 编译为 `.so`。文件选择、权限和相册保存由 Android 适配层提供。Android 使用常规 Kotlin/ART 字节码；桌面仍为不含 JVM 的 Native CLI。
 
 从源码构建（已有 JDK 25、Android SDK **37.2** / Build Tools **37.0.0**，并先检查不存在 `gradle-daemon-jvm.properties`）：
 
@@ -455,7 +455,7 @@ $env:JAVA_HOME = 'C:\path\to\jdk-25'
 if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
     throw '请先处理 gradle-daemon-jvm.properties，再运行 Gradle。'
 }
-.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :verifyNativeOnlyBuild :cli-native:linkReleaseExecutableMingwX64 --console=plain --warning-mode=all
+.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :verifyNativeOnlyBuild :cli:linkReleaseExecutableMingwX64 --console=plain --warning-mode=all
 ```
 
 Linux x64，Bash/Zsh：
@@ -464,7 +464,7 @@ Linux x64，Bash/Zsh：
 export JAVA_HOME='/path/to/jdk-25'
 find . -name gradle-daemon-jvm.properties -print
 # 上述检查必须没有结果，再执行：
-./gradlew -Plivephoto.nativeTarget=linux-x64 :verifyNativeOnlyBuild :cli-native:linkReleaseExecutableLinuxX64 --console=plain --warning-mode=all
+./gradlew -Plivephoto.nativeTarget=linux-x64 :verifyNativeOnlyBuild :cli:linkReleaseExecutableLinuxX64 --console=plain --warning-mode=all
 ```
 
 macOS ARM64，Bash/Zsh：
@@ -473,10 +473,10 @@ macOS ARM64，Bash/Zsh：
 export JAVA_HOME='/path/to/jdk-25'
 find . -name gradle-daemon-jvm.properties -print
 # 上述检查必须没有结果，再执行：
-./gradlew -Plivephoto.nativeTarget=macos-arm64 :verifyNativeOnlyBuild :cli-native:linkReleaseExecutableMacosArm64 --console=plain --warning-mode=all
+./gradlew -Plivephoto.nativeTarget=macos-arm64 :verifyNativeOnlyBuild :cli:linkReleaseExecutableMacosArm64 --console=plain --warning-mode=all
 ```
 
-产物位于 `cli-native/build/bin/<target>/releaseExecutable/`：
+产物位于 `cli/build/bin/<target>/releaseExecutable/`：
 
 | 宿主 | target | 程序 |
 | --- | --- | --- |
@@ -500,22 +500,22 @@ find . -name gradle-daemon-jvm.properties -print
 Windows 示例（已准备上述前提）：
 
 ```powershell
-.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :verifyNativeOnlyBuild :core:mingwX64Test --rerun :cli-shared:mingwX64Test --rerun :file-io:mingwX64Test --rerun :cli-native:mingwX64Test --rerun :process:mingwX64Test --rerun --console=plain --warning-mode=all
+.\gradlew.bat -Plivephoto.nativeTarget=windows-x64 :verifyNativeOnlyBuild :shared:mingwX64Test --rerun :cli:mingwX64Test --rerun --console=plain --warning-mode=all
 ```
 
 Linux 将 Wrapper 改为 `./gradlew`、平台改为 `linux-x64`、任务 target 改为 `linuxX64`；macOS 分别使用 `macos-arm64` 与 `macosArm64`。HTML/XML 报告在各模块的 `build/reports/tests/<target>Test/`、`build/test-results/<target>Test/`。
 
-协议兼容素材位于 `core/src/commonTest/resources/`，包含 19 个固定资产的 SHA-256 清单。20 项固定素材回归与协议、保留、恶意输入、真实媒体测试由三平台运行相同断言。原有素材字节保留；测试展开素材不改变产品依赖，也不代替手机相册认证。
+协议兼容素材位于 `shared/src/commonTest/resources/`，包含 19 个固定资产的 SHA-256 清单。20 项固定素材回归与协议、保留、恶意输入、真实媒体测试由三平台运行相同断言。原有素材字节保留；测试展开素材不改变产品依赖，也不代替手机相册认证。
 
 ### 库、IO 与打包边界
 
-- Core 主库使用 stdlib，实现协议、模型、验证及保留策略；不依赖路径、FFmpeg 或平台媒体 API。
-- `cli-shared` 负责参数 → Request → Core → JSON/日志；平台行为由接口注入，不使用 Java 反射。
-- `file-io` 使用 Okio 提供本地文件适配，冻结输入、预算与内容证明；输出只接受新目录，整组资产原子发布。不支持网络共享、恶意同账户并发修改或断电持久性保证。
-- `process` 使用原生宿主进程 API和协程处理管道、取消、超时及资源释放；Windows 的 Win32 绑定用于文件/进程，不是系统媒体后端。
+- `shared/commonMain` 的协议实现只使用 stdlib，不依赖路径、FFmpeg 或平台媒体 API；合并后的 Native KLIB 另包含依赖 Okio、协程及系统 SDK 绑定的平台适配。
+- `cli` 负责参数 → Request → Core → JSON/日志；平台行为由接口注入，不使用 Java 反射。
+- `shared` 的 Native 文件适配使用 Okio，冻结输入、预算与内容证明；输出只接受新目录，整组资产原子发布。不支持网络共享、恶意同账户并发修改或断电持久性保证。
+- `shared` 的进程适配使用原生宿主 API 和协程处理管道、取消、超时及资源释放；Windows 的 Win32 绑定用于文件/进程，不是系统媒体后端。
 - Native FFmpeg 复用共用媒体策略，结果独立回读；音频始终 copy，不扩大 profile，不降低 metadata/时间线门禁。
 - `scripts/package-native-cli.ps1` 消费真实测试导出的素材，在对应宿主打包、解压并执行 CLI 检查。它是验收流程的一部分，不能只构建程序就跳过前提。
-- KLIB 主库位于各模块 `build/classes/kotlin/<target>/main/`；CI 打包供 Kotlin/Native 调用，不是 C ABI、DLL、iOS framework 或可执行程序。
+- `shared` KLIB 位于 `shared/build/classes/kotlin/<target>/main/`；CI 打包供 Kotlin/Native 调用，不是 C ABI、DLL、iOS framework 或可执行程序。
 
 ## CI 与产物
 
@@ -524,8 +524,8 @@ Linux 将 Wrapper 改为 `./gradlew`、平台改为 `linux-x64`、任务 target 
 每个平台上传三类 artifacts，默认保留 **14 天**：
 
 - `LivePhoto-<平台>-...`：原生程序归档及哈希证据；打包成功后上传，下载运行选这个。
-- `LivePhoto-native-core-...`：Core / 文件 / 进程 KLIB、系统 SDK 绑定与库证据；供库开发使用，不是可执行程序。
-- `native-core-reports-...`：五个模块的测试报告、XML、Gradle 与成品日志及证据；失败时也尝试上传已有报告。
+- `LivePhoto-native-core-...`：合并后的 `shared.klib`、系统 SDK 绑定与库证据；供库开发使用，不是可执行程序。
+- `native-core-reports-...`：`shared`、`cli` 的测试报告、XML、Gradle 与成品日志及证据；失败时也尝试上传已有报告。
 
 Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压后程序的 27 项 CLI 检查（其中 9 项真实媒体、7 项合成 HEIC），不能因没有工具而跳过。CI 安装 FFmpeg 仅用于验证，不会打入应用或由应用自动安装。
 
@@ -583,11 +583,12 @@ macOS 在解压目录使用实际入口（终端 CLI，无需应用 bundle）：
 
 ## 项目结构与参考
 
-- `core/src/commonMain/`：公共模型、协议解析/写入、保留及原子操作逻辑。
-- `core/src/commonTest/`、`core/src/nativeTest/`：共用协议/素材回归与真实 Native 测试。
-- `cli-shared/`、`cli-native/`：薄 CLI 和原生入口。
-- `android/`：直接调用共用 Core 的 Android 应用和 Compose 测试界面；Core 无 JNI。
-- `file-io/`、`process/`：文件/事务、原生进程及 FFmpeg 适配。
+- `shared/src/commonMain/`：公共模型、协议解析/写入、保留及原子操作逻辑。
+- `shared/src/commonTest/`、`shared/src/nativeTest/`：共用协议/素材回归与真实 Native 测试。
+- `shared/src/nativeMain/` 与各宿主 source set：文件/事务、原生进程及 FFmpeg 适配；不引入 Android 构建。
+- `cli/`：薄 CLI 和原生入口。
+- `ui/src/commonMain/`：平台无关的 Compose 界面、选择状态和结果展示；按窗口尺寸布局，不依赖 Android Uri 或 Activity。
+- `android/`：Activity 与文件选择/元信息/相册保存适配，启动共享 UI；Core 无 JNI。
 - `scripts/`：测试素材准备、Native 打包与证据检查。
 - `reference/`：三个测试媒体，供协议与往返测试使用。
 - `upstream/`：只读参考，不是项目依赖，不包含在发行包中；不复制其业务架构。

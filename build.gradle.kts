@@ -14,14 +14,14 @@ gradle.projectsEvaluated {
         group = "verification"
         description = "Reject JVM modules and targets in a Native-only build."
         doLast {
-            check(projectPaths == listOf(":", ":cli-native", ":cli-shared", ":core", ":file-io", ":process")) {
+            check(projectPaths == listOf(":", ":cli", ":shared")) {
                 "Unexpected module graph: $projectPaths"
             }
             check(platformTargets.none { it.endsWith(":jvm") || it.endsWith(":androidJvm") }) {
                 "JVM targets remain: $platformTargets"
             }
-            check(platformTargets.count { it.endsWith(":native") } == 5) {
-                "Expected five host Native targets: $platformTargets"
+            check(platformTargets.count { it.endsWith(":native") } == 2) {
+                "Expected two host Native targets: $platformTargets"
             }
             println("Native-only projects: $projectPaths")
             println("Native-only targets: $platformTargets")

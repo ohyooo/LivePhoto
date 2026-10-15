@@ -48,7 +48,8 @@ androidComponents {
 }
 
 dependencies {
-    implementation(project(":core"))
+    implementation(project(":shared"))
+    implementation(project(":ui"))
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.android.activity.compose)
     implementation(platform(libs.compose.bom))

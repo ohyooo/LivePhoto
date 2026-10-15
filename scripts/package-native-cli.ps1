@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $repository = (Get-Location).Path
 $tests = 0
-$reports = @(Get-ChildItem "cli-native/build/test-results/${Target}Test" -File -Filter 'TEST-*.xml')
+$reports = @(Get-ChildItem "cli/build/test-results/${Target}Test" -File -Filter 'TEST-*.xml')
 if ($reports.Count -eq 0) { throw 'Missing Native CLI test reports.' }
 foreach ($report in $reports) {
     [xml]$xml = Get-Content $report.FullName -Raw
@@ -17,17 +17,17 @@ foreach ($report in $reports) {
 }
 $expected = 0
 foreach ($source in @('commonTest', 'nativeTest')) {
-    Get-ChildItem "cli-native/src/$source" -Recurse -File -Filter '*.kt' | ForEach-Object {
+    Get-ChildItem "cli/src/$source" -Recurse -File -Filter '*.kt' | ForEach-Object {
         $expected += [regex]::Matches((Get-Content $_.FullName -Raw), '@Test\b').Count
     }
 }
 if ($tests -ne $expected -or $tests -eq 0) { throw 'Incomplete Native CLI test execution.' }
 $log = Get-Content ci-output/native-core.log -Raw
-if ($log -notmatch ":cli-native:${Target}Test(?:\s|$)" -or
-    $log -match ":cli-native:${Target}Test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)") {
+if ($log -notmatch ":cli:${Target}Test(?:\s|$)" -or
+    $log -match ":cli:${Target}Test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)") {
     throw 'Native CLI tests must execute freshly.'
 }
-$binary = @(Get-ChildItem "cli-native/build/bin/$Target/releaseExecutable" -File |
+$binary = @(Get-ChildItem "cli/build/bin/$Target/releaseExecutable" -File |
     Where-Object { $_.Name -match '^LivePhoto\.(exe|kexe)$' })
 if ($binary.Count -ne 1) { throw 'Expected one release Native executable.' }
 $header = [IO.File]::ReadAllBytes($binary[0].FullName)
@@ -145,7 +145,7 @@ function Read-SyntheticManifest([string]$directory, [string[]]$files) {
     }
     return $manifest
 }
-$googleHeic = Join-Path $repository 'core/build/portable-heic-fixtures'
+$googleHeic = Join-Path $repository 'shared/build/portable-heic-fixtures'
 $googleHashes = Read-SyntheticManifest $googleHeic @('primary.heic','motion.mp4','motion.heic','damaged.heic')
 $heic = (Invoke-Native @('create', '--image', (Join-Path $googleHeic 'primary.heic'), '--video', (Join-Path $googleHeic 'motion.mp4'),
     '--target', 'google.motionphoto.v2', '--profile', 'heic', '--frame-index', '0', '--strict', '--output-dir', (Join-Path $verify 'created HEIC'))).result
@@ -164,7 +164,7 @@ if ((Get-FileHash $heicRepair.operation.output.assets[0].path).Hash.ToLowerInvar
 foreach ($name in @('primary.heic','motion.mp4','motion.heic','damaged.heic')) {
     if ((Get-FileHash (Join-Path $googleHeic $name)).Hash.ToLowerInvariant() -ne $googleHashes[$name]) { throw 'Native HEIC command changed a fixture input.' }
 }
-$huaweiHeic = Join-Path $repository 'core/build/reports/huawei-heic-fixtures'
+$huaweiHeic = Join-Path $repository 'shared/build/reports/huawei-heic-fixtures'
 $huaweiHashes = Read-SyntheticManifest $huaweiHeic @('carrier.heic','movie.mp4')
 $misleading = Join-Path $verify 'Huawei HEIC image.jpg'
 Copy-Item (Join-Path $huaweiHeic 'carrier.heic') $misleading

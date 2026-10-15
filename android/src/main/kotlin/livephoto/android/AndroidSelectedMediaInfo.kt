@@ -10,7 +10,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** Provider metadata is for display, never format detection or authorization of a larger read. */
-internal data class SelectedMediaInfo(val displayName: String? = null, val sizeBytes: Long? = null)
+internal typealias SelectedMediaInfo = livephoto.ui.SelectedMediaInfo
 
 internal suspend fun readSelectedMediaInfo(resolver: ContentResolver, uri: Uri): SelectedMediaInfo = withContext(Dispatchers.IO) {
     var name: String? = null

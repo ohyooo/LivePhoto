@@ -18,11 +18,42 @@ import livephoto.core.CoreError
 import livephoto.core.CoreResult
 import livephoto.core.IssueCode
 import livephoto.core.Stage
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import livephoto.ui.CreatedPhoto
+import livephoto.ui.LivePhotoUiPlatform
+import livephoto.ui.MediaKind
 
 /** Real Activity/Compose layout and picker-result state; no gallery compatibility claim. */
 @RunWith(AndroidJUnit4::class)
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    @Test fun sharedScreenUsesOpaqueReferencesAndScrollsInAShortWindow() {
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "test-output"
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit =
+                { onResult(if (kind == MediaKind.Image) "opaque-image" else "opaque-video") }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo(reference, 2048)
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> {
+                check(image == "opaque-image" && video == "opaque-video")
+                return CoreResult.Failure(CoreError(livephoto.core.IssueCode("TEST_FAILURE"), Stage.Parse, "shared platform test"))
+            }
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread {
+            compose.activity.setContent {
+                MaterialTheme { Box(Modifier.size(320.dp, 360.dp)) { livephoto.ui.LivePhotoScreen(platform) } }
+            }
+        }
+        compose.onNodeWithTag("select-image").performScrollTo().performClick()
+        compose.onNodeWithTag("select-video").performScrollTo().performClick()
+        compose.onNodeWithTag("create").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("status").assertIsDisplayed().assertTextContains("shared platform test", substring = true)
+    }
 
     @Test fun selectionButtonsAreBelowAppBarAndMissingInputsDisableCreate() {
         val bar = compose.onNodeWithTag("app-bar").fetchSemanticsNode().boundsInRoot

@@ -55,7 +55,7 @@ jobs:
             throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
           }
           # Android's ordinary app/ART adapter is deliberately outside this graph.
-          $sources = git ls-files 'core/src/*.kt' 'core/src/*.java' 'cli-shared/src/*.kt' 'cli-native/src/*.kt' 'file-io/src/*.kt' 'process/src/*.kt'
+          $sources = git ls-files 'shared/src/*.kt' 'shared/src/*.java' 'cli/src/*.kt'
           if ($sources | Where-Object { $_ -match '/src/jvm(Main|Test)/|\.java$' }) {
             throw 'Legacy JVM sources must not return to the Native-only project.'
           }
@@ -121,19 +121,12 @@ jobs:
           $binaryTarget = $binaryTarget.Substring(0, 1).ToUpperInvariant() + $binaryTarget.Substring(1)
           $gradleArgs = @(
             ':verifyNativeOnlyBuild'
-            ':core:${{ matrix.target }}MainKlibrary'
-            ':core:${{ matrix.target }}Test'
+            ':shared:${{ matrix.target }}MainKlibrary'
+            ':shared:${{ matrix.target }}Test'
             '--rerun'
-            ':cli-shared:${{ matrix.target }}Test'
+            ':cli:${{ matrix.target }}Test'
             '--rerun'
-            ':file-io:${{ matrix.target }}Test'
-            '--rerun'
-            ':cli-native:${{ matrix.target }}Test'
-            '--rerun'
-            ':process:${{ matrix.target }}MainKlibrary'
-            ':process:${{ matrix.target }}Test'
-            '--rerun'
-            ":cli-native:linkReleaseExecutable$binaryTarget"
+            ":cli:linkReleaseExecutable$binaryTarget"
             '--max-workers=1'
             '--console=plain'
             '--warning-mode=all'
@@ -155,21 +148,9 @@ jobs:
           path: ~/.konan
           key: ${{ steps.konan-cache.outputs.cache-primary-key }}
 
-      - name: Verify Native library and test evidence
+      - name: Verify consolidated shared library and all test groups
         shell: pwsh
-        run: ./scripts/verify-native-core-evidence.ps1 -Target '${{ matrix.target }}'
-
-      - name: Verify shared CLI Native test evidence
-        shell: pwsh
-        run: ./scripts/verify-shared-cli-evidence.ps1 -Target '${{ matrix.target }}'
-
-      - name: Verify Native file IO test evidence
-        shell: pwsh
-        run: ./scripts/verify-file-io-evidence.ps1 -Target '${{ matrix.target }}'
-
-      - name: Verify Native process test evidence
-        shell: pwsh
-        run: ./scripts/verify-process-evidence.ps1 -Target '${{ matrix.target }}'
+        run: ./scripts/verify-shared-evidence.ps1 -Target '${{ matrix.target }}'
 
       - name: Package and verify Native CLI and real FFmpeg media
         shell: pwsh
@@ -191,15 +172,10 @@ jobs:
         with:
           name: LivePhoto-native-core-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ci-output/native-core/core.klib
-            ci-output/native-core/file-io.klib
-            ci-output/native-core/process.klib
-            ci-output/native-core/process-posix.klib
-            ci-output/native-core/process-win32.klib
+            ci-output/native-core/shared.klib
+            ci-output/native-core/shared-posix.klib
+            ci-output/native-core/shared-win32.klib
             ci-output/native-core-evidence.json
-            ci-output/shared-cli-evidence.json
-            ci-output/file-io-evidence.json
-            ci-output/process-evidence.json
             ci-output/native-ffmpeg-version.txt
           if-no-files-found: error
           retention-days: 14
@@ -210,31 +186,22 @@ jobs:
         with:
           name: native-core-reports-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            core/build/test-results/${{ matrix.target }}Test/
-            core/build/reports/tests/${{ matrix.target }}Test/
-            core/build/reports/protocol-compatibility/verified-captures.tsv
-            core/build/reports/protocol-compatibility/asset-manifest.json
-            core/build/portable-heic-fixtures/manifest.txt
-            core/build/reports/huawei-heic-fixtures/manifest.txt
-            core/build/portable-apple-heif-fixtures/manifest.txt
-            core/build/portable-apple-ordinary-exif-fixtures/manifest.txt
-            core/build/reports/samsung-remux-fixtures/manifest.txt
-            core/build/reports/vivo-remux-fixtures/manifest.txt
-            core/build/reports/huawei-remux-fixtures/manifest.txt
-            cli-shared/build/test-results/${{ matrix.target }}Test/
-            cli-shared/build/reports/tests/${{ matrix.target }}Test/
-            file-io/build/test-results/${{ matrix.target }}Test/
-            file-io/build/reports/tests/${{ matrix.target }}Test/
-            cli-native/build/test-results/${{ matrix.target }}Test/
-            cli-native/build/reports/tests/${{ matrix.target }}Test/
-            process/build/test-results/${{ matrix.target }}Test/
-            process/build/reports/tests/${{ matrix.target }}Test/
+            shared/build/test-results/${{ matrix.target }}Test/
+            shared/build/reports/tests/${{ matrix.target }}Test/
+            cli/build/test-results/${{ matrix.target }}Test/
+            cli/build/reports/tests/${{ matrix.target }}Test/
+            shared/build/reports/protocol-compatibility/verified-captures.tsv
+            shared/build/reports/protocol-compatibility/asset-manifest.json
+            shared/build/portable-heic-fixtures/manifest.txt
+            shared/build/reports/huawei-heic-fixtures/manifest.txt
+            shared/build/portable-apple-heif-fixtures/manifest.txt
+            shared/build/portable-apple-ordinary-exif-fixtures/manifest.txt
+            shared/build/reports/samsung-remux-fixtures/manifest.txt
+            shared/build/reports/vivo-remux-fixtures/manifest.txt
+            shared/build/reports/huawei-remux-fixtures/manifest.txt
             ci-output/native-core.log
             ci-output/native-core-evidence.json
-            ci-output/shared-cli-evidence.json
-            ci-output/file-io-evidence.json
             ci-output/native-cli-evidence.json
             ci-output/native-cli-smoke.log
-            ci-output/process-evidence.json
           if-no-files-found: warn
           retention-days: 14

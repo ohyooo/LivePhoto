@@ -28,12 +28,12 @@ if (androidEnabled) {
         "Build Android and desktop Native separately; omit livephoto.nativeTarget for Android"
     }
     rootProject.buildFileName = "build-android.gradle.kts"
-    include(":core", ":android")
-    project(":core").buildFileName = "build-android.gradle.kts"
+    include(":shared", ":ui", ":android")
+    project(":shared").buildFileName = "build-android.gradle.kts"
 } else {
     require(providers.gradleProperty("livephoto.nativeTarget").orNull in
         setOf("linux-x64", "macos-arm64", "windows-x64")) {
         "Select -Plivephoto.nativeTarget=<host> or -Plivephoto.android=true"
     }
-    include(":core", ":cli-shared", ":file-io", ":cli-native", ":process")
+    include(":shared", ":cli")
 }
