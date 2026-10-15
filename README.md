@@ -80,6 +80,8 @@ CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试�
 
 主分支 debug/release 共用固定签名，通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复，缺少签名时拒绝发布。PR 使用默认 debug 签名且不发布 Releases；本地未传入签名时也使用本地 debug key，不能据此覆盖 CI 安装版。CI 的 `versionCode` 随构建递增，签名保持一致。**以前使用随机 CI debug key 的版本可能需卸载一次**；之后本仓库固定签名的 debug/release 可互相更新。产物证据记录实际证书指纹。
 
+Release 启用 R8 代码裁剪、优化、混淆及资源裁剪；debug 不启用，便于排错。CI 在 `android-reports-...` 中保存 `android/build/outputs/mapping/release/` 的混淆映射及优化报告。排查 release 崩溃时，请保留该构建对应的 `mapping.txt`，不同版本的映射不能混用。APK 下载方式与签名保持不变。
+
 ## 前提与推荐
 
 Native 对文件操作要求一个已存在的私有工作目录，用于冻结输入和释放临时副本。设置一次后再执行下面的示例；目录不能是公用临时目录，容量应覆盖 `--max-bytes` 预算。程序不会自动创建这个父目录。

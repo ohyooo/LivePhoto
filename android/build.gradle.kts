@@ -35,6 +35,9 @@ android {
     buildTypes.named("release") {
         signingConfig = signingConfigs.getByName("debug")
         isDebuggable = false
+        // AGP 9.3+: code optimization/obfuscation and resource shrinking,
+        // including the platform's default optimized keep rules.
+        optimization { enable = true }
     }
 }
 

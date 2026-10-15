@@ -40,10 +40,23 @@ if ($compile -notmatch 'BUILD SUCCESSFUL' -or $device -notmatch 'BUILD SUCCESSFU
     $compile -match ':android:testDebugUnitTest (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)' -or
     $compile -notmatch ':android:testReleaseUnitTest(?:\s|$)' -or
     $compile -match ':android:testReleaseUnitTest (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)' -or
+    $compile -notmatch ':android:minifyReleaseWithR8(?:\s|$)' -or
+    $compile -match ':android:minifyReleaseWithR8 (SKIPPED|NO-SOURCE)' -or
     $device -notmatch ':android:connectedDebugAndroidTest(?:\s|$)' -or
     $device -match ':android:connectedDebugAndroidTest (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)') {
     throw 'Android graph or fresh task execution proof missing.'
 }
+$mappingPath = 'android/build/outputs/mapping/release/mapping.txt'
+$mapping = Get-Content -LiteralPath $mappingPath -Raw
+if ($mapping -notmatch '(?m)^# compiler: R8\s*$' -or
+    $mapping -notmatch '(?m)^livephoto\.core\.[^\r\n]+ -> [^\r\n]+:$') {
+    throw 'Release R8 mapping is missing compiler or shared Core evidence.'
+}
+# Keep optimized names instead of retaining the entire Core for DEX checks.
+$renamedCore = @([regex]::Matches($mapping, '(?m)^(livephoto\.core\.[^\r\n]+) -> ([^\r\n]+):$') |
+    Where-Object { $_.Groups[1].Value -ne $_.Groups[2].Value }).Count
+if ($renamedCore -eq 0) { throw 'Release Core classes were not obfuscated.' }
+$mappingHash = (Get-FileHash -LiteralPath $mappingPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $testApk = 'android/build/outputs/apk/androidTest/debug/android-debug-androidTest.apk'
 $signer = Join-Path $env:ANDROID_HOME $(if ($IsWindows) { 'build-tools/37.0.0/apksigner.bat' } else { 'build-tools/37.0.0/apksigner' })
 $aapt = Join-Path $env:ANDROID_HOME $(if ($IsWindows) { 'build-tools/37.0.0/aapt2.exe' } else { 'build-tools/37.0.0/aapt2' })
@@ -105,6 +118,11 @@ $summary = [ordered]@{
     apks = $apks
     testApkSha256 = (Get-FileHash -LiteralPath $testApk -Algorithm SHA256).Hash.ToLowerInvariant()
     signerCertificateSha256 = $apks[0].signerCertificateSha256
+    releaseOptimization = [ordered]@{
+        compiler = 'R8'
+        mappingSha256 = $mappingHash
+        renamedCoreClasses = $renamedCore
+    }
     signing = $(if ($env:LIVEPHOTO_SIGNING_KEYSTORE) { 'user-supplied-actions-secret' } else { 'generated-debug-key' })
     scope = 'android-app-direct-shared-core-saf-memory-media-store-single-jpeg-no-mobile-decoder-no-gallery-certification'
 }

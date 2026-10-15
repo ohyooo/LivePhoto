@@ -141,6 +141,7 @@ jobs:
             android/build/test-results/
             android/build/outputs/androidTest-results/
             android/build/reports/
+            android/build/outputs/mapping/release/
             ci-output/android-*.log
             ci-output/android-evidence.json
             ci-output/android-*-signature.txt
