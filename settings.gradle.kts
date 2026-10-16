@@ -23,7 +23,18 @@ val androidEnabled = when (val selected = providers.gradleProperty("livephoto.an
     "true" -> true
     else -> error("livephoto.android must be true or false, not $selected")
 }
-if (androidEnabled) {
+val webEnabled = when (val selected = providers.gradleProperty("livephoto.web").orNull) {
+    null, "false" -> false
+    "true" -> true
+    else -> error("livephoto.web must be true or false, not $selected")
+}
+if (webEnabled) {
+    require(!androidEnabled && !providers.gradleProperty("livephoto.nativeTarget").isPresent) {
+        "Build Web, Android and desktop Native separately"
+    }
+    include(":shared")
+    project(":shared").buildFileName = "build-web.gradle.kts"
+} else if (androidEnabled) {
     require(!providers.gradleProperty("livephoto.nativeTarget").isPresent) {
         "Build Android and desktop Native separately; omit livephoto.nativeTarget for Android"
     }

@@ -1,0 +1,101 @@
+name: Web Library
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-web-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GRADLE_OPTS: -Dorg.gradle.project.livephoto.web=true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate Web environment
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
+            throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
+          }
+          if (-not (Get-Command node -ErrorAction Stop)) { throw 'Existing Node.js required.' }
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          cache-jdk: true
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      - name: Build production JS library and TypeScript declarations
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew :verifyWebBuild :shared:jsBrowserProductionLibraryDistribution --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-build.log
+
+      - name: Package browser library without UI or fixtures
+        shell: pwsh
+        run: ./scripts/package-web.ps1
+
+      - name: Prepare synthetic media generator
+        shell: pwsh
+        run: ./scripts/prepare-native-ffmpeg.ps1
+
+      - name: Cache browser validation tools
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/ms-playwright
+          key: livephoto-web-${{ runner.os }}-${{ hashFiles('scripts/web/package.json') }}
+
+      - name: Install pinned browser test tooling
+        working-directory: scripts/web
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Test production module in real headless Chromium and Worker
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/web/verify-browser.mjs 2>&1 | tee ci-output/web-browser.log
+
+      - name: Upload verified Web library
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhoto-web-js-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/web-library/
+            ci-output/web-package-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Web reports without media inputs or outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/web-build.log
+            ci-output/web-browser.log
+            ci-output/web-package-evidence.json
+            ci-output/web-browser-evidence.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -27,4 +27,17 @@ gradle.projectsEvaluated {
             println("Native-only targets: $platformTargets")
         }
     }
+    tasks.register("verifyWebBuild") {
+        group = "verification"
+        description = "Verify the headless JS library graph has no UI or Native adapter."
+        doLast {
+            check(projectPaths == listOf(":", ":shared")) { "Unexpected Web projects: $projectPaths" }
+            check(platformTargets.count { it.endsWith(":js") } == 1 &&
+                platformTargets.none { it.endsWith(":native") || it.endsWith(":jvm") || it.endsWith(":androidJvm") }) {
+                "Unexpected Web targets: $platformTargets"
+            }
+            println("Web library projects: $projectPaths")
+            println("Web library targets: $platformTargets")
+        }
+    }
 }

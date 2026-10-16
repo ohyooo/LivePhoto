@@ -14,6 +14,7 @@
 - [下载与运行](#下载与运行)
 - [前提与推荐](#前提与推荐)
 - [Android 测试应用](#android-测试应用)
+- [浏览器功能库（无 UI）](#浏览器功能库无-ui)
 - [快速开始](#快速开始)
 - [命令与参数](#命令与参数)
 - [协议与能力范围](#协议与能力范围)
@@ -49,6 +50,44 @@ Linux，在解压位置运行：
 ./LivePhoto.kexe --version
 ./LivePhoto.kexe --help
 ```
+
+## 浏览器功能库（无 UI）
+
+Web 入口直接复用 `shared/commonMain`，不依赖 Compose、桌面进程、JVM 或 FFmpeg。当前只实现 Kotlin/JS，不是 Wasm；编译、真实浏览器验收结果请查看 [Web Library CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml)。
+
+成功运行上传 `LivePhoto-web-js-<run>-<attempt>`：`web-library/` 是功能库，包含 `livephoto.mjs` 浏览器入口、Kotlin 编译模块及 TypeScript 声明。保留目录中全部模块，通过 HTTP(S) 静态服务使用，不要只复制单个文件或用 `file://` 打开。不需要服务端上传、处理照片，也不提供网页界面。
+
+```js
+import {
+  createLivePhoto, detectLivePhoto, validateLivePhoto, extractVideo,
+} from './web-library/livephoto.mjs';
+
+// imageFile / videoFile 是调用方提供的 File 或 Blob；按内容检测，不信扩展名。
+const created = await createLivePhoto(imageFile, videoFile, {
+  target: 'oplus.olive',
+  replaceCameraComment: false,
+});
+if (!created.success) throw new Error(`${created.code} / ${created.stage}: ${created.message}`);
+
+const livePhotoBlob = created.blob;
+const detection = await detectLivePhoto(livePhotoBlob);
+const validation = await validateLivePhoto(livePhotoBlob);
+const extracted = await extractVideo(livePhotoBlob);
+if (!extracted.success) throw new Error(extracted.message);
+const originalVideoBlob = extracted.blob;
+```
+
+创建只开放 `oplus.olive`（JPEG 无尾部 profile）、`google.motionphoto.v2`、`google.microvideo.v1` 三个已有目标；浏览器 API 不扩展协议/编码支持。`replaceCameraComment: true` 只允许前文明确列出的两种相机注释替换，默认不授权。失败返回结构化 `success/code/stage/message` 且不返回输出 Blob；参数类型、提前大小检查失败则 Promise 拒绝。
+
+`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。没有浏览器抽帧、裁剪、转码或系统相册导入。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件或可中途取消。
+
+构建（使用已有 JDK 25 和项目 Wrapper）：
+
+```sh
+./gradlew -Plivephoto.web=true :verifyWebBuild :shared:jsBrowserProductionLibraryDistribution
+```
+
+与 Android/Native 分开构建，不同时传入 `livephoto.android` 或 `livephoto.nativeTarget`。原始编译产物位于 `shared/build/dist/js/productionLibrary/`；`scripts/package-web.ps1` 添加 File/Blob 入口及哈希清单。Web CI 使用独立合成媒体，在真正的 Chromium 和 module Worker 中验证生产库，不把桌面测试数算成浏览器测试，也不上传媒体输入或生成结果。
 
 ## Android 测试应用
 
