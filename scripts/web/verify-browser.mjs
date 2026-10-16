@@ -92,10 +92,14 @@ try {
       check(target + ':same-target-exact', same.success && await digest(same.blob) === carrierHash);
       for (const other of ['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].filter(p => p !== target)) {
         const converted = await api.convertLivePhoto(created.blob, {target:other});
+        const convertedDetection = converted.success ? await api.detectLivePhoto(converted.blob) : null;
+        const convertedVideo = converted.success ? await api.extractVideo(converted.blob) : null;
+        const convertedVideoHash = convertedVideo?.success ? await digest(convertedVideo.blob) : null;
         check(target + ':convert-to-' + other, converted.success && converted.protocol === other &&
-          (await api.detectLivePhoto(converted.blob)).protocol === other &&
-          await digest((await api.extractVideo(converted.blob)).blob) === beforeVideo && await digest(created.blob) === carrierHash &&
-          converted.report.preservation.records.length > 0);
+          convertedDetection.protocol === other && convertedVideoHash === beforeVideo && await digest(created.blob) === carrierHash &&
+          converted.report.preservation.records.length > 0,
+          JSON.stringify({success:converted.success,code:converted.code,stage:converted.stage,message:converted.message,
+            protocol:converted.protocol,detected:convertedDetection?.protocol,videoHash:convertedVideoHash,expectedVideoHash:beforeVideo,report:converted.report}));
       }
     }
     const plain = await api.detectLivePhoto(image);
