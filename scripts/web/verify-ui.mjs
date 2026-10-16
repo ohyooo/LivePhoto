@@ -65,7 +65,15 @@ try {
       await (await picker).setFiles(path);
     };
     await button('生成并保存 Live Photo').waitFor({state:'attached'});
-    check(label+':initial-create-disabled',await button('生成并保存 Live Photo').isDisabled());
+    // Compose's semantic DOM does not expose native HTML disabled state consistently.
+    // Exercise the real canvas hit target instead: no inputs must not start a download or alter the status.
+    let downloads=0; page.on('download',()=>downloads++);
+    await click('生成并保存 Live Photo');
+    await page.waitForTimeout(200);
+    check(label+':initial-create-disabled',downloads===0&&await text(/当前不自动从视频抽取封面/).count()===1);
+    await page.mouse.move(viewport.width/2,viewport.height/2);
+    await page.mouse.wheel(0,-2000);
+    await page.waitForTimeout(200);
     const bar=await text('LivePhoto').boundingBox(), input=await button('选择图片').boundingBox();
     check(label+':appbar-does-not-cover-picker',bar && input && input.y>=bar.y+bar.height);
     await page.screenshot({path:`ci-output/web-ui-${label}-before.png`});
@@ -73,7 +81,7 @@ try {
     await choose('选择视频',videoPath);
     await text('名称：cover.jpg').waitFor({state:'attached'});
     await text('名称：clip.mp4').waitFor({state:'attached'});
-    check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).count()>=2);
+    check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).or(page.getByLabel(/大小：/)).count()>=2);
     await page.locator('#livephoto-image-input').setInputFiles([]);
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
@@ -110,6 +118,11 @@ try {
   if(lastPage&&!lastPage.isClosed()) {
     await lastPage.screenshot({path:'ci-output/web-ui-failure.png'}).catch(()=>{});
     await writeFile('ci-output/web-ui-failure.html',await lastPage.content()).catch(()=>{});
+    await writeFile('ci-output/web-ui-failure-a11y.txt',await lastPage.locator('body').ariaSnapshot()).catch(()=>{});
+    await writeFile('ci-output/web-ui-failure-shadow.html',await lastPage.evaluate(()=>{
+      const visit=root=>Array.from(root.children).map(e=>e.outerHTML+(e.shadowRoot?'\nSHADOW:\n'+visit(e.shadowRoot):'')+'\n'+visit(e)).join('\n');
+      return visit(document.body);
+    })).catch(()=>{});
   }
   throw error;
 } finally { await browser.close(); await new Promise(resolve=>server.close(resolve)); }

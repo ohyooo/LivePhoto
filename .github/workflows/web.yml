@@ -191,6 +191,7 @@ jobs:
             ci-output/web-ui-browser-evidence.json
             ci-output/web-ui-*.png
             ci-output/web-ui-failure.html
+            ci-output/web-ui-failure-a11y.txt
+            ci-output/web-ui-failure-shadow.html
           if-no-files-found: warn
           retention-days: 14
-

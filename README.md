@@ -104,6 +104,8 @@ const originalVideoBlob = extracted.blob;
 
 CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性、错误展示、三个协议实际下载，并独立解析下载结果及核对视频字节。报告截图只使用临时合成素材，不上传媒体原片或生成成品。
 
+网页包附带 [Noto Sans SC](https://github.com/notofonts/noto-cjk/releases/tag/Sans2.004) 中文字体及 OFL 许可，首次打开会从同一静态站点预加载约 8 MiB 字体，避免中文缺字或依赖外部字体服务。源码构建后用 `scripts/package-web-ui.ps1` 完成字体与许可打包；打包时需要联网，运行时不向外部字体服务发请求。
+
 ## Android 测试应用
 
 在 [GitHub Releases](https://github.com/ohyooo/LivePhoto/releases) 的 Android 构建中，直接下载并安装 **`LivePhoto-release.apk`**；排错时可下载同版本的 **`LivePhoto-debug.apk`**。附件就是 APK，不需要解压，不附带测试报告。需要 **Android 10 / API 29 或更高**；这是实验性应用，不是正式商店发行版。主分支 CI 全部通过后才发布，不覆盖历史构建。

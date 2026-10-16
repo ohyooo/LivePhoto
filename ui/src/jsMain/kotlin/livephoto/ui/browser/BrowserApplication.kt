@@ -5,6 +5,10 @@ package livephoto.ui.browser
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.window.ComposeViewport
+import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.platform.Font
+import androidx.compose.material3.Text
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlinx.coroutines.await
@@ -23,7 +27,24 @@ import livephoto.ui.*
 public fun main() {
     ComposeViewport(document.getElementById("app")!!, configure = { isA11YEnabled = true }) {
         val platform = remember { BrowserPlatform() }
-        MaterialTheme { LivePhotoScreen(platform) }
+        val resolver = LocalFontFamilyResolver.current
+        var fontsReady by remember { mutableStateOf(false) }
+        var fontError by remember { mutableStateOf(false) }
+        LaunchedEffect(resolver) {
+            try {
+                val response = window.fetch("fonts/NotoSansSC-Regular.otf").await()
+                check(response.ok) { "Bundled font unavailable" }
+                val values = Int8Array(response.arrayBuffer().await())
+                val bytes = ByteArray(values.length) { values.asDynamic()[it].unsafeCast<Byte>() }
+                resolver.preload(FontFamily(Font("NotoSansSC", bytes)))
+                fontsReady = true
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { fontError = true }
+        }
+        MaterialTheme {
+            if (fontsReady) LivePhotoScreen(platform)
+            else Text(if (fontError) "Unable to load bundled font. Reload the page or check the static server." else "Loading fonts...")
+        }
     }
 }
 
