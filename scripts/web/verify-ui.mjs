@@ -55,8 +55,9 @@ try {
         await settle();
         const bounds=await locator.boundingBox().catch(()=>null);
         await settle();
+        await page.waitForTimeout(200);
         const current=await locator.boundingBox().catch(()=>null);
-        if(bounds && current && Math.abs(bounds.y-current.y)>0.5) {
+        if(bounds && current && ['x','y','width','height'].some(key=>Math.abs(bounds[key]-current[key])>0.5)) {
           await page.waitForTimeout(150);
           continue;
         }
@@ -107,6 +108,7 @@ try {
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await click(name);
+      await button(name).filter({hasText:/^✓ /}).waitFor({state:'attached'});
       const pending=page.waitForEvent('download');
       pending.catch(()=>{});
       await click('生成并保存 Live Photo');
@@ -122,6 +124,10 @@ try {
         return {valid:detected.protocol===target&&validation.success&&validation.verdict!=='Invalid'&&validation.coverage==='Complete',digest};
       },{data:Array.from(output),target});
       check(label+':'+target+'-download-valid-exact-video',audit.valid&&audit.digest===videoHash&&download.suggestedFilename().endsWith('.jpg'));
+      // The shared screen animates back to the result card after generation. Do not
+      // chase moving canvas targets while that intentional scroll animation is active.
+      await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
+      await page.waitForTimeout(500);
     }
     await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
     check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1);
