@@ -51,7 +51,7 @@ try {
     const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const click = async name => {
       const locator=button(name);
-      for(let attempt=0;attempt<10;attempt++) {
+      for(let attempt=0;attempt<20;attempt++) {
         await settle();
         const bounds=await locator.boundingBox().catch(()=>null);
         await settle();
@@ -62,19 +62,24 @@ try {
         }
         // The accessibility overlay is pointer-events:none by design; users hit the canvas.
         // Use its semantic bounds to deliver a real pointer event to that canvas, not a DOM click.
-        if(bounds && bounds.y>=64 && bounds.y+bounds.height<=viewport.height) {
+        const placed=bounds && bounds.width>0 && bounds.height>0;
+        if(placed && bounds.y>=64 && bounds.y+bounds.height<=viewport.height) {
           await page.mouse.click(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
           await settle();
           return;
         }
         await page.mouse.move(viewport.width/2,viewport.height/2);
-        await page.mouse.wheel(0,bounds && bounds.y<64 ? -320 : 320);
+        // Compose reports clipped controls as 0x0 at (0,0), not their offscreen position.
+        // Search down first, then up; never interpret that synthetic zero as "above the app bar".
+        const direction=placed ? (bounds.y<64 ? -1 : 1) : (attempt<10 ? 1 : -1);
+        await page.mouse.wheel(0,direction*320);
         await page.waitForTimeout(150);
       }
       throw Error('Shared Compose button is not reachable: '+name+'; '+errors.join(';'));
     };
     const choose = async (name,path) => {
       const picker=page.waitForEvent('filechooser');
+      picker.catch(()=>{});
       await click(name);
       await (await picker).setFiles(path);
       await settle();
@@ -103,6 +108,7 @@ try {
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await click(name);
       const pending=page.waitForEvent('download');
+      pending.catch(()=>{});
       await click('生成并保存 Live Photo');
       const download=await pending;
       if(await download.failure()) throw Error('Browser download failed');
@@ -131,6 +137,7 @@ try {
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
   console.log('WEB_UI_EVIDENCE=SUCCESS 20 checks; shared Compose screen, two sizes, real downloaded outputs audited');
 } catch(error) {
+  console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {
     await lastPage.screenshot({path:'ci-output/web-ui-failure.png'}).catch(()=>{});
     await writeFile('ci-output/web-ui-failure.html',await lastPage.content()).catch(()=>{});
