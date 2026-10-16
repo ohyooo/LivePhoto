@@ -32,7 +32,7 @@ public fun main() {
         var fontError by remember { mutableStateOf(false) }
         LaunchedEffect(resolver) {
             try {
-                val response = window.fetch("fonts/NotoSansSC-Regular.otf").await()
+                val response = window.fetch("fonts/NotoSansSC-Regular.otf", js("({})")).await()
                 check(response.ok) { "Bundled font unavailable" }
                 val values = Int8Array(response.arrayBuffer().await())
                 val bytes = ByteArray(values.length) { values.asDynamic()[it].unsafeCast<Byte>() }
