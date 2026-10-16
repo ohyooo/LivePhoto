@@ -52,7 +52,12 @@ try {
       const locator=button(name);
       for(let attempt=0;attempt<10;attempt++) {
         const bounds=await locator.boundingBox().catch(()=>null);
-        if(bounds && bounds.y>=64 && bounds.y+bounds.height<=viewport.height) { await locator.click(); return; }
+        // The accessibility overlay is pointer-events:none by design; users hit the canvas.
+        // Use its semantic bounds to deliver a real pointer event to that canvas, not a DOM click.
+        if(bounds && bounds.y>=64 && bounds.y+bounds.height<=viewport.height) {
+          await page.mouse.click(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+          return;
+        }
         await page.mouse.move(viewport.width/2,viewport.height/2);
         await page.mouse.wheel(0,bounds && bounds.y<64 ? -320 : 320);
         await page.waitForTimeout(150);
