@@ -13,10 +13,17 @@ async function bytes(blob, limit) {
 
 function result(value) {
   const { success, code, stage, message, protocol, verdict, coverage, mime, issues } = value;
+  const assets = Array.from(value.assets, asset => ({
+    id: asset.id, role: asset.role, mime: asset.mime, byteLength: asset.byteLength,
+    digest: asset.digest, recommendedName: asset.recommendedName,
+    blob: new Blob([asset.bytes], { type: asset.mime }),
+  }));
   return {
     success, code, stage, message, protocol, verdict, coverage, mime,
     issues: Array.from(issues),
-    blob: value.bytes == null ? null : new Blob([value.bytes], { type: mime }),
+    report: value.reportJson ? JSON.parse(value.reportJson) : null,
+    assets,
+    blob: value.bytes == null ? null : assets.length === 1 ? assets[0].blob : new Blob([value.bytes], { type: mime }),
   };
 }
 
@@ -31,3 +38,11 @@ export async function createLivePhoto(image, video, { target = 'oplus.olive', re
 export async function detectLivePhoto(input) { return result(await core.detectLivePhoto(await bytes(input, CARRIER_LIMIT))); }
 export async function validateLivePhoto(input) { return result(await core.validateLivePhoto(await bytes(input, CARRIER_LIMIT))); }
 export async function extractVideo(input) { return result(await core.extractVideo(await bytes(input, CARRIER_LIMIT))); }
+export async function inspectLivePhoto(input) { return result(await core.inspectLivePhoto(await bytes(input, CARRIER_LIMIT))); }
+export async function analyzeLivePhoto(input) { return result(await core.analyzeLivePhoto(await bytes(input, CARRIER_LIMIT))); }
+export async function getKeyPhotoPosition(input) { return result(await core.getKeyPhotoPosition(await bytes(input, CARRIER_LIMIT))); }
+export async function splitLivePhoto(input) { return result(await core.splitLivePhoto(await bytes(input, CARRIER_LIMIT))); }
+export async function convertLivePhoto(input, { target } = {}) {
+  if (typeof target !== 'string') throw new TypeError('Convert requires a target protocol');
+  return result(await core.convertLivePhoto(await bytes(input, CARRIER_LIMIT), target));
+}

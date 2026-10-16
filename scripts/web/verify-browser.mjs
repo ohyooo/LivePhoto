@@ -64,6 +64,35 @@ try {
       check(target + ':extract', extracted.success && await digest(extracted.blob) === beforeVideo, JSON.stringify(extracted));
       check(target + ':inputs-immutable', await digest(image) === beforeImage && await digest(video) === beforeVideo);
       check(target + ':embedded-video', await digest(new Blob([await created.blob.slice(-video.size).arrayBuffer()])) === beforeVideo);
+      const carrierHash = await digest(created.blob);
+      const inspected = await api.inspectLivePhoto(created.blob);
+      check(target + ':inspect-layout', inspected.success && inspected.report.kind === 'Inspection' &&
+        inspected.report.detection.matches.some(m => m.protocol === target) && inspected.report.layout.sources[0].size === String(created.blob.size) &&
+        inspected.report.layout.regions.every(r => /^\d+$/.test(r.range.offset) && /^\d+$/.test(r.range.length)));
+      const analyzed = await api.analyzeLivePhoto(created.blob);
+      check(target + ':analyze-no-media-backend', analyzed.success && analyzed.report.kind === 'Analysis' && analyzed.verdict !== 'Invalid' &&
+        analyzed.report.validation.checks.every(c => ['Structure','Protocol'].includes(c.layer)) &&
+        analyzed.report.capabilities.operations.some(o => o.operation === 'ExtractRaw') &&
+        analyzed.report.capabilities.operations.every(o => !['ExtractFrame','Transcode','Trim'].includes(o.operation) || o.implementation === 'Unsupported'));
+      const key = await api.getKeyPhotoPosition(created.blob);
+      check(target + ':key-position', key.success && key.report.kind === 'KeyPhoto' &&
+        JSON.stringify(key.report) === JSON.stringify(inspected.report.keyPhoto) &&
+        (key.report.position === null || /^-?\d+$/.test(key.report.position.value)));
+      const split = await api.splitLivePhoto(created.blob);
+      const primary = split.assets.find(a => a.role === 'PrimaryImage'), motion = split.assets.find(a => a.role === 'MotionVideo');
+      check(target + ':clean-split-assets', split.success && split.blob === null && split.assets.length === 2 && primary && motion &&
+        (await api.detectLivePhoto(primary.blob)).verdict === 'NonLive' && await digest(motion.blob) === beforeVideo &&
+        split.assets.every(a => a.byteLength === String(a.blob.size) && /^[0-9a-f]{64}$/.test(a.digest)) &&
+        split.report.preservation.records.length > 0 && split.report.durability === 'volatile-process-memory');
+      const same = await api.convertLivePhoto(created.blob, {target});
+      check(target + ':same-target-exact', same.success && await digest(same.blob) === carrierHash);
+      for (const other of ['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].filter(p => p !== target)) {
+        const converted = await api.convertLivePhoto(created.blob, {target:other});
+        check(target + ':convert-to-' + other, converted.success && converted.protocol === other &&
+          (await api.detectLivePhoto(converted.blob)).protocol === other &&
+          await digest((await api.extractVideo(converted.blob)).blob) === beforeVideo && await digest(created.blob) === carrierHash &&
+          converted.report.preservation.records.length > 0);
+      }
     }
     const plain = await api.detectLivePhoto(image);
     check('ordinary-jpeg-is-not-live', plain.success && plain.protocol === '' && plain.verdict === 'NonLive', JSON.stringify(plain));
@@ -79,6 +108,15 @@ try {
     let badType = false;
     try { await api.createLivePhoto('not a File', video); } catch (e) { badType = e instanceof TypeError; }
     check('invalid-js-input-rejected', badType);
+    const rejectedConvert = await api.convertLivePhoto(image, {target:'unsupported'});
+    check('convert-unknown-target-no-assets', !rejectedConvert.success && rejectedConvert.blob === null && rejectedConvert.assets.length === 0);
+    const ordinaryConvert = await api.convertLivePhoto(image, {target:'google.motionphoto.v2'});
+    check('convert-ordinary-is-not-create', !ordinaryConvert.success && ordinaryConvert.assets.length === 0 && ordinaryConvert.code === 'SOURCE_NOT_LIVE');
+    const brokenInspection = await api.inspectLivePhoto(new Blob([new Uint8Array([0,1,2,3])]));
+    check('inspect-malformed-structured-error', !brokenInspection.success && brokenInspection.code.length > 0 && brokenInspection.report.kind === 'Error' && brokenInspection.assets.length === 0);
+    let missingTarget = false;
+    try { await api.convertLivePhoto(image); } catch(e) { missingTarget = e instanceof TypeError; }
+    check('convert-target-required', missingTarget);
     const workerResult = await new Promise((resolve, reject) => {
       const worker = new Worker('/worker.mjs', { type: 'module' });
       const timeout = setTimeout(() => { worker.terminate(); reject(Error('Worker timeout')); }, 120000);
@@ -89,7 +127,7 @@ try {
     check('module-worker-round-trip', workerResult.success, workerResult.message);
     return checks;
   });
-  if (checks.length !== 25 || new Set(checks).size !== 25) throw new Error('Incomplete browser check count');
+  if (checks.length !== 50 || new Set(checks).size !== 50) throw new Error('Incomplete browser check count');
   const evidence = {
     commit: process.env.GITHUB_SHA, run: process.env.GITHUB_RUN_ID,
     browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,

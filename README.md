@@ -9,6 +9,8 @@
 
 **当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
 
+浏览器功能库与共享 Compose 界面已接入，用户已手动验证网页可用。后续能力及验收进度单独维护在 [Web 路线与 TODO](docs/web-roadmap.md)，不以旧阶段测试代替新接口验证。
+
 ## 目录
 
 - [下载与运行](#下载与运行)
@@ -81,6 +83,10 @@ const originalVideoBlob = extracted.blob;
 创建只开放 `oplus.olive`（JPEG 无尾部 profile）、`google.motionphoto.v2`、`google.microvideo.v1` 三个已有目标；浏览器 API 不扩展协议/编码支持。`replaceCameraComment: true` 只允许前文明确列出的两种相机注释替换，默认不授权。失败返回结构化 `success/code/stage/message` 且不返回输出 Blob；参数类型、提前大小检查失败则 Promise 拒绝。
 
 `validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。没有浏览器抽帧、裁剪、转码或系统相册导入。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件或可中途取消。
+
+协议接口还提供 `inspectLivePhoto`、`analyzeLivePhoto`、`getKeyPhotoPosition`、`convertLivePhoto(input, { target })`、`splitLivePhoto`。检查结果位于 `result.report`：包含多重检测、资源范围、媒体/metadata、关键照片原始字段、检查明细及带条件的能力；Analyze 不把缺媒体后端说成可抽帧。64 位 offset/length、时间分子和任意精度 metadata 数字用十进制字符串，未知值保留 `null`。
+
+Convert 仅开放上面三个既有 JPEG 目标，默认同目标原样保留；不隐式修复或转码。Clean Split 与 `extractVideo` 不同：前者返回清理绑定后的 `assets[]`（每项含 role、mime、digest、Blob），后者只原样提取嵌入视频。多资产结果的顶层 `blob` 为 `null`，请遍历 `assets`。写操作的 `report.preservation` 按资产报告保真证明、变化及问题；内存中集合原子发布不等于浏览器下载已持久化。以上新增接口的当前验收状态见路线文档。
 
 构建（使用已有 JDK 25 和项目 Wrapper）：
 
@@ -600,6 +606,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [x] Windows/macOS/Linux 真实 FFmpeg 抽帧、remux、有限带音频裁剪、显式视频转码、封面替换及组合 Create 回归；音频只 copy。
 - [x] 迁移期 JVM 运行时代码、旧 CLI、NIO/ImageIO/Java 进程桥、Windows 历史系统媒体 API及其专项测试、旧 JVM 打包/回归流程清理；保留共用/Native 测试和全部素材。Gradle 构建仍需要 JDK。
 - [x] Android 初始接入：直接引用 Core 的 APK、最小手测界面、系统选择器/有界内存输入、单张 MediaStore 保存、宿主与模拟器回归及 CI 产物。
+- [x] Kotlin/JS 基础功能库、Promise/File/Blob 适配、真实 Chromium/Worker 验收，以及复用 Android 的浏览器 Compose 界面；用户已手测网页可用。
 
 后续 TODO（当前不扩展这些业务范围）：
 
@@ -608,7 +615,8 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [ ] 其它显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
 - [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
 - [ ] 后续移动工作：大文件/随机访问 IO、URI 生命周期、通用多资产事务、移动系统媒体后端及真机验收。iOS targets、构建/IO/媒体适配仍未实施；不复用桌面 FFmpeg 进程冒充移动支持。
-- [ ] 完整 Compose Multiplatform GUI：未来规划；当前只提供 Android Compose 测试界面，不扩大 Core 业务范围。
+- [ ] Web 后续协议接口、公共 JS 回归与浏览器媒体后端，分项状态见 [Web 路线与 TODO](docs/web-roadmap.md)。
+- [ ] 完整 Compose Multiplatform GUI：当前 Android/Web 共享有限测试界面，更完整的工具界面仍待实现，不扩大 Core 业务范围。
 
 ### 诊断日志
 
