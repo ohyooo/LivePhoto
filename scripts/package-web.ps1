@@ -10,10 +10,11 @@ $module = @(Get-ChildItem $destination -Recurse -File -Filter 'livephoto-core.mj
 if ($module.Count -ne 1 -or $module[0].Directory.FullName -ne (Resolve-Path $destination).Path) {
     throw 'Expected one flat livephoto-core.mjs entry.'
 }
-if (@(Get-ChildItem $destination -Recurse -File -Filter '*.d.ts').Count -eq 0) { throw 'Missing generated TypeScript declarations.' }
+if (@(Get-ChildItem $destination -Recurse -File | Where-Object { $_.Name -match '\.d\.(mts|ts)$' }).Count -eq 0) { throw 'Missing generated TypeScript declarations.' }
 Copy-Item scripts/web/livephoto.mjs $destination
+Copy-Item scripts/web/livephoto.d.mts $destination
 $files = @(Get-ChildItem $destination -Recurse -File)
-if ($files | Where-Object { $_.Extension -notin @('.mjs', '.js', '.ts', '.json', '.map') }) {
+if ($files | Where-Object { $_.Extension -notin @('.mjs', '.js', '.mts', '.ts', '.json', '.map') }) {
     throw 'Web library must contain code/declarations only, not media or native libraries.'
 }
 [ordered]@{
