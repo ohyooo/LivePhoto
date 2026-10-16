@@ -92,6 +92,16 @@ try {
       check(target + ':same-target-exact', same.success && await digest(same.blob) === carrierHash);
       for (const other of ['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].filter(p => p !== target)) {
         const converted = await api.convertLivePhoto(created.blob, {target:other});
+        // Fresh upstream-compatible Oplus puts XMP before EXIF. Core deliberately
+        // refuses a conversion that would resize that slot and move unverified EXIF.
+        // Preserve its contract; the Web adapter must not authorize loss or transcode.
+        if (target === 'oplus.olive') {
+          check(target + ':convert-blocked-exif-' + other,
+            !converted.success && converted.code === 'UNSAFE_METADATA_REWRITE' && converted.stage === 'Parse' &&
+            converted.assets.length === 0 && converted.blob === null && converted.report.kind === 'Error' &&
+            await digest(created.blob) === carrierHash, JSON.stringify(converted));
+          continue;
+        }
         const convertedDetection = converted.success ? await api.detectLivePhoto(converted.blob) : null;
         const convertedVideo = converted.success ? await api.extractVideo(converted.blob) : null;
         const convertedVideoHash = convertedVideo?.success ? await digest(convertedVideo.blob) : null;

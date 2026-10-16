@@ -88,6 +88,8 @@ const originalVideoBlob = extracted.blob;
 
 Convert 仅开放上面三个既有 JPEG 目标，默认同目标原样保留；不隐式修复或转码。Clean Split 与 `extractVideo` 不同：前者返回清理绑定后的 `assets[]`（每项含 role、mime、digest、Blob），后者只原样提取嵌入视频。多资产结果的顶层 `blob` 为 `null`，请遍历 `assets`。写操作的 `report.preservation` 按资产报告保真证明、变化及问题；内存中集合原子发布不等于浏览器下载已持久化。以上新增接口的当前验收状态见路线文档。
 
+三个目标不代表任意来源都能转换。当前新建 OPPO 布局将 XMP 放在 EXIF 前方，转换为 Google 时若需调整 XMP 并移动未验证 EXIF，Core 会返回 `UNSAFE_METADATA_REWRITE`，没有输出；网页不会删除 EXIF、隐式授权丢失或转码来绕过。相同目标仍可原样复制，Google 来源的有限转换与这两个拒绝方向分别验收。
+
 构建（使用已有 JDK 25 和项目 Wrapper）：
 
 ```sh
