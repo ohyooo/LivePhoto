@@ -61,7 +61,9 @@ try {
       const validated = await api.validateLivePhoto(created.blob);
       check(target + ':validate', validated.success && validated.verdict !== 'Invalid' && validated.coverage === 'Complete', JSON.stringify(validated));
       const extracted = await api.extractVideo(created.blob);
-      check(target + ':extract', extracted.success && await digest(extracted.blob) === beforeVideo, JSON.stringify(extracted));
+      check(target + ':extract', extracted.success && await digest(extracted.blob) === beforeVideo &&
+        extracted.assets.length === 1 && extracted.assets[0].role === 'MotionVideo' &&
+        extracted.report.preservation.records.some(r => r.guarantee === 'ExactExtraction' && r.outcome === 'Verified'), JSON.stringify(extracted));
       check(target + ':inputs-immutable', await digest(image) === beforeImage && await digest(video) === beforeVideo);
       check(target + ':embedded-video', await digest(new Blob([await created.blob.slice(-video.size).arrayBuffer()])) === beforeVideo);
       const carrierHash = await digest(created.blob);

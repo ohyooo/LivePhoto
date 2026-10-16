@@ -124,7 +124,9 @@ public fun analyzeLivePhoto(input: ByteArray): Promise<WebResult> = read(input) 
         is CoreResult.Failure -> failure(result.error)
         is CoreResult.Success -> WebResult(true, protocol = result.value.inspection.detection.primaryProtocol?.protocol?.value.orEmpty(),
             verdict = result.value.validation.verdict.name, coverage = result.value.validation.coverage.name,
-            reportJson = reportJson(analysis(result.value, DefaultLivePhotoCore().getMediaCapabilities())))
+            reportJson = reportJson(analysis(result.value, DefaultLivePhotoCore().getMediaCapabilities())),
+            issues = (result.value.inspection.issues + result.value.validation.issues + result.value.capabilities.issues)
+                .map { it.code.value }.distinct().toTypedArray())
     }
 }
 
@@ -174,7 +176,12 @@ public fun extractVideo(input: ByteArray): Promise<WebResult> = read(input) { so
                 extracted = result.value
                 val asset = result.value.output.assets.singleOrNull { it.role == AssetRole.MotionVideo }
                     ?: return@read invalid("CAPABILITY_UNSUPPORTED", "Expected one embedded motion video")
-                WebResult(true, mime = asset.mime, bytes = output.committedAssets().getValue(asset.id).toByteArray())
+                val bytes = output.committedAssets().getValue(asset.id).toByteArray()
+                WebResult(true, mime = asset.mime, bytes = bytes, reportJson = reportJson(operationReport(result.value)),
+                    verdict = result.value.validation.verdict.name, coverage = result.value.validation.coverage.name,
+                    issues = (result.value.issues + result.value.validation.issues + result.value.preservation.issues).map { it.code.value }.distinct().toTypedArray(),
+                    assets = arrayOf(WebAsset(asset.id.value, asset.role.name, asset.mime, asset.byteLength.toString(),
+                        asset.digest.value, asset.recommendedName, bytes)))
             }
         }
     } finally { extracted?.output?.assets?.forEach { it.readableSource?.close() } }

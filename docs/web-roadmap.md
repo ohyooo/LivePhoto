@@ -13,9 +13,9 @@
 
 ## 继续实施
 
-- [ ] 只读协议接口：完整多重检测、Inspect、Analyze、关键照片位置与来源读取。
-- [ ] Clean Split 多资产 Blob 输出，保留变化清单及分项保真证明；与 Raw Extract 分开。
-- [ ] 有限 JPEG 协议之间的 Convert；与普通图片＋视频的 Create 分开，不隐式修复或转码。
+- [x] 只读协议接口实现：多重检测、Inspect、Analyze、关键照片位置与来源读取。
+- [x] Clean Split 接口实现：多资产 Blob 输出、变化清单及分项保真证明；与 Raw Extract 分开。
+- [x] 有限 JPEG Convert 接口实现：与 Create 分开，不隐式修复或转码；下述 EXIF 限制仍保留。
 - [ ] 有限 Repair：先 dry-run，再显式提交安全修改，报告无法修复/歧义问题。
 - [ ] 关键照片 metadata 写入；与视频抽帧、替换封面分开。
 - [ ] 将不依赖文件系统、真实编码素材或 FFmpeg 的公共协议回归接入 JS；不伪造平台 actual、不静默跳过后端测试。
@@ -33,4 +33,6 @@ Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入
 
 ## 本轮状态
 
-只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配正在实施。此段不代表已编译或通过新测试；完成后以新的 CI 结果更新，不能套用基础阶段的 25＋20 项结果。
+只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮。
+
+新增接口对应的功能库检查扩展为 50 项：含三个目标的结构化检查、Clean Split 幂等性、同目标字节不变、四个实际跨协议转换方向、两个 EXIF 安全拒绝方向，以及错误/无输出、输入不变和 Worker 回归。共享 UI 的 20 项操作检查另行保留。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准；不能用基础阶段的旧 25＋20 项结果代替。** 公共协议 commonTest 的 JS 迁移、Repair、关键照片写入及媒体后端仍未完成。
