@@ -2,6 +2,14 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
 }
 
+// Web builds reuse the host's existing Node.js instead of adding a download
+// repository, keeping FAIL_ON_PROJECT_REPOS intact for all targets.
+allprojects {
+    plugins.withType<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsPlugin> {
+        project.extensions.getByType<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec>().download = false
+    }
+}
+
 // Capture the graph during configuration; the action retains immutable values
 // only, without accessing Project at execution time (configuration cache).
 gradle.projectsEvaluated {
