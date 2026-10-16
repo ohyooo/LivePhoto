@@ -99,3 +99,98 @@ jobs:
             ci-output/web-browser-evidence.json
           if-no-files-found: warn
           retention-days: 14
+
+  ui-browser:
+    name: Shared Compose Web UI
+    needs: browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GRADLE_OPTS: -Dorg.gradle.project.livephoto.web=true -Dorg.gradle.project.livephoto.webUi=true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate shared Web UI environment
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
+            throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
+          }
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          cache-jdk: true
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      - name: Compile the existing shared Compose screen for browser
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew :verifyWebBuild :ui:jsBrowserDistribution --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-ui-build.log
+
+      - name: Package static browser application
+        shell: pwsh
+        run: ./scripts/package-web-ui.ps1
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: LivePhoto-web-js-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-output/browser-api
+
+      - name: Prepare synthetic media generator
+        shell: pwsh
+        run: ./scripts/prepare-native-ffmpeg.ps1
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/ms-playwright
+          key: livephoto-web-${{ runner.os }}-${{ hashFiles('scripts/web/package.json') }}
+
+      - name: Install pinned browser test tooling
+        working-directory: scripts/web
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Test mobile and wide layouts, chooser, errors and real downloads
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/web/verify-ui.mjs 2>&1 | tee ci-output/web-ui-browser.log
+
+      - name: Upload verified shared Compose website
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhoto-web-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/web-ui/
+            ci-output/web-ui-package-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Web UI reports and synthetic-only screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-ui-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/web-ui-build.log
+            ci-output/web-ui-browser.log
+            ci-output/web-ui-package-evidence.json
+            ci-output/web-ui-browser-evidence.json
+            ci-output/web-ui-*.png
+            ci-output/web-ui-failure.html
+          if-no-files-found: warn
+          retention-days: 14
+

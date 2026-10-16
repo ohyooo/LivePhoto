@@ -1,6 +1,6 @@
 pluginManagement {
     repositories {
-        if (providers.gradleProperty("livephoto.android").orNull == "true") google()
+        if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true") google()
         gradlePluginPortal()
         mavenCentral()
     }
@@ -9,7 +9,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        if (providers.gradleProperty("livephoto.android").orNull == "true") google()
+        if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true") google()
         mavenCentral()
     }
 }
@@ -28,12 +28,23 @@ val webEnabled = when (val selected = providers.gradleProperty("livephoto.web").
     "true" -> true
     else -> error("livephoto.web must be true or false, not $selected")
 }
+val webUiEnabled = when (val selected = providers.gradleProperty("livephoto.webUi").orNull) {
+    null, "false" -> false
+    "true" -> true
+    else -> error("livephoto.webUi must be true or false, not $selected")
+}
+require(!webUiEnabled || webEnabled) { "Web UI requires livephoto.web=true" }
 if (webEnabled) {
     require(!androidEnabled && !providers.gradleProperty("livephoto.nativeTarget").isPresent) {
         "Build Web, Android and desktop Native separately"
     }
     include(":shared")
     project(":shared").buildFileName = "build-web.gradle.kts"
+    if (webUiEnabled) {
+        rootProject.buildFileName = "build-web-ui.gradle.kts"
+        include(":ui")
+        project(":ui").buildFileName = "build-web.gradle.kts"
+    }
 } else if (androidEnabled) {
     require(!providers.gradleProperty("livephoto.nativeTarget").isPresent) {
         "Build Android and desktop Native separately; omit livephoto.nativeTarget for Android"

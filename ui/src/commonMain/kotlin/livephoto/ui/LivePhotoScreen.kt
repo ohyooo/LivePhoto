@@ -110,7 +110,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                             status = when (val result = platform.create(chosenImage, chosenVideo, target)) {
                                 is CoreResult.Success -> {
                                     val issues = (result.value.operation.issues + result.value.operation.validation.issues).distinct()
-                                    "已保存到 ${platform.outputDescription}。\nCore 验证：${result.value.operation.validation.verdict}；问题报告：${issues.size} 项。" +
+                                    "${platform.successMessage}\nCore 验证：${result.value.operation.validation.verdict}；问题报告：${issues.size} 项。" +
                                         (if (issues.isEmpty()) "" else "\n报告代码：${issues.take(8).joinToString { it.code.value }}") +
                                         (if (result.value.operation.preservation.changes.any { it.selector == "exif:UserComment" && it.before != null })
                                             "\n已将新图片的相机 UserComment 更新为动态照片标记。" else "") +

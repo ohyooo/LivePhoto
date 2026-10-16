@@ -15,6 +15,7 @@
 - [前提与推荐](#前提与推荐)
 - [Android 测试应用](#android-测试应用)
 - [浏览器功能库（无 UI）](#浏览器功能库无-ui)
+- [浏览器共享界面](#浏览器共享界面)
 - [快速开始](#快速开始)
 - [命令与参数](#命令与参数)
 - [协议与能力范围](#协议与能力范围)
@@ -88,6 +89,20 @@ const originalVideoBlob = extracted.blob;
 ```
 
 与 Android/Native 分开构建，不同时传入 `livephoto.android` 或 `livephoto.nativeTarget`。原始编译产物位于 `shared/build/dist/js/productionLibrary/`；`scripts/package-web.ps1` 添加 File/Blob 入口及哈希清单。Web CI 使用独立合成媒体，在真正的 Chromium 和 module Worker 中验证生产库，不把桌面测试数算成浏览器测试，也不上传媒体输入或生成结果。
+
+## 浏览器共享界面
+
+浏览器界面直接运行 `ui/commonMain` 中与 Android 相同的 Compose 屏幕，不是另外维护的 HTML 表单。浏览器适配层负责文件选择、元信息读取及下载，协议封装仍调用公共 Core；媒体只在本机浏览器处理，不上传服务器。
+
+在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
+
+```sh
+./gradlew -Plivephoto.web=true -Plivephoto.webUi=true :verifyWebBuild :ui:jsBrowserDistribution
+```
+
+原始静态网页产物位于 `ui/build/dist/js/productionExecutable/`。Core 与界面代码使用 Kotlin/JS；Compose 图形运行时可能包含自己的 Wasm 文件，这不是 FFmpeg 或新增 Wasm 媒体后端。界面复用窗口尺寸自适应布局；选择 JPEG 和 MP4 后生成下载，协议和输入限制与现有应用一致。浏览器只能确认已发起下载，不能保证用户最终保存，因此成功提示不冒充磁盘持久化。刷新页面后需要重新选择输入。
+
+CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性、错误展示、三个协议实际下载，并独立解析下载结果及核对视频字节。报告截图只使用临时合成素材，不上传媒体原片或生成成品。
 
 ## Android 测试应用
 
