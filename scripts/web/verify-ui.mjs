@@ -48,14 +48,23 @@ try {
     await page.keyboard.press('Tab');
     const text = value => page.getByText(value).or(page.getByLabel(value)).first();
     const button = name => page.getByRole('button',{name,exact:typeof name==='string'});
+    const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const click = async name => {
       const locator=button(name);
       for(let attempt=0;attempt<10;attempt++) {
+        await settle();
         const bounds=await locator.boundingBox().catch(()=>null);
+        await settle();
+        const current=await locator.boundingBox().catch(()=>null);
+        if(bounds && current && Math.abs(bounds.y-current.y)>0.5) {
+          await page.waitForTimeout(150);
+          continue;
+        }
         // The accessibility overlay is pointer-events:none by design; users hit the canvas.
         // Use its semantic bounds to deliver a real pointer event to that canvas, not a DOM click.
         if(bounds && bounds.y>=64 && bounds.y+bounds.height<=viewport.height) {
           await page.mouse.click(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
+          await settle();
           return;
         }
         await page.mouse.move(viewport.width/2,viewport.height/2);
@@ -68,6 +77,7 @@ try {
       const picker=page.waitForEvent('filechooser');
       await click(name);
       await (await picker).setFiles(path);
+      await settle();
     };
     await button('生成并保存 Live Photo').waitFor({state:'attached'});
     // Compose's semantic DOM does not expose native HTML disabled state consistently.
@@ -83,6 +93,7 @@ try {
     check(label+':appbar-does-not-cover-picker',bar && input && input.y>=bar.y+bar.height);
     await page.screenshot({path:`ci-output/web-ui-${label}-before.png`});
     await choose('选择图片',imagePath);
+    await text('名称：cover.jpg').waitFor({state:'attached'});
     await choose('选择视频',videoPath);
     await text('名称：cover.jpg').waitFor({state:'attached'});
     await text('名称：clip.mp4').waitFor({state:'attached'});
