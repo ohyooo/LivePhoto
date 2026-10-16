@@ -40,13 +40,20 @@ internal fun key(v: KeyPhotoResult): dynamic = record("kind" to "KeyPhoto", "pos
     "frameIndex" to v.frameIndex?.toString(), "trackId" to v.trackId?.value, "source" to v.source.name,
     "rawFields" to v.rawFields.map { record("selector" to it.selector, "rawValue" to value(it.rawValue),
         "unit" to it.unit, "location" to location(it.location)) }.toTypedArray(), "issues" to v.issues.map { issue(it) }.toTypedArray())
+private fun metadata(v: MetadataEntry): dynamic = record("selector" to v.selector, "rawResource" to v.raw?.value,
+    "value" to value(v.value), "owner" to v.owner.name, "origin" to v.origin.name, "location" to location(v.location))
+private fun color(v: ColorFacts?): dynamic = v?.let { record("primaries" to it.primaries, "transfer" to it.transfer,
+    "matrix" to it.matrix, "range" to it.range, "bitDepth" to it.bitDepth?.toDouble(), "icc" to it.icc?.value,
+    "hdr" to it.hdr.map { m -> metadata(m) }.toTypedArray()) }
 private fun media(v: MediaFacts): dynamic = record("imageFormat" to v.imageFormat?.name, "videoContainer" to v.videoContainer?.name,
     "mime" to v.mime, "width" to v.width?.toDouble(), "height" to v.height?.toDouble(), "duration" to time(v.duration),
-    "coverage" to v.coverage.name, "orientation" to value(v.orientation),
+    "coverage" to v.coverage.name, "orientation" to value(v.orientation), "color" to color(v.color),
+    "auxiliary" to v.auxiliary.map { it.value }.toTypedArray(),
     "tracks" to v.tracks.map { record("id" to it.id.value, "kind" to it.kind, "videoCodec" to it.videoCodec?.name,
         "audioCodec" to it.audioCodec?.name, "codecString" to it.codecString, "profile" to it.profile, "level" to it.level,
         "duration" to time(it.duration), "frameCount" to it.frameCount?.toString(), "width" to it.width?.toDouble(),
-        "height" to it.height?.toDouble(), "origin" to it.origin.name) }.toTypedArray(),
+        "height" to it.height?.toDouble(), "origin" to it.origin.name, "color" to color(it.color), "transform" to value(it.transform),
+        "codecConfigurationByteLength" to it.codecConfiguration?.size) }.toTypedArray(),
     "issues" to v.issues.map { issue(it) }.toTypedArray())
 internal fun inspection(v: InspectionResult): dynamic = record("kind" to "Inspection", "detection" to detection(v.detection),
     "layout" to record("sources" to v.layout.sources.map { record("id" to it.id.value, "size" to it.size.toString()) }.toTypedArray(),
@@ -58,8 +65,7 @@ internal fun inspection(v: InspectionResult): dynamic = record("kind" to "Inspec
         "relationships" to v.layout.relationships.map { record("kind" to it.kind.name, "from" to it.from.value,
             "to" to it.to.value, "details" to record(*it.details.map { d -> d.key to value(d.value) }.toTypedArray())) }.toTypedArray()),
     "media" to v.media.map { media(it) }.toTypedArray(),
-    "metadata" to v.metadata.map { record("selector" to it.selector, "rawResource" to it.raw?.value, "value" to value(it.value),
-        "owner" to it.owner.name, "origin" to it.origin.name, "location" to location(it.location)) }.toTypedArray(),
+    "metadata" to v.metadata.map { metadata(it) }.toTypedArray(),
     "keyPhoto" to key(v.keyPhoto), "pairing" to v.pairing?.let { record("imageIdentifier" to it.imageIdentifier,
         "videoIdentifier" to it.videoIdentifier, "matches" to it.matches, "evidence" to it.evidence.map { e -> evidence(e) }.toTypedArray()) },
     "issues" to v.issues.map { issue(it) }.toTypedArray())
@@ -83,4 +89,6 @@ internal fun operationReport(v: OperationResult): dynamic = record("kind" to "Op
             "after" to value(it.after), "reason" to it.reason, "requested" to it.requested) }.toTypedArray(),
         "issues" to v.preservation.issues.map { issue(it) }.toTypedArray()),
     "keyPhoto" to v.keyPhoto?.let { key(it) }, "issues" to v.issues.map { issue(it) }.toTypedArray(),
+    "execution" to v.execution.map { record("stage" to it.stage.name, "backendId" to it.backendId, "reason" to it.reason,
+        "transcoded" to it.transcoded, "remuxed" to it.remuxed, "hardwareUsed" to it.hardwareUsed) }.toTypedArray(),
     "durability" to "volatile-process-memory")

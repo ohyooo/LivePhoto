@@ -80,10 +80,12 @@ try {
         (key.report.position === null || /^-?\d+$/.test(key.report.position.value)));
       const split = await api.splitLivePhoto(created.blob);
       const primary = split.assets.find(a => a.role === 'PrimaryImage'), motion = split.assets.find(a => a.role === 'MotionVideo');
+      const secondSplit = primary && await api.splitLivePhoto(primary.blob);
       check(target + ':clean-split-assets', split.success && split.blob === null && split.assets.length === 2 && primary && motion &&
         (await api.detectLivePhoto(primary.blob)).verdict === 'NonLive' && await digest(motion.blob) === beforeVideo &&
         split.assets.every(a => a.byteLength === String(a.blob.size) && /^[0-9a-f]{64}$/.test(a.digest)) &&
-        split.report.preservation.records.length > 0 && split.report.durability === 'volatile-process-memory');
+        split.report.preservation.records.length > 0 && split.report.durability === 'volatile-process-memory' &&
+        secondSplit.success && secondSplit.assets.length === 1 && await digest(secondSplit.blob) === await digest(primary.blob));
       const same = await api.convertLivePhoto(created.blob, {target});
       check(target + ':same-target-exact', same.success && await digest(same.blob) === carrierHash);
       for (const other of ['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].filter(p => p !== target)) {
