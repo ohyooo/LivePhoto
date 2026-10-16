@@ -71,7 +71,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {
         val photo = files[image] ?: error("Select the image again")
         val movie = files[video] ?: error("Select the video again")
-        if (photo.size + movie.size > 32 * 1024 * 1024) return CoreResult.Failure(CoreError(
+        if (photo.size.toLong() + movie.size.toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
         suspend fun bytes(file: File): ByteArray {
             val buffer = file.asDynamic().arrayBuffer().unsafeCast<Promise<ArrayBuffer>>().await()
