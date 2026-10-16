@@ -132,8 +132,14 @@ try {
     check('convert-unknown-target-no-assets', !rejectedConvert.success && rejectedConvert.blob === null && rejectedConvert.assets.length === 0);
     const ordinaryConvert = await api.convertLivePhoto(image, {target:'google.motionphoto.v2'});
     check('convert-ordinary-is-not-create', !ordinaryConvert.success && ordinaryConvert.assets.length === 0 && ordinaryConvert.code === 'SOURCE_NOT_LIVE');
-    const brokenInspection = await api.inspectLivePhoto(new Blob([new Uint8Array([0,1,2,3])]));
-    check('inspect-malformed-structured-error', !brokenInspection.success && brokenInspection.code.length > 0 && brokenInspection.report.kind === 'Error' && brokenInspection.assets.length === 0);
+    const unknownInspection = await api.inspectLivePhoto(new Blob([new Uint8Array([0,1,2,3])]));
+    const brokenInspection = await api.inspectLivePhoto(new Blob([new Uint8Array([255,216,255,225,0,16,0,0])]));
+    check('inspect-unknown-and-malformed-structured-results',
+      unknownInspection.success && unknownInspection.verdict === 'Unknown' && unknownInspection.report.kind === 'Inspection' &&
+      unknownInspection.report.detection.matches.length === 0 && unknownInspection.assets.length === 0 &&
+      !brokenInspection.success && brokenInspection.code.length > 0 && brokenInspection.report.kind === 'Error' &&
+      brokenInspection.assets.length === 0 && brokenInspection.blob === null,
+      JSON.stringify({unknown:unknownInspection,broken:brokenInspection}));
     let missingTarget = false;
     try { await api.convertLivePhoto(image); } catch(e) { missingTarget = e instanceof TypeError; }
     check('convert-target-required', missingTarget);
