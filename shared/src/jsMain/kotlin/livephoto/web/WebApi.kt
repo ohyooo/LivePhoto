@@ -124,7 +124,7 @@ public fun analyzeLivePhoto(input: ByteArray): Promise<WebResult> = read(input) 
         is CoreResult.Failure -> failure(result.error)
         is CoreResult.Success -> WebResult(true, protocol = result.value.inspection.detection.primaryProtocol?.protocol?.value.orEmpty(),
             verdict = result.value.validation.verdict.name, coverage = result.value.validation.coverage.name,
-            reportJson = reportJson(analysis(result.value)))
+            reportJson = reportJson(analysis(result.value, DefaultLivePhotoCore().getMediaCapabilities())))
     }
 }
 

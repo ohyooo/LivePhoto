@@ -75,12 +75,15 @@ internal fun validation(v: ValidationReport): dynamic = record("verdict" to v.ve
     "issues" to v.issues.map { issue(it) }.toTypedArray())
 private fun condition(v: Condition): dynamic = record("operator" to v.operator.name, "key" to v.key, "value" to value(v.value),
     "operands" to v.operands.map { condition(it) }.toTypedArray())
-internal fun analysis(v: AnalysisResult): dynamic = record("kind" to "Analysis", "inspection" to inspection(v.inspection),
+internal fun analysis(v: AnalysisResult, media: MediaCapabilities): dynamic = record("kind" to "Analysis", "inspection" to inspection(v.inspection),
     "validation" to validation(v.validation), "capabilities" to record("availability" to v.capabilities.availability.name,
         "operations" to v.capabilities.operations.map { record("operation" to it.operation.name, "implementation" to it.implementation.name,
             "lifecycle" to it.lifecycle.name, "exposure" to it.exposure.name, "reasons" to it.reasons.map { r -> r.value }.toTypedArray(),
             "conditions" to it.conditions.map { c -> condition(c) }.toTypedArray()) }.toTypedArray(),
-        "issues" to v.capabilities.issues.map { issue(it) }.toTypedArray()))
+        "issues" to v.capabilities.issues.map { issue(it) }.toTypedArray()),
+    "mediaCapabilities" to record("backendIds" to media.backendIds.toTypedArray(),
+        "operations" to media.operations.map { record("operation" to it.operation.name, "implementation" to it.implementation.name,
+            "reasons" to it.reasons.map { r -> r.value }.toTypedArray(), "conditions" to it.conditions.map { c -> condition(c) }.toTypedArray()) }.toTypedArray()))
 internal fun operationReport(v: OperationResult): dynamic = record("kind" to "Operation", "validation" to validation(v.validation),
     "preservation" to record("records" to v.preservation.records.map { record("assetId" to it.assetId.value,
         "guarantee" to it.guarantee.name, "outcome" to it.outcome.name, "sourceDigest" to it.sourceDigest?.value,

@@ -73,7 +73,9 @@ try {
       check(target + ':analyze-no-media-backend', analyzed.success && analyzed.report.kind === 'Analysis' && analyzed.verdict !== 'Invalid' &&
         analyzed.report.validation.checks.every(c => ['Structure','Protocol'].includes(c.layer)) &&
         analyzed.report.capabilities.operations.some(o => o.operation === 'ExtractRaw') &&
-        analyzed.report.capabilities.operations.every(o => !['ExtractFrame','Transcode','Trim'].includes(o.operation) || o.implementation === 'Unsupported'));
+        analyzed.report.mediaCapabilities.backendIds.length === 0 &&
+        analyzed.report.mediaCapabilities.operations.filter(o => ['ExtractFrame','Transcode','Trim'].includes(o.operation)).length === 3 &&
+        analyzed.report.mediaCapabilities.operations.every(o => !['ExtractFrame','Transcode','Trim'].includes(o.operation) || o.implementation === 'Unsupported'));
       const key = await api.getKeyPhotoPosition(created.blob);
       check(target + ':key-position', key.success && key.report.kind === 'KeyPhoto' &&
         JSON.stringify(key.report) === JSON.stringify(inspected.report.keyPhoto) &&
