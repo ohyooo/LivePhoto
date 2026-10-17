@@ -31,7 +31,7 @@ import livephoto.core.memory.*
 import livephoto.ui.*
 
 /** Normalize native JS Promise errors before they cross shared Kotlin UI handlers. */
-private suspend fun <T> browserAwait(promise: Promise<T>): T = promise.catch { error ->
+private suspend fun <T> browserAwait(promise: Promise<T>): T = promise.catch<T> { error ->
     throw IllegalStateException(js("String(error && error.message || error)").unsafeCast<String>().take(2000))
 }.await()
 

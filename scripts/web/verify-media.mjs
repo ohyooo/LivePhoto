@@ -84,6 +84,11 @@ try {
     const path=join(directory,kind+'.mp4');await writeFile(path,new Uint8Array(output.bytes));
     const after=probe(path);
     if(after.streams.length!==2||after.streams.find(s=>s.codec_type==='video').codec_name!=='h264') throw Error('Output codec/streams');
+    if(kind==='transcode') {
+      const originalVideo=before.streams.find(s=>s.codec_type==='video'),outputVideo=after.streams.find(s=>s.codec_type==='video');
+      const originalHashes=new Set(before.packets.filter(p=>p.stream_index===originalVideo.index).map(p=>p.data_hash));
+      if(!after.packets.some(p=>p.stream_index===outputVideo.index&&!originalHashes.has(p.data_hash))) throw Error('Video was not re-encoded');
+    }
     for(const type of kind==='copy'?['video','audio']:['audio']) {
       const a=before.streams.find(s=>s.codec_type===type),b=after.streams.find(s=>s.codec_type===type);
       if(a.codec_name!==b.codec_name)throw Error('Unexpected encoder');

@@ -18,7 +18,7 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
   let engine=null, cancelled=false, timer;
   let rejectCancel;
   const abort=new Promise((_,reject)=>{rejectCancel=reject;});
-  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{engine?.terminate();reject(Error('媒体处理超时（120 秒）'));},120000);});
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{cancelled=true;engine?.terminate();reject(Error('媒体处理超时（120 秒）'));},120000);});
   const operation=(async()=>{
     if(!(file instanceof Blob)||file.size>LIMIT) throw Error('视频必须为不超过 32 MiB 的 File/Blob');
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||typeof transcodeVideo!=='boolean') throw Error('无效的 A/B 范围或转码参数');

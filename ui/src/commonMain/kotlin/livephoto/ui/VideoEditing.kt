@@ -63,7 +63,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                     onImage(selected)
                     status = "已将当前画面设为 C 和封面。截图会重新编码，不保证原视频 HDR/色彩信息。"
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { status = error.message ?: "截取失败" }
+                catch (error: Exception) { status = "截取失败：${error.message ?: error.toString()}" }
                 finally { working = false; onBusy(false) }
             }
         }) { Text("截取当前画面为 C／封面") }
@@ -78,7 +78,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                     onVideo(result)
                     status = result.summary
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { status = "处理失败：${error.message ?: "未知错误"}。没有替换输入视频。" }
+                catch (error: Exception) { status = "处理失败：${error.message ?: error.toString()}。没有替换输入视频。" }
                 finally { working = false; onBusy(false) }
             }
         }
