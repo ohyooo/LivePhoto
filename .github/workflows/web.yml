@@ -159,13 +159,23 @@ jobs:
           npm install --ignore-scripts --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Test mobile and wide layouts, chooser, errors and real downloads
+      - name: Package static website with optional same-origin media runtime
+        id: web_package
+        shell: pwsh
+        run: ./scripts/package-web-ui.ps1
+
+      - name: Test real FFmpeg Wasm and independently audit retained packets
         shell: bash
         run: |
           set -o pipefail
-          pwsh -File scripts/package-web-ui.ps1
-          node scripts/web/verify-ui.mjs 2>&1 | tee ci-output/web-ui-browser.log
           node scripts/web/verify-media.mjs 2>&1 | tee ci-output/web-media.log
+
+      - name: Test mobile and wide layouts, chooser, errors and real downloads
+        if: ${{ !cancelled() && steps.web_package.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/web/verify-ui.mjs 2>&1 | tee ci-output/web-ui-browser.log
 
       - name: Upload verified shared Compose website
         uses: actions/upload-artifact@v7

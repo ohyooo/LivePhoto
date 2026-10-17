@@ -14,7 +14,7 @@ if (!ffmpeg) throw Error('Synthetic media generator required');
 const generate = args => execFileSync(ffmpeg, ['-nostdin', '-n', '-hide_banner', '-loglevel', 'error', ...args], { timeout: 60000 });
 const imagePath = join(fixtures, 'cover.jpg'), videoPath = join(fixtures, 'clip.mp4');
 generate(['-f','lavfi','-i','color=c=blue:s=64x64','-frames:v','1','-threads','1','-update','1',imagePath]);
-generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-t','1','-an','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','25','-use_editlist','0','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoPath]);
+generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-t','3','-an','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','25','-use_editlist','0','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoPath]);
 const video = await readFile(videoPath);
 const videoHash = createHash('sha256').update(video).digest('hex');
 const server = createServer(async (req,res) => {
@@ -158,7 +158,7 @@ try {
       await page.waitForFunction(time=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&!v.seeking&&v.readyState>=2&&Math.abs(v.currentTime-time)<.01;},time);
       await page.waitForTimeout(150);
     };
-    await seek(.4);
+    await seek(1.4);
     await click('截取当前画面为 C／封面');
     await text('名称：cover-C.jpg').waitFor({state:'attached'});
     await page.waitForFunction(()=>{const image=document.querySelector('img[alt="已选封面预览"]');return image?.complete&&image.naturalWidth>0;});
@@ -181,9 +181,9 @@ try {
       return audit.hash===expectedVideoHash&&audit.verdict!=='Invalid'&&audit.source==='ProtocolField'&&
         audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-expectedKey)<.05;
     };
-    check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash));
-    await seek(.2);await click('设为 A');
-    await seek(.8);await click('设为 B');
+    check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash,1.4));
+    await seek(1.2);await click('设为 A');
+    await seek(2.6);await click('设为 B');
     await click('裁剪 A～B 并使用（音视频 copy）');
     await text('名称：trimmed-AB.mp4').waitFor({state:'attached',timeout:120000});
     check(label+':AB-copy-video-used',await text(/copy 裁剪完成；请求/).count()===1);
