@@ -40,6 +40,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var status by remember(editor) { mutableStateOf("暂停并拖动进度条。A/B 选择裁剪范围，C 截取当前画面作为封面。") }
     val scope = rememberCoroutineScope()
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
+    LaunchedEffect(editor, playback.duration) { if (cover == null) cover = editor.coverTime }
     val enabled = !parentBusy && !working && playback.ready
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("视频预览与 A / B / C", style = MaterialTheme.typography.titleMedium)

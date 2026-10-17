@@ -64,6 +64,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     private var selectedFrame: Frame? = null
     private var next = 0
     override val outputDescription = "浏览器下载"
+    override val supportsVideoEditing = true
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
 
     private fun register(kind: MediaKind, file: File, timeline: Timeline? = null): String {

@@ -141,15 +141,58 @@ try {
     check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1);
     await page.screenshot({path:`ci-output/web-ui-${label}-success.png`});
     check(label+':viewport-contained',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    const player=page.getByLabel('视频预览',{exact:true});
+    await player.waitFor({state:'attached'});
+    const seek=async time=>{
+      await player.evaluate((video,time)=>{video.pause();video.currentTime=time;},time);
+      await page.waitForFunction(time=>{const v=document.querySelector('video');return v&&!v.seeking&&v.readyState>=2&&Math.abs(v.currentTime-time)<.01;},time);
+      await page.waitForTimeout(150);
+    };
+    await seek(.4);
+    await click('截取当前画面为 C／封面');
+    await text('名称：cover-C.jpg').waitFor({state:'attached'});
+    await page.waitForFunction(()=>{const image=document.querySelector('img[alt="已选封面预览"]');return image?.complete&&image.naturalWidth>0;});
+    check(label+':current-frame-cover-selected',await page.getByAltText('已选封面预览').evaluate(image=>image.complete&&image.naturalWidth===64));
+    const generateAndAudit=async(expectedVideoHash)=>{
+      const pending=page.waitForEvent('download');pending.catch(()=>{});
+      await click('生成并保存 Live Photo');
+      const download=await pending;
+      if(await download.failure())throw Error('C output download failed');
+      const output=await readFile(await download.path());
+      const audit=await page.evaluate(async data=>{
+        const api=await import('/api/livephoto.mjs'),blob=new Blob([new Uint8Array(data)]);
+        const extracted=await api.extractVideo(blob),key=await api.getKeyPhotoPosition(blob),valid=await api.validateLivePhoto(blob);
+        if(!extracted.success||!key.success||!valid.success)throw Error('C carrier audit');
+        const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await extracted.blob.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
+        return {hash,key:key.report.position,source:key.report.source,verdict:valid.verdict};
+      },Array.from(output));
+      await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
+      await page.waitForTimeout(500);
+      return audit.hash===expectedVideoHash&&audit.verdict!=='Invalid'&&audit.source==='ProtocolField'&&
+        audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-.4)<.05;
+    };
+    check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash));
+    await seek(.2);await click('设为 A');
+    await seek(.8);await click('设为 B');
+    await click('裁剪 A～B 并使用（音视频 copy）');
+    await text('名称：trimmed-AB.mp4').waitFor({state:'attached',timeout:120000});
+    check(label+':AB-copy-video-used',await text(/copy 裁剪完成；请求/).count()===1);
+    await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v.readyState>=2;});
+    const trimmedHash=await player.evaluate(async video=>{
+      const data=await(await fetch(video.currentSrc)).arrayBuffer();
+      return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
+    });
+    check(label+':AB-carrier-C-rebased-video-exact',await generateAndAudit(trimmedHash));
+    await choose('重新选择图片',imagePath);
     await choose('重新选择视频',{name:'broken.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,1,2,3])});
     await click('生成并保存 Live Photo');
     await text(/错误码：/).waitFor({state:'visible'});
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==22||new Set(checks).size!==22) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==30||new Set(checks).size!==30) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 22 checks; shared Compose screen under /livephoto/, two sizes, real downloaded outputs audited');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 30 checks; shared Compose A/B/C editor under /livephoto/, two sizes, ten audited downloads');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

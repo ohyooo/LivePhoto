@@ -14,6 +14,7 @@ public data class CreatedPhoto(val operation: OperationResult)
 public interface LivePhotoUiPlatform {
     public val outputDescription: String
     public val successMessage: String get() = "已保存到 $outputDescription。"
+    public val supportsVideoEditing: Boolean get() = false
     @Composable
     public fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit
     public suspend fun describe(reference: String): SelectedMediaInfo

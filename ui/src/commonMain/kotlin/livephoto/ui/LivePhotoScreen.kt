@@ -20,7 +20,9 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
     var image by rememberSaveable { mutableStateOf<String?>(null) }
     var video by rememberSaveable { mutableStateOf<String?>(null) }
     var profile by rememberSaveable { mutableIntStateOf(0) }
-    var status by rememberSaveable { mutableStateOf("当前不自动从视频抽取封面；需要 JPEG 图片＋MP4 视频。不裁剪或转码。") }
+    var status by rememberSaveable { mutableStateOf(if (platform.supportsVideoEditing)
+        "当前不自动从视频抽取封面；可选择 JPEG 图片，或在视频预览中手动截取 C。裁剪默认 copy，转码需显式点击。"
+        else "当前不自动从视频抽取封面；需要 JPEG 图片＋MP4 视频。不裁剪或转码。") }
     var busy by remember { mutableStateOf(false) }
     var failed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
