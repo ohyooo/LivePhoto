@@ -30,6 +30,11 @@ import livephoto.core.*
 import livephoto.core.memory.*
 import livephoto.ui.*
 
+/** Normalize native JS Promise errors before they cross shared Kotlin UI handlers. */
+private suspend fun <T> browserAwait(promise: Promise<T>): T = promise.catch { error ->
+    throw IllegalStateException(js("String(error && error.message || error)").unsafeCast<String>().take(2000))
+}.await()
+
 public fun main() {
     ComposeViewport(document.getElementById("app")!!, configure = { isA11YEnabled = true }) {
         val platform = remember { BrowserPlatform() }
@@ -224,7 +229,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         override fun seek(seconds: Double) { surface?.seek(seconds) }
         override suspend fun capture(): String {
             check(surface != null && !disposed) { "播放器不可用" }
-            val result = surface.capture().unsafeCast<Promise<dynamic>>().await()
+            val result = browserAwait(surface.capture().unsafeCast<Promise<dynamic>>())
             check(!disposed) { "输入已改变" }
             val blob = result.blob.unsafeCast<Blob>()
             val file = js("new File([blob], 'cover-C.jpg', {type:'image/jpeg'})").unsafeCast<File>()
@@ -238,7 +243,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             options.start = start; options.end = end; options.transcodeVideo = transcodeVideo
             job = media[1].startVideoEdit(file, options)
             try {
-                val result = job.promise.unsafeCast<Promise<dynamic>>().await()
+                val result = browserAwait(job.promise.unsafeCast<Promise<dynamic>>())
                 check(!disposed) { "输入已改变" }
                 val blob = result.blob.unsafeCast<Blob>()
                 val name = if (transcodeVideo) "transcoded-H264.mp4" else "trimmed-AB.mp4"

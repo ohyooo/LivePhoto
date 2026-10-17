@@ -58,12 +58,13 @@ try {
     decoded.close();player.dispose();player.element.remove();
     const copy=await startVideoEdit(file,{start:1.2,end:2.6}).promise;
     const coded=await startVideoEdit(file,{start:.2,end:1.8,transcodeVideo:true}).promise;
-    let range=false,budget=false,cancel=false;
+    let range=false,budget=false,cancel=false,malformed=false;
     try{await startVideoEdit(file,{start:2,end:1}).promise;}catch{range=true;}
     try{await startVideoEdit(new Blob([new Uint8Array(32*1024*1024+1)]),{start:0,end:1}).promise;}catch{budget=true;}
     const pending=startVideoEdit(file,{start:0,end:1});pending.cancel();
     try{await pending.promise;}catch{cancel=true;}
-    return {loaded,captured,range,budget,cancel,immutable:await digest(file)===originalHash,
+    try{await startVideoEdit(new Blob([new Uint8Array([0,1,2,3])]),{start:0,end:1}).promise;}catch{malformed=true;}
+    return {loaded,captured,range,budget,cancel,malformed,immutable:await digest(file)===originalHash,
       copy:{...copy,blob:null,bytes:Array.from(new Uint8Array(await copy.blob.arrayBuffer()))},
       coded:{...coded,blob:null,bytes:Array.from(new Uint8Array(await coded.blob.arrayBuffer()))}};
   });
@@ -75,6 +76,7 @@ try {
   check('invalid-range-rejected',result.range);
   check('input-budget-rejected',result.budget);
   check('cancel-stops-operation',result.cancel);
+  check('malformed-media-never-accepted-as-probe-success',result.malformed);
   const ffprobe=join(dirname(ffmpeg),process.platform==='win32'?'ffprobe.exe':'ffprobe');
   const probe=path=>JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-show_packets','-show_data_hash','sha256','-of','json',path],{timeout:30000,maxBuffer:16*1024*1024}));
   const before=probe(source);
@@ -91,9 +93,9 @@ try {
     }
     check(kind+'-independent-native-packet-audit',true);
   }
-  if(checks.length!==10||new Set(checks).size!==10)throw Error('Incomplete media evidence');
+  if(checks.length!==11||new Set(checks).size!==11)throw Error('Incomplete media evidence');
   await writeFile('ci-output/web-media-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
     browserVersion:browser.version(),tests:checks.length,failures:0,checks,inputSha256:createHash('sha256').update(input).digest('hex'),
     scope:'browser-video-canvas-real-single-thread-ffmpeg-wasm-native-packet-audit-synthetic-audio-no-device-proof'},null,2)+'\n');
-  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 10 checks; real Wasm editing, native independent audio/video packet audit');
+  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 11 checks; real Wasm editing, native independent audio/video packet audit');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

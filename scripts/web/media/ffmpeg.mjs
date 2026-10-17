@@ -16,7 +16,10 @@ function sequence(original, retained) {
 
 export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
   let engine=null, cancelled=false, timer;
-  const promise=(async()=>{
+  let rejectCancel;
+  const abort=new Promise((_,reject)=>{rejectCancel=reject;});
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{engine?.terminate();reject(Error('媒体处理超时（120 秒）'));},120000);});
+  const operation=(async()=>{
     if(!(file instanceof Blob)||file.size>LIMIT) throw Error('视频必须为不超过 32 MiB 的 File/Blob');
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||typeof transcodeVideo!=='boolean') throw Error('无效的 A/B 范围或转码参数');
     const {FFmpeg}=await import('./vendor/ffmpeg/index.js');
@@ -24,19 +27,27 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
     engine=new FFmpeg();
     const logs=[];
     engine.on('log',({message})=>{logs.push(String(message).slice(0,500));if(logs.length>8)logs.shift();});
-    const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{engine.terminate();reject(Error('媒体处理超时（120 秒）'));},120000);});
     const work=(async()=>{
       await engine.load({coreURL:new URL('vendor/core/ffmpeg-core.js',base).href,
         wasmURL:new URL('vendor/core/ffmpeg-core.wasm',base).href});
       await engine.writeFile('input.mp4',new Uint8Array(await file.arrayBuffer()));
-      const probe=async(name,packets=true)=>{
+      let probeNumber=0;
+      const probe=async(name)=>{
+        const reportName=`probe-${probeNumber++}.json`;
         const args=['-v','error','-show_entries',
           'format=duration:stream=index,codec_type,codec_name,pix_fmt,color_transfer,color_primaries:stream_side_data=side_data_type:packet=stream_index,pts_time,dts_time,duration_time,flags,data_hash',
-          '-show_streams','-show_format',...(packets?['-show_packets','-show_data_hash','sha256']:[]),'-of','json',name,'-o','probe.json'];
-        if(await engine.ffprobe(args,30000)!==0) throw Error('FFprobe 无法读取媒体');
-        const text=await engine.readFile('probe.json','utf8');
+          '-show_error','-show_streams','-show_format','-show_packets','-show_data_hash','sha256','-of','json',name,'-o',reportName];
+        const status=await engine.ffprobe(args,30000);
+        // Upstream #817: 0.12.10's C entry returns normally, while its JS binding
+        // reads an unset `ret` (-1). Never treat -1 alone as success: require a
+        // fresh, complete, error-free JSON report and then verify packet payloads.
+        if(status!==0&&status!==-1) throw Error('FFprobe 无法读取媒体：'+logs.join('\n').slice(0,2000));
+        const text=await engine.readFile(reportName,'utf8');
         if(text.length>16*1024*1024) throw Error('采样表超过编辑预算');
-        return JSON.parse(text);
+        const report=JSON.parse(text);
+        if(report.error||!report.format||!Array.isArray(report.streams)||!report.streams.length||
+          !Array.isArray(report.packets)||!report.packets.length) throw Error('FFprobe 报告不完整或媒体损坏：'+logs.join('\n').slice(0,2000));
+        return report;
       };
       const before=await probe('input.mp4');
       const duration=Number(before.format?.duration);
@@ -84,8 +95,10 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
         // requested boundaries are measured, or reuse a stale C metadata time.
         timelineKnown:!transcodeVideo};
     })();
-    try {return await Promise.race([work,timeout]);}
-    finally {clearTimeout(timer);engine.terminate();}
-  })().catch(error=>{throw error instanceof Error?error:Error(String(error));});
-  return {promise,cancel(){cancelled=true;engine?.terminate();}};
+    return await work;
+  })();
+  const promise=Promise.race([operation,abort,timeout])
+    .catch(error=>{throw error instanceof Error?error:Error(String(error));})
+    .finally(()=>{clearTimeout(timer);engine?.terminate();});
+  return {promise,cancel(){cancelled=true;engine?.terminate();rejectCancel(Error('已取消'));}};
 }
