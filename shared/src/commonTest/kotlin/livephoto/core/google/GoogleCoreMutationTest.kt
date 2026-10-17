@@ -177,8 +177,17 @@ class GoogleCoreMutationTest {
         val accepted = MemoryOutputTransaction(context, "aac-valid-create")
         value(core.create(CreateRequest(source(GoogleFixtures.jpeg(), "aac-cover"), source(valid.bytes, "aac-video"), ProtocolSelector(ProtocolId("google.motionphoto.v2")), output = accepted, context = context)))
         assertEquals(1, accepted.committedAssets().size)
-        for ((index, asc) in listOf(GoogleFixtures.bytes(0x12, 0x90), GoogleFixtures.bytes(0x11, 0xb8)).withIndex()) {
-            val invalid = GoogleFixtures.video(aac = true, audioConfig = asc).bytes
+        val mono = GoogleFixtures.video(aac = true, audioConfig = GoogleFixtures.bytes(0x11, 0x88)).bytes
+        val monoOutput = MemoryOutputTransaction(context, "aac-mono-create")
+        value(core.create(CreateRequest(source(GoogleFixtures.jpeg(), "mono-cover"), source(mono, "mono-video"), ProtocolSelector(ProtocolId("google.motionphoto.v2")), output = monoOutput, context = context)))
+        assertEquals(1, monoOutput.committedAssets().size)
+        // Reserved MP4 channelcount=2 is not an assertion of stereo. Keep the
+        // negative coverage with a genuine non-reserved conflicting value.
+        val conflictingChannels = valid.bytes.copyOf()
+        val tag = "mp4a".encodeToByteArray()
+        val entry = (0..conflictingChannels.size - 4).single { start -> tag.indices.all { conflictingChannels[start + it] == tag[it] } }
+        conflictingChannels[entry + 4 + 17] = 3
+        for ((index, invalid) in listOf(GoogleFixtures.video(aac = true, audioConfig = GoogleFixtures.bytes(0x12, 0x90)).bytes, conflictingChannels).withIndex()) {
             val probe = assertIs<CoreResult.Failure>(BmffVideoProbe(BinaryReader(source(invalid, "aac-invalid-$index"), context)).probe(ByteRange(0uL, invalid.size.toULong())))
             assertEquals(IssueCode("CORRUPTED_CONTAINER"), probe.error.code)
             val transaction = MemoryOutputTransaction(context, "aac-rejected-$index")
