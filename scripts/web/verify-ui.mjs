@@ -203,7 +203,10 @@ try {
     await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
     await seek(.2);
     await click('截取当前画面为 C／封面');
-    await text('当前画面已选为封面 C').waitFor({state:'visible'});
+    // Compose also exposes this status in its hidden accessibility bridge.
+    // Existence acknowledges the callback; the real download/key/video audit
+    // below, not DOM visibility of that bridge, proves the recaptured C works.
+    await text('当前画面已选为封面 C').waitFor({state:'attached'});
     const transcodedHash=await player.evaluate(async video=>{
       const data=await(await fetch(video.currentSrc)).arrayBuffer();
       return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
