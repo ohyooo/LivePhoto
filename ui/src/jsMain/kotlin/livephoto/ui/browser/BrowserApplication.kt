@@ -5,6 +5,10 @@ package livephoto.ui.browser
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.window.ComposeViewport
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.HtmlElementView
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
@@ -14,12 +18,14 @@ import kotlinx.browser.window
 import kotlinx.coroutines.await
 import org.w3c.dom.HTMLAnchorElement
 import org.w3c.dom.HTMLInputElement
+import org.w3c.dom.HTMLElement
 import org.w3c.files.File
 import org.w3c.files.Blob
 import org.w3c.files.BlobPropertyBag
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Int8Array
 import kotlin.js.Promise
+import kotlin.math.roundToLong
 import livephoto.core.*
 import livephoto.core.memory.*
 import livephoto.ui.*
@@ -37,6 +43,7 @@ public fun main() {
                 val values = Int8Array(response.arrayBuffer().await())
                 val bytes = ByteArray(values.length) { values.asDynamic()[it].unsafeCast<Byte>() }
                 resolver.preload(FontFamily(Font("NotoSansSC", bytes)))
+                platform.media = window.asDynamic().livePhotoMediaReady.unsafeCast<Promise<dynamic>>().await()
                 fontsReady = true
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { fontError = true }
@@ -50,9 +57,24 @@ public fun main() {
 
 private class BrowserPlatform : LivePhotoUiPlatform {
     private val files = mutableMapOf<String, File>()
+    var media: dynamic = null
+    private data class Timeline(val root: String, val origin: Double)
+    private data class Frame(val image: String, val root: String, val sourceTime: Double)
+    private val timelines = mutableMapOf<String, Timeline>()
+    private var selectedFrame: Frame? = null
     private var next = 0
     override val outputDescription = "浏览器下载"
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
+
+    private fun register(kind: MediaKind, file: File, timeline: Timeline? = null): String {
+        val prefix = "${kind.name}:"
+        files.keys.filter { it.startsWith(prefix) }.forEach { files.remove(it) }
+        val reference = "$prefix${next++}"
+        files[reference] = file
+        if (kind == MediaKind.Image) selectedFrame = null
+        else { timelines.clear(); timelines[reference] = timeline ?: Timeline(reference, 0.0) }
+        return reference
+    }
 
     @Composable
     override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit {
@@ -69,10 +91,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             input.onchange = {
                 val file = input.files?.item(0)
                 if (file != null) {
-                    val prefix = "${kind.name}:"
-                    files.keys.filter { it.startsWith(prefix) }.forEach { files.remove(it) }
-                    val reference = "$prefix${next++}"
-                    files[reference] = file
+                    val reference = register(kind, file)
                     currentResult(reference)
                 } else currentResult(null)
                 input.value = ""
@@ -92,6 +111,13 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {
         val photo = files[image] ?: error("Select the image again")
         val movie = files[video] ?: error("Select the video again")
+        val frame = selectedFrame?.takeIf { it.image == image }
+        val timeline = timelines[video]
+        if (frame != null && (timeline == null || frame.root != timeline.root || frame.sourceTime < timeline.origin))
+            return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan,
+                "视频范围或编码已改变，请在当前视频上重新截取 C 封面；不会猜测旧封面的时间。"))
+        val key = frame?.let { CoverPosition.Timestamp(Time(((it.sourceTime - timeline!!.origin) * 1_000_000).roundToLong(), 1_000_000u),
+            Selection.AtOrBefore, Time(1, 1u)) }
         if (photo.size.toLong() + movie.size.toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
         suspend fun bytes(file: File): ByteArray {
@@ -108,7 +134,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             val policy = if (target.protocol == ProtocolIds.Oplus) MutationPolicy(loss = LossPolicy.AllowListed,
                 allowedLosses = listOf(MetadataLoss.OplusCameraUserComment, MetadataLoss.OplusAsciiCameraUserComment)) else MutationPolicy()
             return when (val result = DefaultLivePhotoCore().create(CreateRequest(imageSource, videoSource, target,
-                policy = policy, output = output, context = ctx))) {
+                edits = key?.let { EditSpec(keyPosition = it) }, policy = policy, output = output, context = ctx))) {
                 is CoreResult.Failure -> result
                 is CoreResult.Success -> {
                     created = result.value
@@ -132,6 +158,82 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             created?.output?.assets?.forEach { it.readableSource?.close() }
             imageSource.close(); videoSource.close()
         }
+    }
+
+    @Composable
+    override fun ImagePreview(reference: String, modifier: Modifier) {
+        val file = files[reference] ?: return
+        key(reference) {
+            HtmlElementView(factory = {
+                val preview = media[0].imagePreview(file)
+                val element = preview.element.unsafeCast<HTMLElement>()
+                element.asDynamic().releasePreview = preview.dispose
+                element
+            }, modifier = modifier.height(160.dp), onRelease = { it.asDynamic().releasePreview() })
+        }
+    }
+
+    @Composable
+    override fun rememberVideoEditor(reference: String?): VideoEditor? {
+        if (reference == null) return null
+        val file = files[reference] ?: return null
+        val timeline = timelines[reference] ?: return null
+        val controller = remember(reference) { BrowserEditor(file, timeline) }
+        DisposableEffect(controller) { onDispose { controller.dispose() } }
+        return controller
+    }
+
+    private inner class BrowserEditor(private val file: File, private val timeline: Timeline) : VideoEditor {
+        private val state = mutableStateOf(VideoPlayback())
+        override val playback: State<VideoPlayback> = state
+        override val coverTime: Double? get() = selectedFrame?.takeIf { it.root == timeline.root }
+            ?.let { (it.sourceTime - timeline.origin).takeIf { time -> time >= 0 && time < state.value.duration } }
+        private var surface: dynamic = null
+        private var job: dynamic = null
+        private var disposed = false
+        @Composable
+        override fun Player(modifier: Modifier) {
+            HtmlElementView(factory = {
+                val callback: (dynamic) -> Unit = { value ->
+                    if (!disposed) state.value = VideoPlayback(value.duration.unsafeCast<Double>(), value.current.unsafeCast<Double>(),
+                        value.seeking.unsafeCast<Boolean>(), value.ready.unsafeCast<Boolean>(), value.error.unsafeCast<String?>())
+                }
+                surface = media[0].createPlayer(file, callback)
+                surface.element.unsafeCast<HTMLElement>()
+            }, modifier = modifier, onRelease = { surface?.dispose(); surface = null })
+        }
+        override fun seek(seconds: Double) { surface?.seek(seconds) }
+        override suspend fun capture(): String {
+            check(surface != null && !disposed) { "播放器不可用" }
+            val result = surface.capture().unsafeCast<Promise<dynamic>>().await()
+            check(!disposed) { "输入已改变" }
+            val blob = result.blob.unsafeCast<Blob>()
+            val file = js("new File([blob], 'cover-C.jpg', {type:'image/jpeg'})").unsafeCast<File>()
+            val reference = register(MediaKind.Image, file)
+            selectedFrame = Frame(reference, timeline.root, timeline.origin + result.time.unsafeCast<Double>())
+            return reference
+        }
+        override suspend fun process(start: Double, end: Double, transcodeVideo: Boolean): EditedVideo {
+            check(!disposed && job == null) { "已有媒体任务或输入已改变" }
+            val options = js("({})")
+            options.start = start; options.end = end; options.transcodeVideo = transcodeVideo
+            job = media[1].startVideoEdit(file, options)
+            try {
+                val result = job.promise.unsafeCast<Promise<dynamic>>().await()
+                check(!disposed) { "输入已改变" }
+                val blob = result.blob.unsafeCast<Blob>()
+                val name = if (transcodeVideo) "transcoded-H264.mp4" else "trimmed-AB.mp4"
+                val editedFile = js("new File([blob], name, {type:'video/mp4'})").unsafeCast<File>()
+                val known = result.timelineKnown.unsafeCast<Boolean>()
+                val mapped = if (known) Timeline(timeline.root, timeline.origin + result.origin.unsafeCast<Double>()) else null
+                val reference = register(MediaKind.Video, editedFile, mapped)
+                val summary = if (known) "copy 裁剪完成；请求 ${mediaSeconds(start)}～${mediaSeconds(end)}，实际保留的视频帧 ${mediaSeconds(result.actualStart.unsafeCast<Double>())}～${mediaSeconds(result.actualEnd.unsafeCast<Double>())}。音视频编码数据包已核对。" else
+                    "显式 H.264 转码完成，音频数据包 copy 已核对；未证明原始时间映射，请在新视频上重新截取 C。"
+                return EditedVideo(reference, summary + " 普通 metadata 保留不作完整保证。")
+            } finally { job = null }
+        }
+        override fun cancel() { job?.cancel() }
+        fun dispose() { disposed = true; cancel() }
     }
 
     override fun formatFailure(error: Exception, imageName: String?, videoName: String?): String =

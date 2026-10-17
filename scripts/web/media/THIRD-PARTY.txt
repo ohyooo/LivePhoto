@@ -1,0 +1,16 @@
+Optional browser media backend (loaded only when editing is requested)
+
+@ffmpeg/ffmpeg 0.12.15: MIT
+Source and build scripts: https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15
+License: https://github.com/ffmpegwasm/ffmpeg.wasm/blob/v12.15/LICENSE
+
+@ffmpeg/core 0.12.10: GPL-2.0-or-later (contains FFmpeg and optional codec libraries)
+Source/build configuration: https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15
+Upstream licensing: https://ffmpegwasm.netlify.app/docs/overview/#license
+FFmpeg source and license: https://ffmpeg.org/download.html and https://ffmpeg.org/legal.html
+
+These are separate, unmodified npm distributions, hosted on the same origin.
+No media is sent to an external service. The GPL media component is not linked
+into the Kotlin protocol Core or the desktop/Android artifacts by this change.
+See the included license files and dependency source/build references before
+redistributing this optional component; this notice is not a legal exemption.

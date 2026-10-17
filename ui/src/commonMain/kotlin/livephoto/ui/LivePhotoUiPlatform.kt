@@ -1,6 +1,7 @@
 package livephoto.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import livephoto.core.*
 
 public enum class MediaKind { Image, Video }
@@ -18,4 +19,8 @@ public interface LivePhotoUiPlatform {
     public suspend fun describe(reference: String): SelectedMediaInfo
     public suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto>
     public fun formatFailure(error: Exception, imageName: String?, videoName: String?): String
+    @Composable
+    public fun rememberVideoEditor(reference: String?): VideoEditor? = null
+    @Composable
+    public fun ImagePreview(reference: String, modifier: Modifier) {}
 }

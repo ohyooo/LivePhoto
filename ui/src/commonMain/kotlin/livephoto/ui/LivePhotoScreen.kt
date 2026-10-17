@@ -48,6 +48,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
             failed = false
         }
     }
+    val editor = platform.rememberVideoEditor(video)
     Scaffold(topBar = {
         TopAppBar(title = { Text("LivePhoto") }, modifier = Modifier.testTag("app-bar"))
     }) { innerPadding ->
@@ -72,6 +73,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
             }
             Text(if (image == null) "图片：未选择" else "图片：已选择", modifier = Modifier.testTag("image-selection"))
             if (image != null) {
+                platform.ImagePreview(image!!, Modifier.fillMaxWidth().heightIn(max = 180.dp))
                 Text("名称：${imageInfo?.displayName ?: "未知"}", modifier = Modifier.testTag("image-name"))
                 Text("大小：${if (imageInfo == null) "正在读取…" else formatMediaSize(imageInfo?.sizeBytes)}", modifier = Modifier.testTag("image-size"))
             }
@@ -84,6 +86,9 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                 Text("名称：${videoInfo?.displayName ?: "未知"}", modifier = Modifier.testTag("video-name"))
                 Text("大小：${if (videoInfo == null) "正在读取…" else formatMediaSize(videoInfo?.sizeBytes)}", modifier = Modifier.testTag("video-size"))
             }
+            if (editor != null) VideoEditingPanel(editor, busy, { busy = it },
+                onImage = { image = it; failed = false; status = "当前画面已选为封面 C" },
+                onVideo = { video = it.reference; failed = false; status = it.summary + "\n原文件未修改。" })
             Text("目标协议", style = MaterialTheme.typography.titleMedium)
             listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1").forEachIndexed { index, label ->
                 OutlinedButton(onClick = { profile = index }, enabled = !busy,

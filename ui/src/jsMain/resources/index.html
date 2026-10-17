@@ -10,6 +10,7 @@
 </head>
 <body>
   <div id="app"></div>
+  <script>window.livePhotoMediaReady = Promise.all([import('./media/player.mjs'), import('./media/ffmpeg.mjs')]);</script>
   <script src="livephoto-ui.js"></script>
 </body>
 </html>
