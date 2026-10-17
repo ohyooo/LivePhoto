@@ -16,10 +16,11 @@
 - [x] 只读协议接口实现：多重检测、Inspect、Analyze、关键照片位置与来源读取。
 - [x] Clean Split 接口实现：多资产 Blob 输出、变化清单及分项保真证明；与 Raw Extract 分开。
 - [x] 有限 JPEG Convert 接口实现：与 Create 分开，不隐式修复或转码；下述 EXIF 限制仍保留。
-- [ ] 有限 Repair：先 dry-run，再显式提交安全修改，报告无法修复/歧义问题。
+- [x] 有限 Repair：默认 dry-run，显式应用安全修改；结构化报告保留阻止/无操作/修复前后问题。Google V1/V2 长度修复通过浏览器验证；默认新建 OPPO 布局保留安全拒绝，见下方限制。
 - [ ] 关键照片 metadata 写入；与视频抽帧、替换封面分开。
 - [ ] 将不依赖文件系统、真实编码素材或 FFmpeg 的公共协议回归接入 JS；不伪造平台 actual、不静默跳过后端测试。
-- [ ] 为上述 API 增加真实浏览器正向、错误、不可变输入、多资产和字节一致性回归；主线程与 Worker 分开验证。
+- [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
+- [ ] 为其它已公开 API 补齐 Worker 专项，以及后续新接口的相应回归；不能以主线程结果代替 Worker。
 - [ ] 后续按需将已验证能力接入共享 UI，不另写网页业务逻辑。
 
 ## 后续、尚未实现
@@ -34,8 +35,8 @@ Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入
 
 ## 本轮状态
 
-下一阶段正在补齐 `repairLivePhoto`：只开放 SafeMetadataOnly，默认 dry-run，显式应用后返回 Repair 报告及原子提交的 assets；success 不等于已修复，被阻止/无需修改/预览时均无输出。新增 Google V1/V2 的无操作、独立损坏长度修复、过滤阻止、保真和幂等测试；OPPO 默认新建布局则单独测试安全拒绝/无输出/输入不变，不能算修复成功。再加错误/预算/歧义后缀检查，计划功能库 70 项。共享 UI 验收调整为在 `/livephoto/` 子路径加载，检查字体/Wasm，相应扩展为 22 项。**这些新测试尚待对应 CI 验证，不能算已通过或已部署。** 本阶段不新增 Repair UI 按钮，也不扩大协议支持。
+`repairLivePhoto` 只开放 SafeMetadataOnly，默认 dry-run，显式应用后返回 Repair 报告及原子提交的 assets；success 不等于已修复，被阻止/无需修改/预览时均无输出。Google V1/V2 的无操作、独立损坏长度修复、过滤阻止、保真和幂等通过验证；OPPO 默认新建布局单独验证安全拒绝/无输出/输入不变，不算修复成功。加上错误/预算/歧义后缀检查，[Web CI 39006350139](https://github.com/ohyooo/LivePhoto/actions/runs/39006350139) 在代码提交 `a9699f3` 通过功能库 **70 项**、共享 UI **22 项**。UI 实际从 `/livephoto/` 子路径加载字体/Wasm，保留两尺寸六次真实下载审计；主线程与 Worker 均调用修复 API。产物清单、哈希与四张界面截图已独立复核。本阶段没有新增 Repair UI 按钮，也没有扩大协议支持。
 
 只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮。
 
-新增接口对应的功能库检查扩展为 50 项：含三个目标的结构化检查、Clean Split 幂等性、同目标字节不变、四个实际跨协议转换方向、两个 EXIF 安全拒绝方向，以及错误/无输出、输入不变和 Worker 回归。共享 UI 的 20 项操作检查另行保留。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准；不能用基础阶段的旧 25＋20 项结果代替。** 公共协议 commonTest 的 JS 迁移、Repair、关键照片写入及媒体后端仍未完成。
+上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作均保留在本轮 70＋22 项中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** 公共协议 commonTest 的 JS 迁移、其余 Worker 专项、关键照片写入、更多共享 UI 功能及浏览器媒体后端仍未完成。
