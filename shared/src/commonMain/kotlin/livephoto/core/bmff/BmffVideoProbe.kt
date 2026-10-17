@@ -50,7 +50,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         val movieDuration = if (u8(mvhd, 0) == 0) u32(mvhd, 16).toULong() else u64(mvhd, 24)
         if (movieDuration == 0uL) corrupt("Movie duration is zero")
         val tracks = mutableListOf<VideoTrack>()
-        for (trak in moov.filter { it.type == "trak" }) tracks.add(track(trak, range, mdats.map { it.payload }, movieScale, movieDuration))
+        for (trak in moov.filter { it.type == "trak" }) tracks.add(track(trak, range, mdats.map { it.payload }, movieScale, movieDuration, container))
         if (tracks.isEmpty() || tracks.none { it.handler == "vide" }) corrupt("Movie has no video track")
         if (tracks.map { it.trackId }.distinct().size != tracks.size) corrupt("Duplicate track identifiers")
         // Disallow overlapping chunk/sample resources, including across tracks.
@@ -60,7 +60,7 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
         VideoStructure(container, range, tracks.toList(), movieScale, movieDuration)
     }
 
-    private suspend fun track(trak: BmffBox, videoRange: ByteRange, mdats: List<ByteRange>, movieScale: UInt, movieDuration: ULong): VideoTrack {
+    private suspend fun track(trak: BmffBox, videoRange: ByteRange, mdats: List<ByteRange>, movieScale: UInt, movieDuration: ULong, container: VideoContainer): VideoTrack {
         val children = children(trak, 2u)
         val tkhd = bytes(one(children, "tkhd"))
         fullVersion(tkhd, setOf(0, 1), allowFlags = true)
@@ -156,7 +156,14 @@ internal class BmffVideoProbe(private val reader: BinaryReader, private val budg
             config = bytes(one(extra, "esds"))
             aacConfiguration = validateEsds(config, budget)
             if (aacConfiguration.actualSampleRate > 65535u) unsupported("AAC sample rates above 16.16 sample-entry capacity require an unimplemented rate binding")
-            if (u32(entryBytes, 24) != (aacConfiguration.actualSampleRate shl 16) || u16(entryBytes, 16).toUInt() != aacConfiguration.channelCount) corrupt("AAC AudioSpecificConfig rate/channels disagree with the sample entry")
+            val declaredChannels = u16(entryBytes, 16).toUInt()
+            // MP4 muxers may write the reserved channelcount value 2 even for
+            // mono AAC (FFmpeg n5.1.4 movenc.c:1163-1170). ASC is authoritative;
+            // retain the declared field separately for preservation. This is
+            // not a QuickTime audio-entry rule or permission to ignore rates.
+            val reservedMp4Channels = container == VideoContainer.Mp4 && declaredChannels == 2u
+            if (u32(entryBytes, 24) != (aacConfiguration.actualSampleRate shl 16) ||
+                declaredChannels != aacConfiguration.channelCount && !reservedMp4Channels) corrupt("AAC AudioSpecificConfig rate/channels disagree with the sample entry")
         }
         val stsz = bytes(one(stbl, "stsz")); fullVersion(stsz, setOf(0)); need(stsz, 12)
         val count = u32(stsz, 8).toULong()

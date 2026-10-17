@@ -11,6 +11,33 @@ class BmffVideoProbeTest {
         Context(Limits(65536uL, 65536uL, maxMetadataBytes = metadata), cancellation = cancellation)
 
     @Test
+    fun mp4ReservedAacChannelCountDoesNotOverrideMonoAsc(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video(aac = true, audioConfig = byteArrayOf(0x11, 0x88.toByte())).bytes
+        val audio = probe(bytes).tracks.single { it.handler == "soun" }
+        assertEquals(2u, audio.audioChannels)
+        assertEquals(1u, audio.audioActualChannelCount)
+        assertEquals(48000u, audio.audioActualSampleRate)
+        // Actual single-channel declarations remain supported too.
+        val explicit = bytes.copyOf()
+        explicit[payloadOffset(explicit, "mp4a") + 17] = 1
+        assertEquals(1u, probe(explicit).tracks.single { it.handler == "soun" }.audioActualChannelCount)
+    }
+
+    @Test
+    fun reservedAacChannelsDoNotPermitOtherConflictsOrQuickTimeMismatches(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video(aac = true, audioConfig = byteArrayOf(0x11, 0x88.toByte())).bytes
+        val otherChannels = bytes.copyOf()
+        otherChannels[payloadOffset(otherChannels, "mp4a") + 17] = 3
+        failure("CORRUPTED_CONTAINER", result(otherChannels))
+        val wrongRate = bytes.copyOf()
+        put32(wrongRate, payloadOffset(wrongRate, "mp4a") + 24, 44100u shl 16)
+        failure("CORRUPTED_CONTAINER", result(wrongRate))
+        val quickTime = bytes.copyOf()
+        "qt  ".encodeToByteArray().copyInto(quickTime, payloadOffset(quickTime, "ftyp"))
+        failure("CORRUPTED_CONTAINER", result(quickTime))
+    }
+
+    @Test
     fun independentMovieTablesProduceExpectedAbsoluteSampleRangesAndTimes(): Unit = runImmediate {
         val fixture = GoogleFixtures.video()
         val result = probe(fixture.bytes)
