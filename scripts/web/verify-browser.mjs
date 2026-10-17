@@ -22,7 +22,8 @@ const worker = `import {createLivePhoto,extractVideo,repairLivePhoto} from '/liv
 onmessage=async()=>{try{const image=await(await fetch('/fixture-image')).blob();const video=await(await fetch('/fixture-video')).blob();
 const result=await createLivePhoto(image,video);if(!result.success)throw Error(result.code+': '+result.message);
 const extracted=await extractVideo(result.blob);if(!extracted.success)throw Error(extracted.code);
-const preview=await repairLivePhoto(result.blob);if(!preview.success||preview.report.kind!=='Repair'||!preview.report.dryRun||preview.assets.length||preview.report.blocked.length)throw Error('Worker repair preview');
+const repairable=await createLivePhoto(image,video,{target:'google.microvideo.v1'});if(!repairable.success)throw Error('Worker repair fixture');
+const preview=await repairLivePhoto(repairable.blob);if(!preview.success||preview.report.kind!=='Repair'||!preview.report.dryRun||preview.assets.length||preview.report.blocked.length)throw Error('Worker repair preview');
 const a=new Uint8Array(await extracted.blob.arrayBuffer()),b=new Uint8Array(await video.arrayBuffer());
 postMessage({success:a.length===b.length&&a.every((v,i)=>v===b[i])});}catch(e){postMessage({success:false,message:String(e)})}};`;
 const server = createServer(async (request, response) => {
@@ -128,6 +129,23 @@ try {
           converted.report.preservation.records.length > 0,
           JSON.stringify({success:converted.success,code:converted.code,stage:converted.stage,message:converted.message,
             protocol:converted.protocol,detected:convertedDetection?.protocol,videoHash:convertedVideoHash,expectedVideoHash:beforeVideo,report:converted.report}));
+      }
+      if (target === 'oplus.olive') {
+        // Core intentionally excludes this writer's explicit secondary Padding=0
+        // repair dialect. Do not broaden protocol writes in a Web adapter task.
+        const damaged = await corruptLength(created.blob, target), damagedHash = await digest(damaged);
+        for (const [name, input, options] of [
+          ['repair-existing-layout-refused',created.blob,{}],
+          ['repair-damaged-layout-refused',damaged,{}],
+          ['repair-filtered-layout-refused',damaged,{dryRun:false,allowedIssueCodes:['OTHER_ISSUE']}],
+          ['repair-apply-layout-refused',damaged,{dryRun:false}],
+        ]) {
+          const refused = await api.repairLivePhoto(input, options);
+          check(target + ':' + name, !refused.success && refused.code === 'REPAIR_AMBIGUOUS' && refused.stage === 'Plan' &&
+            refused.report.kind === 'Error' && refused.assets.length === 0 && refused.blob === null, JSON.stringify(refused));
+        }
+        check(target + ':repair-refused-input-immutable', await digest(created.blob) === carrierHash && await digest(damaged) === damagedHash);
+        continue;
       }
       const unchangedRepair = await api.repairLivePhoto(created.blob, {dryRun:false});
       check(target + ':repair-valid-noop', unchangedRepair.success && unchangedRepair.report.kind === 'Repair' &&

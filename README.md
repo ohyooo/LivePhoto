@@ -92,6 +92,8 @@ Convert 仅开放上面三个既有 JPEG 目标，默认同目标原样保留；
 
 `repairLivePhoto(input)` 默认仅预览已有 Core 能证明安全的 metadata 修复，不扫描猜测视频位置。确认 `result.report.blocked` 为空、核对 `proposedChanges` 后，可传 `{ dryRun: false }` 生成新文件；可用 `allowedIssueCodes` 限定问题类型。此入口不开放 remux、重新配对、转码或 metadata 丢失授权。`success` 仅表示取得报告：被阻止、无需修改或预览时均没有输出 Blob。实际修改见 `changesApplied`，验证和保真证明位于 `report.operation`。原输入不变，修复失败不返回半成品；当前验收状态见路线文档。
 
+Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件的目录包含显式次级 `Padding="0"`，超出既有 Core 修复门禁，会返回 `REPAIR_AMBIGUOUS`，预览也不例外；这不等于文件无效。此适配保留拒绝，不删除字段或自行更改协议。Google V1/V2 的有限长度修复与该 OPPO 布局的无输出拒绝分别测试。
+
 构建（使用已有 JDK 25 和项目 Wrapper）：
 
 ```sh

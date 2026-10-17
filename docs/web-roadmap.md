@@ -25,6 +25,7 @@
 ## 后续、尚未实现
 
 - [ ] 不移动 EXIF 的固定长度 XMP 槽位优化及独立保留证明。当前 Core 对 XMP 调整会移动未验证 EXIF 的布局返回 `UNSAFE_METADATA_REWRITE`，Web 保留此拒绝，不删除 EXIF 或增加丢失授权。新建 OPPO 文件转 Google 的两个方向受此限制；同目标原样复制与无此布局依赖的转换分开验证。
+- [ ] 独立核验 OPPO 显式次级 `Padding="0"` 的修复边界。当前默认新建布局含此字段，现有 Core Repair 刻意不接受；Web 返回 `REPAIR_AMBIGUOUS` 且无输出，不能把可创建误写为可修复，也不在适配层移除字段绕过。
 - [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。当前不是任意大文件流式实现。
 - [ ] 浏览器媒体后端：抽帧、裁剪、remux、transcode。不能调用桌面 FFmpeg 进程，不能据此默认转码或增加音频编码。
 - [ ] Kotlin/Wasm target 与独立验收；Compose 图形运行时的 Wasm 文件不代表 Core 已实现 Kotlin/Wasm。
@@ -33,7 +34,7 @@ Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入
 
 ## 本轮状态
 
-下一阶段正在补齐 `repairLivePhoto`：只开放 SafeMetadataOnly，默认 dry-run，显式应用后返回 Repair 报告及原子提交的 assets；success 不等于已修复，被阻止/无需修改/预览时均无输出。新增三种既有 JPEG 目标的无操作、独立损坏长度修复、过滤阻止、保真和幂等测试，以及错误/预算/歧义后缀检查；计划功能库 70 项。共享 UI 验收调整为在 `/livephoto/` 子路径加载，检查字体/Wasm，相应扩展为 22 项。**这些新测试尚待对应 CI 验证，不能算已通过或已部署。** 本阶段不新增 Repair UI 按钮，也不扩大协议支持。
+下一阶段正在补齐 `repairLivePhoto`：只开放 SafeMetadataOnly，默认 dry-run，显式应用后返回 Repair 报告及原子提交的 assets；success 不等于已修复，被阻止/无需修改/预览时均无输出。新增 Google V1/V2 的无操作、独立损坏长度修复、过滤阻止、保真和幂等测试；OPPO 默认新建布局则单独测试安全拒绝/无输出/输入不变，不能算修复成功。再加错误/预算/歧义后缀检查，计划功能库 70 项。共享 UI 验收调整为在 `/livephoto/` 子路径加载，检查字体/Wasm，相应扩展为 22 项。**这些新测试尚待对应 CI 验证，不能算已通过或已部署。** 本阶段不新增 Repair UI 按钮，也不扩大协议支持。
 
 只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮。
 
