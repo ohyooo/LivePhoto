@@ -22,8 +22,8 @@ foreach ($package in @('ffmpeg', 'core')) {
     Copy-Item "$npm/package.json" (Join-Path $vendor "$package-package.json")
 }
 Copy-Item scripts/web/media/THIRD-PARTY.txt $media
-Invoke-WebRequest 'https://raw.githubusercontent.com/ffmpegwasm/ffmpeg.wasm/v12.15/LICENSE' -OutFile (Join-Path $media 'ffmpeg-wrapper-LICENSE.txt')
-Invoke-WebRequest 'https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt' -OutFile (Join-Path $media 'ffmpeg-core-GPL-2.0.txt')
+Copy-Item scripts/web/media/ffmpeg-wrapper-LICENSE.txt $media
+Copy-Item scripts/web/media/ffmpeg-core-GPL-2.0.txt $media
 # Noto's latest stable Sans CJK release; ship its unmodified font and OFL license.
 # These public assets are fetched at packaging time, never at application runtime.
 $fontDirectory = Join-Path $destination 'fonts'

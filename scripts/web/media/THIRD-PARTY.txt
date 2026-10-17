@@ -8,6 +8,7 @@ License: https://github.com/ffmpegwasm/ffmpeg.wasm/blob/v12.15/LICENSE
 Source/build configuration: https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15
 Upstream licensing: https://ffmpegwasm.netlify.app/docs/overview/#license
 FFmpeg source and license: https://ffmpeg.org/download.html and https://ffmpeg.org/legal.html
+Included GPL v2 text: https://github.com/FFmpeg/FFmpeg/blob/n5.1.4/COPYING.GPLv2
 
 These are separate, unmodified npm distributions, hosted on the same origin.
 No media is sent to an external service. The GPL media component is not linked
