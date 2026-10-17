@@ -61,7 +61,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     private data class Timeline(val root: String, val origin: Double)
     private data class Frame(val image: String, val root: String, val sourceTime: Double)
     private val timelines = mutableMapOf<String, Timeline>()
-    private var selectedFrame: Frame? = null
+    private var selectedFrame by mutableStateOf<Frame?>(null)
     private var next = 0
     override val outputDescription = "浏览器下载"
     override val supportsVideoEditing = true

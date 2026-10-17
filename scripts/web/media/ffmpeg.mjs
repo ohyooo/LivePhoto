@@ -29,7 +29,7 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
       await engine.writeFile('input.mp4',new Uint8Array(await file.arrayBuffer()));
       const probe=async(name,packets=true)=>{
         const args=['-v','error','-show_entries',
-          'format=duration:stream=index,codec_type,codec_name:packet=stream_index,pts_time,dts_time,duration_time,flags,data_hash',
+          'format=duration:stream=index,codec_type,codec_name,pix_fmt,color_transfer,color_primaries:stream_side_data=side_data_type:packet=stream_index,pts_time,dts_time,duration_time,flags,data_hash',
           '-show_streams','-show_format',...(packets?['-show_packets','-show_data_hash','sha256']:[]),'-of','json',name,'-o','probe.json'];
         if(await engine.ffprobe(args,30000)!==0) throw Error('FFprobe 无法读取媒体');
         const text=await engine.readFile('probe.json','utf8');
@@ -42,9 +42,15 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
       const streams=before.streams??[];
       if(streams.filter(s=>s.codec_type==='video').length!==1||streams.filter(s=>s.codec_type==='audio').length>1||
         streams.some(s=>!['video','audio'].includes(s.codec_type))) throw Error('编辑目前只接受一条视频和至多一条音轨，不丢弃其它轨道');
+      const video=streams.find(s=>s.codec_type==='video');
+      if(transcodeVideo && (!['yuv420p','yuvj420p','nv12'].includes(video.pix_fmt)||
+        ['smpte2084','arib-std-b67'].includes(video.color_transfer)||video.color_primaries==='bt2020'||
+        video.side_data_list?.some(s=>/mastering|content light|dovi|hdr/i.test(s.side_data_type)))) {
+        throw Error('转码目前仅接受 8-bit SDR；不自动降低 HDR、位深或宽色域');
+      }
       const args=['-ss',String(start),'-i','input.mp4','-t',String(end-start),'-map','0:v:0','-map','0:a?',
         '-c:v',...(transcodeVideo?['libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p']:['copy']),
-        '-c:a','copy','-map_metadata','0','-avoid_negative_ts','make_zero','-movflags','+faststart','output.mp4'];
+        '-c:a','copy','-map_metadata','0','-avoid_negative_ts','make_zero','-video_track_timescale','1000000','-movflags','+faststart','output.mp4'];
       if(await engine.exec(args,90000)!==0) throw Error('FFmpeg 处理失败；不会自动改用其它编码或重新编码音频');
       const after=await probe('output.mp4');
       if(after.streams.length!==streams.length) throw Error('输出轨道数量不匹配');

@@ -35,12 +35,11 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     val playback by editor.playback
     var start by remember(editor) { mutableDoubleStateOf(0.0) }
     var end by remember(editor) { mutableDoubleStateOf(0.0) }
-    var cover by remember(editor) { mutableStateOf(editor.coverTime) }
+    val cover = editor.coverTime
     var working by remember(editor) { mutableStateOf(false) }
     var status by remember(editor) { mutableStateOf("暂停并拖动进度条。A/B 选择裁剪范围，C 截取当前画面作为封面。") }
     val scope = rememberCoroutineScope()
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
-    LaunchedEffect(editor, playback.duration) { if (cover == null) cover = editor.coverTime }
     val enabled = !parentBusy && !working && playback.ready
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("视频预览与 A / B / C", style = MaterialTheme.typography.titleMedium)
@@ -61,7 +60,6 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 try {
                     require(start < end && playback.current >= start && playback.current < end) { "C 必须位于 A（含）与 B（不含）之间。" }
                     val selected = editor.capture()
-                    cover = editor.coverTime ?: playback.current
                     onImage(selected)
                     status = "已将当前画面设为 C 和封面。截图会重新编码，不保证原视频 HDR/色彩信息。"
                 } catch (cancelled: CancellationException) { throw cancelled }
@@ -91,6 +89,6 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
         }
         if (working) OutlinedButton(onClick = { editor.cancel() }) { Text("取消媒体处理") }
         Text(status)
-        Text("编辑仅限 32 MiB / 60 秒内视频。copy 裁剪可能提前至关键帧，以实际保留范围为准；转码仅在点击上述转码按钮时进行，音频不编码。")
+        Text("编辑仅限 32 MiB / 60 秒内视频。copy 裁剪可能提前至关键帧，以实际保留范围为准；转码仅支持 8-bit SDR，需显式点击，音频不编码。截图不保证 HDR/色彩信息，普通 metadata 不作完整保留保证。")
     }
 }
