@@ -16,7 +16,7 @@ export interface WebResult {
 /** Int64/UInt64 and exact decimal metadata are strings, never rounded JS numbers. */
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export interface WebReport {
-  readonly kind: 'Detection' | 'Validation' | 'Inspection' | 'Analysis' | 'KeyPhoto' | 'Operation' | 'Error';
+  readonly kind: 'Detection' | 'Validation' | 'Inspection' | 'Analysis' | 'KeyPhoto' | 'Operation' | 'Repair' | 'Error';
   readonly [key: string]: JsonValue;
 }
 export interface WebAsset {
@@ -43,3 +43,12 @@ export function analyzeLivePhoto(input: Blob): Promise<WebResult>;
 export function getKeyPhotoPosition(input: Blob): Promise<WebResult>;
 export function splitLivePhoto(input: Blob): Promise<WebResult>;
 export function convertLivePhoto(input: Blob, options: { target: NonNullable<CreateOptions['target']> }): Promise<WebResult>;
+
+export interface RepairOptions {
+  /** Defaults to true. False explicitly applies only proven-safe metadata changes. */
+  dryRun?: boolean;
+  /** Empty permits all proven-safe changes. Does not authorize remux or metadata loss. */
+  allowedIssueCodes?: readonly string[];
+}
+/** Inspect report.blocked/changesApplied/operation; success alone does not mean repaired. */
+export function repairLivePhoto(input: Blob, options?: RepairOptions): Promise<WebResult>;

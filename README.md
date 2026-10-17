@@ -90,6 +90,8 @@ Convert 仅开放上面三个既有 JPEG 目标，默认同目标原样保留；
 
 三个目标不代表任意来源都能转换。当前新建 OPPO 布局将 XMP 放在 EXIF 前方，转换为 Google 时若需调整 XMP 并移动未验证 EXIF，Core 会返回 `UNSAFE_METADATA_REWRITE`，没有输出；网页不会删除 EXIF、隐式授权丢失或转码来绕过。相同目标仍可原样复制，Google 来源的有限转换与这两个拒绝方向分别验收。
 
+`repairLivePhoto(input)` 默认仅预览已有 Core 能证明安全的 metadata 修复，不扫描猜测视频位置。确认 `result.report.blocked` 为空、核对 `proposedChanges` 后，可传 `{ dryRun: false }` 生成新文件；可用 `allowedIssueCodes` 限定问题类型。此入口不开放 remux、重新配对、转码或 metadata 丢失授权。`success` 仅表示取得报告：被阻止、无需修改或预览时均没有输出 Blob。实际修改见 `changesApplied`，验证和保真证明位于 `report.operation`。原输入不变，修复失败不返回半成品；当前验收状态见路线文档。
+
 构建（使用已有 JDK 25 和项目 Wrapper）：
 
 ```sh

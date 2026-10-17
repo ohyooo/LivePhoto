@@ -95,3 +95,13 @@ internal fun operationReport(v: OperationResult): dynamic = record("kind" to "Op
     "execution" to v.execution.map { record("stage" to it.stage.name, "backendId" to it.backendId, "reason" to it.reason,
         "transcoded" to it.transcoded, "remuxed" to it.remuxed, "hardwareUsed" to it.hardwareUsed) }.toTypedArray(),
     "durability" to "volatile-process-memory")
+
+private fun change(v: Change): dynamic = record("selector" to v.selector, "before" to value(v.before),
+    "after" to value(v.after), "reason" to v.reason, "requested" to v.requested)
+internal fun repairReport(v: RepairResult, dryRun: Boolean): dynamic = record("kind" to "Repair", "dryRun" to dryRun,
+    "issuesBefore" to v.issuesBefore.map { issue(it) }.toTypedArray(),
+    "proposedChanges" to v.proposedChanges.map { change(it) }.toTypedArray(),
+    "changesApplied" to v.changesApplied.map { change(it) }.toTypedArray(),
+    "issuesAfter" to v.issuesAfter.map { issue(it) }.toTypedArray(),
+    "blocked" to v.blocked.map { issue(it) }.toTypedArray(),
+    "operation" to v.operation?.let { operationReport(it) })

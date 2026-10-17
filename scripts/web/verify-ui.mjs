@@ -21,8 +21,10 @@ const server = createServer(async (req,res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     const api = url.pathname.startsWith('/api/');
+    if (!api && !url.pathname.startsWith('/livephoto/')) { res.writeHead(404).end(); return; }
     const directory = api ? apiRoot : root;
-    const name = api ? url.pathname.slice(4) : url.pathname === '/' ? '/index.html' : url.pathname;
+    const relative = api ? url.pathname.slice(4) : url.pathname.slice('/livephoto'.length);
+    const name = relative === '/' ? '/index.html' : relative;
     const path = resolve(directory, '.' + decodeURIComponent(name));
     if (!path.startsWith(directory + sep)) { res.writeHead(403).end(); return; }
     res.setHeader('Content-Type', {'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.css':'text/css'}[extname(path)] ?? 'application/octet-stream');
@@ -40,10 +42,12 @@ try {
     const context = await browser.newContext({viewport,acceptDownloads:true,serviceWorkers:'block'});
     await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
     const page = await context.newPage();
+    const loaded = [];
+    page.on('response', response => loaded.push({url:response.url(),status:response.status()}));
     lastPage = page;
     const errors=[]; page.on('pageerror', error => errors.push(String(error)));
     page.setDefaultTimeout(30000);
-    await page.goto(origin);
+    await page.goto(origin + '/livephoto/');
     await page.locator('canvas').first().waitFor({state:'visible'});
     await page.keyboard.press('Tab');
     const text = value => page.getByText(value).or(page.getByLabel(value)).first();
@@ -86,6 +90,10 @@ try {
       await settle();
     };
     await button('生成并保存 Live Photo').waitFor({state:'attached'});
+    check(label+':subpath-assets-loaded',
+      loaded.some(r=>r.url.startsWith(origin+'/livephoto/')&&r.url.endsWith('.wasm')&&r.status===200) &&
+      loaded.some(r=>r.url===origin+'/livephoto/fonts/NotoSansSC-Regular.otf'&&r.status===200) &&
+      loaded.every(r=>r.status===200&&r.url.startsWith(origin+'/livephoto/')));
     // Compose's semantic DOM does not expose native HTML disabled state consistently.
     // Exercise the real canvas hit target instead: no inputs must not start a download or alter the status.
     let downloads=0; page.on('download',()=>downloads++);
@@ -139,9 +147,9 @@ try {
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==20||new Set(checks).size!==20) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==22||new Set(checks).size!==22) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 20 checks; shared Compose screen, two sizes, real downloaded outputs audited');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 22 checks; shared Compose screen under /livephoto/, two sizes, real downloaded outputs audited');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

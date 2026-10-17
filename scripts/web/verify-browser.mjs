@@ -18,10 +18,11 @@ generate(['-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=25', '-t', '1', '-an', 
   '-pix_fmt', 'yuv420p', '-bf', '0', '-g', '25', '-use_editlist', '0', '-movflags', '+faststart', '-map_metadata', '-1',
   '-metadata:s:v', 'encoder=', '-fflags', '+bitexact', '-flags:v', '+bitexact', '-write_btrt', '0', videoPath]);
 const image = await readFile(imagePath), video = await readFile(videoPath);
-const worker = `import {createLivePhoto,extractVideo} from '/livephoto.mjs';
+const worker = `import {createLivePhoto,extractVideo,repairLivePhoto} from '/livephoto.mjs';
 onmessage=async()=>{try{const image=await(await fetch('/fixture-image')).blob();const video=await(await fetch('/fixture-video')).blob();
 const result=await createLivePhoto(image,video);if(!result.success)throw Error(result.code+': '+result.message);
 const extracted=await extractVideo(result.blob);if(!extracted.success)throw Error(extracted.code);
+const preview=await repairLivePhoto(result.blob);if(!preview.success||preview.report.kind!=='Repair'||!preview.report.dryRun||preview.assets.length||preview.report.blocked.length)throw Error('Worker repair preview');
 const a=new Uint8Array(await extracted.blob.arrayBuffer()),b=new Uint8Array(await video.arrayBuffer());
 postMessage({success:a.length===b.length&&a.every((v,i)=>v===b[i])});}catch(e){postMessage({success:false,message:String(e)})}};`;
 const server = createServer(async (request, response) => {
@@ -53,6 +54,21 @@ try {
     const beforeImage = await digest(image), beforeVideo = await digest(video);
     const checks = [];
     const check = (name, condition, details = '') => { if (!condition) throw Error(name + ': ' + details); checks.push(name); };
+    let brokenV1;
+    // Independently corrupt one owned length attribute in-place; do not touch JPEG
+    // segment sizes, image coding, ordinary metadata or the complete video suffix.
+    const corruptLength = async (blob, target) => {
+      const data = new Uint8Array(await blob.arrayBuffer());
+      const header = new TextDecoder('latin1').decode(data.slice(0, data.length - video.size));
+      const expression = target === 'google.microvideo.v1'
+        ? /\b(?:[A-Za-z_][\w.-]*:)?MicroVideoOffset=(["'])([1-9][0-9]*)\1/
+        : /\b(?:[A-Za-z_][\w.-]*:)?Length=(["'])([1-9][0-9]*)\1/;
+      const match = expression.exec(header);
+      if (!match) throw Error('Missing unique synthetic length field: ' + target);
+      const start = match.index + match[0].lastIndexOf(match[2]);
+      data.fill(48, start, start + match[2].length);
+      return new Blob([data], {type:'image/jpeg'});
+    };
     for (const target of ['oplus.olive', 'google.motionphoto.v2', 'google.microvideo.v1']) {
       const created = await api.createLivePhoto(image, video, { target });
       check(target + ':create', created.success && created.blob instanceof Blob && created.mime === 'image/jpeg', JSON.stringify(created));
@@ -113,7 +129,61 @@ try {
           JSON.stringify({success:converted.success,code:converted.code,stage:converted.stage,message:converted.message,
             protocol:converted.protocol,detected:convertedDetection?.protocol,videoHash:convertedVideoHash,expectedVideoHash:beforeVideo,report:converted.report}));
       }
+      const unchangedRepair = await api.repairLivePhoto(created.blob, {dryRun:false});
+      check(target + ':repair-valid-noop', unchangedRepair.success && unchangedRepair.report.kind === 'Repair' &&
+        !unchangedRepair.report.dryRun && unchangedRepair.report.proposedChanges.length === 0 &&
+        unchangedRepair.report.changesApplied.length === 0 && unchangedRepair.report.blocked.length === 0 &&
+        unchangedRepair.report.operation === null && unchangedRepair.blob === null && unchangedRepair.assets.length === 0,
+        JSON.stringify(unchangedRepair));
+      const damaged = await corruptLength(created.blob, target), damagedHash = await digest(damaged);
+      if (target === 'google.microvideo.v1') brokenV1 = damaged;
+      const preview = await api.repairLivePhoto(damaged);
+      check(target + ':repair-dry-run', preview.success && preview.report.kind === 'Repair' && preview.report.dryRun &&
+        preview.report.proposedChanges.length > 0 && preview.report.proposedChanges.every(c => c.after.value === String(video.size)) &&
+        preview.report.changesApplied.length === 0 && preview.report.blocked.length === 0 && preview.report.operation === null &&
+        preview.blob === null && preview.assets.length === 0 && await digest(damaged) === damagedHash,
+        JSON.stringify(preview));
+      const blocked = await api.repairLivePhoto(damaged, {dryRun:false,allowedIssueCodes:['OTHER_ISSUE']});
+      check(target + ':repair-filter-blocked', blocked.success && blocked.report.blocked.length > 0 &&
+        blocked.report.changesApplied.length === 0 && blocked.report.operation === null &&
+        blocked.blob === null && blocked.assets.length === 0 && await digest(damaged) === damagedHash,
+        JSON.stringify(blocked));
+      const repaired = await api.repairLivePhoto(damaged, {dryRun:false});
+      const repairedVideo = repaired.success && repaired.blob ? await api.extractVideo(repaired.blob) : null;
+      check(target + ':repair-applied-preserving', repaired.success && repaired.assets.length === 1 && repaired.blob instanceof Blob &&
+        !repaired.report.dryRun && repaired.report.blocked.length === 0 &&
+        JSON.stringify(repaired.report.changesApplied) === JSON.stringify(preview.report.proposedChanges) &&
+        repaired.report.operation.validation.verdict !== 'Invalid' && repaired.report.operation.validation.coverage === 'Complete' &&
+        ['ImageDataPreserving','BitstreamPreserving','MetadataPreserving'].every(guarantee =>
+          repaired.report.operation.preservation.records.some(r => r.guarantee === guarantee && r.outcome === 'Verified')) &&
+        repairedVideo?.success && await digest(repairedVideo.blob) === beforeVideo &&
+        await digest(damaged) === damagedHash && await digest(created.blob) === carrierHash,
+        JSON.stringify(repaired));
+      const again = await api.repairLivePhoto(repaired.blob, {dryRun:false});
+      check(target + ':repair-idempotent-no-output', again.success && again.report.proposedChanges.length === 0 &&
+        again.report.changesApplied.length === 0 && again.report.blocked.length === 0 &&
+        again.report.operation === null && again.assets.length === 0 && again.blob === null);
     }
+    let invalidRepairOptions = true;
+    for (const options of [{dryRun:'false'},{allowedIssueCodes:'ALL'},{allowedIssueCodes:['']},{allowedIssueCodes:[1]},
+      {allowedIssueCodes:['not-valid']},{allowedIssueCodes:Array(65).fill('OTHER_ISSUE')}]) {
+      let rejected = false;
+      try { await api.repairLivePhoto(image, options); } catch(e) { rejected = e instanceof TypeError; }
+      invalidRepairOptions &&= rejected;
+    }
+    check('repair-invalid-options-rejected', invalidRepairOptions);
+    let repairBudget = false;
+    try { await api.repairLivePhoto(new Blob([new Uint8Array(48 * 1024 * 1024 + 1)])); } catch(e) { repairBudget = e instanceof RangeError; }
+    check('repair-budget-before-reading', repairBudget);
+    const ordinaryRepair = await api.repairLivePhoto(image, {dryRun:false});
+    check('repair-ordinary-no-output', !ordinaryRepair.success && ordinaryRepair.code.length > 0 && ordinaryRepair.report.kind === 'Error' &&
+      ordinaryRepair.blob === null && ordinaryRepair.assets.length === 0, JSON.stringify(ordinaryRepair));
+    const malformedRepair = await api.repairLivePhoto(new Blob([new Uint8Array([255,216,255,225,0,16,0,0])]), {dryRun:false});
+    check('repair-malformed-no-output', !malformedRepair.success && malformedRepair.report.kind === 'Error' &&
+      malformedRepair.blob === null && malformedRepair.assets.length === 0);
+    const ambiguousRepair = await api.repairLivePhoto(new Blob([brokenV1,video]), {dryRun:false});
+    check('repair-ambiguous-suffix-no-output', !ambiguousRepair.success && ambiguousRepair.code === 'REPAIR_NOT_POSSIBLE' &&
+      ambiguousRepair.assets.length === 0 && ambiguousRepair.blob === null, JSON.stringify(ambiguousRepair));
     const plain = await api.detectLivePhoto(image);
     check('ordinary-jpeg-is-not-live', plain.success && plain.protocol === '' && plain.verdict === 'NonLive', JSON.stringify(plain));
     const unsupported = await api.createLivePhoto(image, video, { target: 'not-a-protocol' });
@@ -153,7 +223,7 @@ try {
     check('module-worker-round-trip', workerResult.success, workerResult.message);
     return checks;
   });
-  if (checks.length !== 50 || new Set(checks).size !== 50) throw new Error('Incomplete browser check count');
+  if (checks.length !== 70 || new Set(checks).size !== 70) throw new Error('Incomplete browser check count');
   const evidence = {
     commit: process.env.GITHUB_SHA, run: process.env.GITHUB_RUN_ID,
     browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,

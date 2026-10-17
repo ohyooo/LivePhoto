@@ -33,6 +33,8 @@ Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入
 
 ## 本轮状态
 
+下一阶段正在补齐 `repairLivePhoto`：只开放 SafeMetadataOnly，默认 dry-run，显式应用后返回 Repair 报告及原子提交的 assets；success 不等于已修复，被阻止/无需修改/预览时均无输出。新增三种既有 JPEG 目标的无操作、独立损坏长度修复、过滤阻止、保真和幂等测试，以及错误/预算/歧义后缀检查；计划功能库 70 项。共享 UI 验收调整为在 `/livephoto/` 子路径加载，检查字体/Wasm，相应扩展为 22 项。**这些新测试尚待对应 CI 验证，不能算已通过或已部署。** 本阶段不新增 Repair UI 按钮，也不扩大协议支持。
+
 只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮。
 
 新增接口对应的功能库检查扩展为 50 项：含三个目标的结构化检查、Clean Split 幂等性、同目标字节不变、四个实际跨协议转换方向、两个 EXIF 安全拒绝方向，以及错误/无输出、输入不变和 Worker 回归。共享 UI 的 20 项操作检查另行保留。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准；不能用基础阶段的旧 25＋20 项结果代替。** 公共协议 commonTest 的 JS 迁移、Repair、关键照片写入及媒体后端仍未完成。

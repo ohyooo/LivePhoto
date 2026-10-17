@@ -50,13 +50,14 @@ private fun selector(target: String): ProtocolSelector? = when (target) {
     else -> null
 }
 
-private fun operation(result: OperationResult, output: MemoryOutputTransaction, protocol: String = ""): WebResult {
+private fun operation(result: OperationResult, output: MemoryOutputTransaction, protocol: String = "",
+    report: String = reportJson(operationReport(result))): WebResult {
     val committed = output.committedAssets()
     val assets = result.output.assets.map { asset -> WebAsset(asset.id.value, asset.role.name, asset.mime,
         asset.byteLength.toString(), asset.digest.value, asset.recommendedName, committed.getValue(asset.id).toByteArray()) }.toTypedArray()
     return WebResult(true, protocol = protocol, verdict = result.validation.verdict.name, coverage = result.validation.coverage.name,
         mime = assets.singleOrNull()?.mime.orEmpty(), bytes = assets.singleOrNull()?.bytes, assets = assets,
-        reportJson = reportJson(operationReport(result)),
+        reportJson = report,
         issues = (result.issues + result.validation.issues + result.preservation.issues).map { it.code.value }.distinct().toTypedArray())
 }
 
@@ -150,6 +151,29 @@ public fun convertLivePhoto(input: ByteArray, target: String): Promise<WebResult
 @JsExport
 public fun splitLivePhoto(input: ByteArray): Promise<WebResult> = mutate(input, "split") { source, ctx, output ->
     DefaultLivePhotoCore().split(SplitRequest(SourceSet.Single(source), output = output, context = ctx))
+}
+
+/** Safe metadata only. A successful report may be blocked or a no-op, with no output. */
+@JsExport
+public fun repairLivePhoto(input: ByteArray, dryRun: Boolean = true,
+    allowedIssueCodes: Array<String> = emptyArray()): Promise<WebResult> = read(input) { source, ctx ->
+    val output = if (dryRun) null else MemoryOutputTransaction(ctx, "web-repair")
+    var applied: OperationResult? = null
+    try {
+        when (val result = DefaultLivePhotoCore().repair(RepairRequest(SourceSet.Single(source),
+            mode = RepairMode.SafeMetadataOnly, allowedIssueCodes = allowedIssueCodes.map(::IssueCode),
+            dryRun = dryRun, output = output, context = ctx))) {
+            is CoreResult.Failure -> failure(result.error)
+            is CoreResult.Success -> {
+                val repaired = result.value
+                applied = repaired.operation
+                val report = reportJson(repairReport(repaired, dryRun))
+                applied?.let { operation(it, output!!, report = report) } ?: WebResult(true,
+                    reportJson = report, issues = (repaired.issuesBefore + repaired.issuesAfter + repaired.blocked)
+                        .map { it.code.value }.distinct().toTypedArray())
+            }
+        }
+    } finally { applied?.output?.assets?.forEach { it.readableSource?.close() } }
 }
 
 private fun mutate(input: ByteArray, name: String, protocol: String = "",

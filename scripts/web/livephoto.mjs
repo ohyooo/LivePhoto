@@ -46,3 +46,14 @@ export async function convertLivePhoto(input, { target } = {}) {
   if (typeof target !== 'string') throw new TypeError('Convert requires a target protocol');
   return result(await core.convertLivePhoto(await bytes(input, CARRIER_LIMIT), target));
 }
+
+/** success means a report was obtained, not that a repair was applied. */
+export async function repairLivePhoto(input, { dryRun = true, allowedIssueCodes = [] } = {}) {
+  if (typeof dryRun !== 'boolean' || !Array.isArray(allowedIssueCodes) || allowedIssueCodes.length > 64 ||
+      !allowedIssueCodes.every(code => typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,127}$/.test(code))) {
+    throw new TypeError('Repair requires a boolean dryRun and at most 64 issue codes');
+  }
+  // Copy the filter before awaiting the Blob so callers cannot change the request in flight.
+  const codes = [...allowedIssueCodes];
+  return result(await core.repairLivePhoto(await bytes(input, CARRIER_LIMIT), dryRun, codes));
+}
