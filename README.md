@@ -82,7 +82,7 @@ const originalVideoBlob = extracted.blob;
 
 创建只开放 `oplus.olive`（JPEG 无尾部 profile）、`google.motionphoto.v2`、`google.microvideo.v1` 三个已有目标；浏览器 API 不扩展协议/编码支持。`replaceCameraComment: true` 只允许前文明确列出的两种相机注释替换，默认不授权。失败返回结构化 `success/code/stage/message` 且不返回输出 Blob；参数类型、提前大小检查失败则 Promise 拒绝。
 
-`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。没有浏览器抽帧、裁剪、转码或系统相册导入。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件或可中途取消。
+`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。此协议功能库不提供抽帧、裁剪、转码或系统相册导入；下方网页界面的媒体预处理是独立适配。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件或可中途取消。
 
 协议接口还提供 `inspectLivePhoto`、`analyzeLivePhoto`、`getKeyPhotoPosition`、`convertLivePhoto(input, { target })`、`splitLivePhoto`。检查结果位于 `result.report`：包含多重检测、资源范围、媒体/metadata、关键照片原始字段、检查明细及带条件的能力；Analyze 不把缺媒体后端说成可抽帧。64 位 offset/length、时间分子和任意精度 metadata 数字用十进制字符串，未知值保留 `null`。
 
@@ -112,7 +112,16 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 ./gradlew -Plivephoto.web=true -Plivephoto.webUi=true :verifyWebBuild :ui:jsBrowserDistribution
 ```
 
-原始静态网页产物位于 `ui/build/dist/js/productionExecutable/`。Core 与界面代码使用 Kotlin/JS；Compose 图形运行时可能包含自己的 Wasm 文件，这不是 FFmpeg 或新增 Wasm 媒体后端。界面复用窗口尺寸自适应布局；选择 JPEG 和 MP4 后生成下载，协议和输入限制与现有应用一致。浏览器只能确认已发起下载，不能保证用户最终保存，因此成功提示不冒充磁盘持久化。刷新页面后需要重新选择输入。
+原始静态网页产物位于 `ui/build/dist/js/productionExecutable/`。Core 与界面代码使用 Kotlin/JS；Compose 图形运行时与可选 FFmpeg 都可能包含 Wasm 文件，不表示 Core 已迁移至 Kotlin/Wasm。界面复用窗口尺寸自适应布局；选择 JPEG 和 MP4 后生成下载，协议和输入限制与现有应用一致。浏览器只能确认已发起下载，不能保证用户最终保存，因此成功提示不冒充磁盘持久化。刷新页面后需要重新选择输入。
+
+网页 A/B/C 编辑入口已实现，完整验收状态见 [Web 路线](docs/web-roadmap.md)：
+
+1. 选择视频，暂停并拖动播放进度。可另选 JPEG，也可点击“截取当前画面为 C／封面”，直接使用浏览器当前显示的画面；不是逐帧精确抽取。
+2. 分别定位后点击“设为 A”“设为 B”。仅设置标记不会改变视频；点击“裁剪 A～B 并使用”才导出音视频 copy 结果。边界可能移至关键帧，以显示的实际范围为准；C 必须处于保留范围内。
+3. 只有显式点击 H.264 转码才重新编码视频，目前限 8-bit SDR。音频始终 copy，不兼容则报错，不自动编码。转码后需重新截取 C，不能沿用无法证明的新旧帧映射。
+4. 选择目标协议并生成下载。上次结果支持按住播放、松开回封面，仅模拟预览，不代表手机相册已识别。
+
+播放与截图使用原生 Video/Canvas；裁剪、显式转码按需加载随站点分发的单线程 ffmpeg.wasm，无 CDN 运行时依赖，不调用桌面 FFmpeg。首次编辑需加载较大的 Wasm。编辑限 32 MiB、60 秒内输入，输出上限 48 MiB、总处理超时 120 秒，并提供取消；实际内存占用高于文件大小。截图不保证原 HDR、色彩或 metadata，编辑也不承诺完整保留普通 metadata。FFmpeg 依赖、许可证与对应源码/构建说明随 `media/` 分发；这不是正式 Core MediaBackend 或独立协议 JS API 的媒体能力声明，也不改变 Android 的后端状态。
 
 CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性、错误展示、三个协议实际下载，并独立解析下载结果及核对视频字节。报告截图只使用临时合成素材，不上传媒体原片或生成成品。
 
