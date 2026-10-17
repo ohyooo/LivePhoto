@@ -35,7 +35,7 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
       const probe=async(name)=>{
         const reportName=`probe-${probeNumber++}.json`;
         const args=['-v','error','-show_entries',
-          'format=duration:stream=index,codec_type,codec_name,pix_fmt,color_transfer,color_primaries:stream_side_data=side_data_type:packet=stream_index,pts_time,dts_time,duration_time,flags,data_hash',
+          'format=duration:stream=index,codec_type,codec_name,sample_rate,pix_fmt,color_transfer,color_primaries:stream_side_data=side_data_type:packet=stream_index,pts_time,dts_time,duration_time,flags,data_hash',
           '-show_error','-show_streams','-show_format','-show_packets','-show_data_hash','sha256','-of','json',name,'-o',reportName];
         const status=await engine.ffprobe(args,30000);
         // Upstream #817: 0.12.10's C entry returns normally, while its JS binding
@@ -56,6 +56,15 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
       if(streams.filter(s=>s.codec_type==='video').length!==1||streams.filter(s=>s.codec_type==='audio').length>1||
         streams.some(s=>!['video','audio'].includes(s.codec_type))) throw Error('编辑目前只接受一条视频和至多一条音轨，不丢弃其它轨道');
       const video=streams.find(s=>s.codec_type==='video');
+      const audio=streams.find(s=>s.codec_type==='audio');
+      const sampleRate=audio?Number(audio.sample_rate):1;
+      if(!Number.isSafeInteger(sampleRate)||sampleRate<1||sampleRate>768000) throw Error('无法确定安全的音频时钟');
+      const gcd=(a,b)=>{while(b){const r=a%b;a=b;b=r;}return a;};
+      // A millisecond movie clock can round tkhd and elst differently when AAC
+      // shifts video start time. Use a common clock rather than rewriting boxes
+      // or weakening the Core's independent header/edit consistency checks.
+      const movieClock=1000000/gcd(1000000,sampleRate)*sampleRate;
+      if(movieClock>2147483647) throw Error('音视频时钟无法安全表示，拒绝猜测或重新编码音频');
       if(transcodeVideo && (!['yuv420p','yuvj420p','nv12'].includes(video.pix_fmt)||
         ['smpte2084','arib-std-b67'].includes(video.color_transfer)||video.color_primaries==='bt2020'||
         video.side_data_list?.some(s=>/mastering|content light|dovi|hdr/i.test(s.side_data_type)))) {
@@ -63,7 +72,7 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
       }
       const args=['-hide_banner','-loglevel','error','-ss',String(start),'-i','input.mp4','-t',String(end-start),'-map','0:v:0','-map','0:a?',
         '-c:v',...(transcodeVideo?['libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p']:['copy']),
-        '-c:a','copy','-map_metadata','0','-avoid_negative_ts','make_zero','-video_track_timescale','1000000','-movflags','+faststart','output.mp4'];
+        '-c:a','copy','-map_metadata','0','-avoid_negative_ts','make_zero','-video_track_timescale','1000000','-movie_timescale',String(movieClock),'-movflags','+faststart','output.mp4'];
       if(await engine.exec(args,90000)!==0) throw Error('FFmpeg 处理失败；不会自动改用其它编码或重新编码音频。'+logs.join('\n').slice(0,2000));
       const after=await probe('output.mp4');
       if(after.streams.length!==streams.length) throw Error('输出轨道数量不匹配');
