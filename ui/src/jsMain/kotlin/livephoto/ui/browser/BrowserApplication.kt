@@ -62,9 +62,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     private data class Frame(val image: String, val root: String, val sourceTime: Double)
     private val timelines = mutableMapOf<String, Timeline>()
     private var selectedFrame by mutableStateOf<Frame?>(null)
+    private var lastResult by mutableStateOf<Pair<Blob, Blob>?>(null)
     private var next = 0
     override val outputDescription = "浏览器下载"
     override val supportsVideoEditing = true
+    override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
 
     private fun register(kind: MediaKind, file: File, timeline: Timeline? = null): String {
@@ -141,6 +143,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     created = result.value
                     val asset = result.value.output.assets.single()
                     val blob = Blob(arrayOf(output.committedAssets().getValue(asset.id).toByteArray()), BlobPropertyBag(type = asset.mime))
+                    lastResult = blob to movie
                     val url = window.asDynamic().URL.createObjectURL(blob).unsafeCast<String>()
                     try {
                         val link = (document.createElement("a") as HTMLAnchorElement).apply {
@@ -162,15 +165,28 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     }
 
     @Composable
-    override fun ImagePreview(reference: String, modifier: Modifier) {
+    override fun ImagePreview(reference: String, modifier: Modifier, onScroll: (Float) -> Unit) {
         val file = files[reference] ?: return
         key(reference) {
             HtmlElementView(factory = {
-                val preview = media[0].imagePreview(file)
+                val preview = media[0].imagePreview(file, onScroll)
                 val element = preview.element.unsafeCast<HTMLElement>()
                 element.asDynamic().releasePreview = preview.dispose
                 element
             }, modifier = modifier.height(160.dp), onRelease = { it.asDynamic().releasePreview() })
+        }
+    }
+
+    @Composable
+    override fun ResultPreview(modifier: Modifier, onScroll: (Float) -> Unit) {
+        val result = lastResult ?: return
+        key(result) {
+            HtmlElementView(factory = {
+                val preview = media[0].resultPreview(result.first, result.second, onScroll)
+                val element = preview.element.unsafeCast<HTMLElement>()
+                element.asDynamic().releasePreview = preview.dispose
+                element
+            }, modifier = modifier, onRelease = { it.asDynamic().releasePreview() })
         }
     }
 
@@ -193,15 +209,17 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         private var job: dynamic = null
         private var disposed = false
         @Composable
-        override fun Player(modifier: Modifier) {
+        override fun Player(modifier: Modifier, onScroll: (Float) -> Unit) {
+            key(this) {
             HtmlElementView(factory = {
                 val callback: (dynamic) -> Unit = { value ->
                     if (!disposed) state.value = VideoPlayback(value.duration.unsafeCast<Double>(), value.current.unsafeCast<Double>(),
                         value.seeking.unsafeCast<Boolean>(), value.ready.unsafeCast<Boolean>(), value.error.unsafeCast<String?>())
                 }
-                surface = media[0].createPlayer(file, callback)
+                surface = media[0].createPlayer(file, callback, onScroll)
                 surface.element.unsafeCast<HTMLElement>()
             }, modifier = modifier, onRelease = { surface?.dispose(); surface = null })
+            }
         }
         override fun seek(seconds: Double) { surface?.seek(seconds) }
         override suspend fun capture(): String {

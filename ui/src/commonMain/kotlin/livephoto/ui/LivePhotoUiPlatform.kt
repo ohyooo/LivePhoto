@@ -15,6 +15,7 @@ public interface LivePhotoUiPlatform {
     public val outputDescription: String
     public val successMessage: String get() = "已保存到 $outputDescription。"
     public val supportsVideoEditing: Boolean get() = false
+    public val hasResultPreview: Boolean get() = false
     @Composable
     public fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit
     public suspend fun describe(reference: String): SelectedMediaInfo
@@ -23,5 +24,7 @@ public interface LivePhotoUiPlatform {
     @Composable
     public fun rememberVideoEditor(reference: String?): VideoEditor? = null
     @Composable
-    public fun ImagePreview(reference: String, modifier: Modifier) {}
+    public fun ImagePreview(reference: String, modifier: Modifier, onScroll: (Float) -> Unit) {}
+    @Composable
+    public fun ResultPreview(modifier: Modifier, onScroll: (Float) -> Unit) {}
 }

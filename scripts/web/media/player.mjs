@@ -1,5 +1,14 @@
 /** Browser decoding/screenshot adapter only. No Live Photo protocol logic. */
-export function createPlayer(file, changed) {
+function forwardWheel(element, scroll) {
+  const wheel=event=>{
+    if(!scroll||event.ctrlKey)return;
+    event.preventDefault();event.stopPropagation();
+    scroll(event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?innerHeight:1));
+  };
+  element.addEventListener('wheel',wheel,{passive:false});
+  return ()=>element.removeEventListener('wheel',wheel);
+}
+export function createPlayer(file, changed, scroll) {
   const video = document.createElement('video');
   const url = URL.createObjectURL(file);
   video.controls = true;
@@ -21,6 +30,7 @@ export function createPlayer(file, changed) {
   if (video.requestVideoFrameCallback) callback = video.requestVideoFrameCallback(frame);
   for (const event of ['loadedmetadata','loadeddata','timeupdate','seeking','seeked','error','pause','play']) video.addEventListener(event,publish);
   video.src = url;
+  const releaseWheel=forwardWheel(video,scroll);
   return {
     element:video,
     seek(seconds) {
@@ -47,6 +57,7 @@ export function createPlayer(file, changed) {
     },
     dispose() {
       disposed=true;
+      releaseWheel();
       if (callback!==null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(callback);
       for (const event of ['loadedmetadata','loadeddata','timeupdate','seeking','seeked','error','pause','play']) video.removeEventListener(event,publish);
       video.pause(); video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url);
@@ -54,9 +65,39 @@ export function createPlayer(file, changed) {
   };
 }
 
-export function imagePreview(file) {
+export function imagePreview(file, scroll) {
   const element=document.createElement('img'), url=URL.createObjectURL(file);
   element.src=url; element.alt='已选封面预览';
   element.style.cssText='width:100%;height:100%;object-fit:contain;border-radius:12px';
-  return {element,dispose:()=>URL.revokeObjectURL(url)};
+  const releaseWheel=forwardWheel(element,scroll);
+  return {element,dispose(){releaseWheel();URL.revokeObjectURL(url);}};
+}
+
+/** Display the verified result's composite JPEG and its unchanged input video. */
+export function resultPreview(photo, movie, scroll) {
+  const element=document.createElement('div'),image=document.createElement('img'),video=document.createElement('video');
+  const imageURL=URL.createObjectURL(photo),videoURL=URL.createObjectURL(movie);
+  element.setAttribute('role','button');element.setAttribute('aria-label','按住预览生成结果');element.tabIndex=0;
+  element.style.cssText='width:100%;height:100%;background:#111;border-radius:12px;overflow:hidden;touch-action:none';
+  image.alt='上次生成的封面';image.src=imageURL;video.src=videoURL;
+  image.style.cssText=video.style.cssText='width:100%;height:100%;object-fit:contain';
+  video.hidden=true;video.playsInline=true;video.loop=true;video.preload='metadata';
+  video.setAttribute('aria-label','生成结果动态预览');
+  let holding=false,disposed=false;
+  const stop=()=>{holding=false;video.pause();video.currentTime=0;video.hidden=true;image.hidden=false;};
+  const start=()=>{
+    if(disposed||holding)return;
+    holding=true;video.hidden=false;image.hidden=true;
+    video.play().then(()=>{if(!holding)video.pause();}).catch(()=>{stop();element.title='浏览器无法播放此视频';});
+  };
+  element.onpointerdown=event=>{event.preventDefault();element.setPointerCapture(event.pointerId);start();};
+  element.onpointerup=element.onpointercancel=element.onlostpointercapture=stop;
+  element.onkeydown=event=>{if([' ','Enter'].includes(event.key)){event.preventDefault();start();}};
+  element.onkeyup=event=>{if([' ','Enter'].includes(event.key)){event.preventDefault();stop();}};
+  element.onblur=stop;element.oncontextmenu=event=>event.preventDefault();
+  const visibility=()=>{if(document.hidden)stop();};
+  window.addEventListener('blur',stop);document.addEventListener('visibilitychange',visibility);
+  const releaseWheel=forwardWheel(element,scroll);
+  element.append(image,video);
+  return {element,dispose(){disposed=true;stop();releaseWheel();window.removeEventListener('blur',stop);document.removeEventListener('visibilitychange',visibility);video.removeAttribute('src');video.load();URL.revokeObjectURL(imageURL);URL.revokeObjectURL(videoURL);}};
 }

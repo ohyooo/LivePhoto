@@ -21,7 +21,7 @@ public interface VideoEditor {
     public suspend fun capture(): String
     public suspend fun process(start: Double, end: Double, transcodeVideo: Boolean): EditedVideo
     public fun cancel()
-    @Composable public fun Player(modifier: Modifier)
+    @Composable public fun Player(modifier: Modifier, onScroll: (Float) -> Unit)
 }
 
 public fun mediaSeconds(value: Double): String {
@@ -31,7 +31,7 @@ public fun mediaSeconds(value: Double): String {
 
 @Composable
 public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (Boolean) -> Unit,
-    onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit) {
+    onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit) {
     val playback by editor.playback
     var start by remember(editor) { mutableDoubleStateOf(0.0) }
     var end by remember(editor) { mutableDoubleStateOf(0.0) }
@@ -43,7 +43,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     val enabled = !parentBusy && !working && playback.ready
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("视频预览与 A / B / C", style = MaterialTheme.typography.titleMedium)
-        editor.Player(Modifier.fillMaxWidth().height(220.dp))
+        editor.Player(Modifier.fillMaxWidth().height(220.dp), onScroll)
         playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Text("当前位置：${mediaSeconds(playback.current)} / ${mediaSeconds(playback.duration)}")
         if (playback.duration > 0) Slider(value = playback.current.coerceIn(0.0, playback.duration).toFloat(),
@@ -73,6 +73,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 status = "正在本地加载和执行 FFmpeg；不会上传视频…"
                 try {
                     require(start >= 0 && start < end && end <= playback.duration + 0.001) { "需要 0 ≤ A < B ≤ 视频时长。" }
+                    require(cover == null || cover >= start && cover < end) { "C 必须位于 A～B 内，请重新选点或截图。" }
                     val result = editor.process(start, end, transcode)
                     onVideo(result)
                     status = result.summary

@@ -22,6 +22,8 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
     const {FFmpeg}=await import('./vendor/ffmpeg/index.js');
     if(cancelled) throw Error('已取消');
     engine=new FFmpeg();
+    const logs=[];
+    engine.on('log',({message})=>{logs.push(String(message).slice(0,500));if(logs.length>8)logs.shift();});
     const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{engine.terminate();reject(Error('媒体处理超时（120 秒）'));},120000);});
     const work=(async()=>{
       await engine.load({coreURL:new URL('vendor/core/ffmpeg-core.js',base).href,
@@ -48,10 +50,10 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
         video.side_data_list?.some(s=>/mastering|content light|dovi|hdr/i.test(s.side_data_type)))) {
         throw Error('转码目前仅接受 8-bit SDR；不自动降低 HDR、位深或宽色域');
       }
-      const args=['-ss',String(start),'-i','input.mp4','-t',String(end-start),'-map','0:v:0','-map','0:a?',
+      const args=['-hide_banner','-loglevel','error','-ss',String(start),'-i','input.mp4','-t',String(end-start),'-map','0:v:0','-map','0:a?',
         '-c:v',...(transcodeVideo?['libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p']:['copy']),
         '-c:a','copy','-map_metadata','0','-avoid_negative_ts','make_zero','-video_track_timescale','1000000','-movflags','+faststart','output.mp4'];
-      if(await engine.exec(args,90000)!==0) throw Error('FFmpeg 处理失败；不会自动改用其它编码或重新编码音频');
+      if(await engine.exec(args,90000)!==0) throw Error('FFmpeg 处理失败；不会自动改用其它编码或重新编码音频。'+logs.join('\n').slice(0,2000));
       const after=await probe('output.mp4');
       if(after.streams.length!==streams.length) throw Error('输出轨道数量不匹配');
       let origin=null, actualStart=null, actualEnd=null;
@@ -69,7 +71,7 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
             origin=Number(matched[0].pts_time)-Number(retained[0].pts_time);
             actualStart=Math.min(...matched.map(p=>Number(p.pts_time)));
             actualEnd=Math.max(...matched.map(p=>Number(p.pts_time)+Number(p.duration_time??0)));
-            if(![origin,actualStart,actualEnd].every(Number.isFinite)) throw Error('无法验证实际裁剪时间');
+            if(![origin,actualStart,actualEnd].every(Number.isFinite)||actualStart<0) throw Error('无法验证实际裁剪时间，或存在隐藏前导画面');
           }
         }
       }
@@ -84,6 +86,6 @@ export function startVideoEdit(file,{start=0,end,transcodeVideo=false}={}) {
     })();
     try {return await Promise.race([work,timeout]);}
     finally {clearTimeout(timer);engine.terminate();}
-  })();
+  })().catch(error=>{throw error instanceof Error?error:Error(String(error));});
   return {promise,cancel(){cancelled=true;engine?.terminate();}};
 }

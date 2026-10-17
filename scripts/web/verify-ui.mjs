@@ -139,13 +139,23 @@ try {
     }
     await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
     check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1);
+    await click('按住预览生成结果');
+    const preview=page.getByRole('button',{name:'按住预览生成结果',exact:true});
+    const previewBounds=await preview.boundingBox();
+    await page.mouse.move(previewBounds.x+previewBounds.width/2,previewBounds.y+previewBounds.height/2);
+    await page.mouse.down();
+    await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="生成结果动态预览"]');return v&&!v.paused&&!v.hidden&&v.readyState>=2;});
+    await page.mouse.up();
+    await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="生成结果动态预览"]');return v&&v.paused&&v.hidden;});
+    check(label+':result-hold-preview',await page.getByAltText('上次生成的封面').evaluate(image=>!image.hidden&&image.complete));
+    await page.mouse.wheel(0,-4000);await page.waitForTimeout(250);
     await page.screenshot({path:`ci-output/web-ui-${label}-success.png`});
     check(label+':viewport-contained',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     const player=page.getByLabel('视频预览',{exact:true});
     await player.waitFor({state:'attached'});
     const seek=async time=>{
       await player.evaluate((video,time)=>{video.pause();video.currentTime=time;},time);
-      await page.waitForFunction(time=>{const v=document.querySelector('video');return v&&!v.seeking&&v.readyState>=2&&Math.abs(v.currentTime-time)<.01;},time);
+      await page.waitForFunction(time=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&!v.seeking&&v.readyState>=2&&Math.abs(v.currentTime-time)<.01;},time);
       await page.waitForTimeout(150);
     };
     await seek(.4);
@@ -153,7 +163,7 @@ try {
     await text('名称：cover-C.jpg').waitFor({state:'attached'});
     await page.waitForFunction(()=>{const image=document.querySelector('img[alt="已选封面预览"]');return image?.complete&&image.naturalWidth>0;});
     check(label+':current-frame-cover-selected',await page.getByAltText('已选封面预览').evaluate(image=>image.complete&&image.naturalWidth===64));
-    const generateAndAudit=async(expectedVideoHash)=>{
+    const generateAndAudit=async(expectedVideoHash,expectedKey=.4)=>{
       const pending=page.waitForEvent('download');pending.catch(()=>{});
       await click('生成并保存 Live Photo');
       const download=await pending;
@@ -169,7 +179,7 @@ try {
       await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
       await page.waitForTimeout(500);
       return audit.hash===expectedVideoHash&&audit.verdict!=='Invalid'&&audit.source==='ProtocolField'&&
-        audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-.4)<.05;
+        audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-expectedKey)<.05;
     };
     check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash));
     await seek(.2);await click('设为 A');
@@ -177,12 +187,28 @@ try {
     await click('裁剪 A～B 并使用（音视频 copy）');
     await text('名称：trimmed-AB.mp4').waitFor({state:'attached',timeout:120000});
     check(label+':AB-copy-video-used',await text(/copy 裁剪完成；请求/).count()===1);
-    await page.waitForFunction(()=>{const v=document.querySelector('video');return v&&v.readyState>=2;});
+    await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
     const trimmedHash=await player.evaluate(async video=>{
       const data=await(await fetch(video.currentSrc)).arrayBuffer();
       return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
     });
     check(label+':AB-carrier-C-rebased-video-exact',await generateAndAudit(trimmedHash));
+    await click('显式转为 H.264 并使用（音频 copy）');
+    await text('名称：transcoded-H264.mp4').waitFor({state:'attached',timeout:120000});
+    check(label+':explicit-transcode-used',await text(/显式 H.264 转码完成/).count()===1);
+    const priorDownloads=downloads;
+    await click('生成并保存 Live Photo');
+    await text(/视频范围或编码已改变，请在当前视频上重新截取 C/).waitFor({state:'visible'});
+    check(label+':transcode-stale-C-rejected',downloads===priorDownloads);
+    await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
+    await seek(.2);
+    await click('截取当前画面为 C／封面');
+    await text('当前画面已选为封面 C').waitFor({state:'visible'});
+    const transcodedHash=await player.evaluate(async video=>{
+      const data=await(await fetch(video.currentSrc)).arrayBuffer();
+      return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
+    });
+    check(label+':transcoded-recaptured-C-carrier',await generateAndAudit(transcodedHash,.2));
     await choose('重新选择图片',imagePath);
     await choose('重新选择视频',{name:'broken.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,1,2,3])});
     await click('生成并保存 Live Photo');
@@ -190,9 +216,9 @@ try {
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==30||new Set(checks).size!==30) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==38||new Set(checks).size!==38) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 30 checks; shared Compose A/B/C editor under /livephoto/, two sizes, ten audited downloads');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 38 checks; shared Compose A/B/C editor under /livephoto/, two sizes, twelve audited downloads, hold-to-play result');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {
