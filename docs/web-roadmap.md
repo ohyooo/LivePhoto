@@ -20,7 +20,7 @@
 - [ ] 关键照片 metadata 写入；与视频抽帧、替换封面分开。
 - [ ] 将不依赖文件系统、真实编码素材或 FFmpeg 的公共协议回归接入 JS；不伪造平台 actual、不静默跳过后端测试。
 - [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
-- [ ] Worker 专项验收：已补写全部十个公开 API 的 42 项独立 Worker 检查，覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；待本轮真实 Chromium CI 验证，尚不标为已完成。未来新接口仍须补充专项。
+- [x] 当前十个公开 API 的 Worker 专项：42 项检查覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；在 `5009915` 的 [Web CI 协议 job](https://github.com/ohyooo/LivePhoto/actions/runs/39141307170/job/117716540201) 由真实 Chromium 全部执行成功。此处仅指该组验收，不冒充整轮 UI/播放器或发布成功；未来新接口仍须补充专项。
 - [ ] 后续按需将已验证能力接入共享 UI，不另写网页业务逻辑。
 
 ## 后续、尚未实现
@@ -54,6 +54,6 @@ CI 已拆分为一次生产构建、四个并行测试 job（协议、媒体、�
 
 `repairLivePhoto` 只开放 SafeMetadataOnly，默认 dry-run，显式应用后返回 Repair 报告及原子提交的 assets；success 不等于已修复，被阻止/无需修改/预览时均无输出。Google V1/V2 的无操作、独立损坏长度修复、过滤阻止、保真和幂等通过验证；OPPO 默认新建布局单独验证安全拒绝/无输出/输入不变，不算修复成功。加上错误/预算/歧义后缀检查，[Web CI 39006350139](https://github.com/ohyooo/LivePhoto/actions/runs/39006350139) 在代码提交 `a9699f3` 通过功能库 **70 项**、共享 UI **22 项**。UI 实际从 `/livephoto/` 子路径加载字体/Wasm，保留两尺寸六次真实下载审计；主线程与 Worker 均调用修复 API。产物清单、哈希与四张界面截图已独立复核。本阶段没有新增 Repair UI 按钮，也没有扩大协议支持。
 
-只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮。
+只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现；当前全部公开接口已另有 42 项 Worker 专项。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮或自动后台执行。
 
-上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作均保留在后续检查中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** 公共协议 commonTest 的 JS 迁移、其余 Worker 专项、已有载体的独立关键照片写入、更多共享 UI 功能及正式浏览器 Core MediaBackend 仍未完成。
+上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作均保留在后续检查中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** 公共协议 commonTest 的 JS 迁移、未来新接口的 Worker 增量验收、已有载体的独立关键照片写入、更多共享 UI 功能及正式浏览器 Core MediaBackend 仍未完成。
