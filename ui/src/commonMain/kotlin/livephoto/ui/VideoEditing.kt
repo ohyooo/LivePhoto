@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 public data class VideoPlayback(
     val duration: Double = 0.0, val current: Double = 0.0, val seeking: Boolean = true,
     val ready: Boolean = false, val error: String? = null,
+    val width: Double = 0.0, val height: Double = 0.0,
 )
 public data class EditedVideo(val reference: String, val summary: String)
 public interface VideoEditor {
@@ -43,12 +44,14 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     val enabled = !parentBusy && !working && playback.ready
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("视频预览与 A / B / C", style = MaterialTheme.typography.titleMedium)
-        editor.Player(Modifier.fillMaxWidth().height(220.dp), onScroll)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val aspect = if (playback.width > 0 && playback.height > 0) (playback.width / playback.height).toFloat() else 16f / 9f
+            val portrait = aspect < 1f
+            val videoWidth = (maxWidth - if (portrait) 56.dp else 24.dp).coerceAtLeast(1.dp)
+            val videoHeight = (videoWidth / aspect).coerceAtMost(if (portrait) 1200.dp else 1080.dp)
+            editor.Player(Modifier.fillMaxWidth().height(videoHeight + 84.dp), onScroll)
+        }
         playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Text("当前位置：${mediaSeconds(playback.current)} / ${mediaSeconds(playback.duration)}")
-        if (playback.duration > 0) Slider(value = playback.current.coerceIn(0.0, playback.duration).toFloat(),
-            onValueChange = { editor.seek(it.toDouble()) }, enabled = enabled,
-            valueRange = 0f..playback.duration.toFloat())
         Text("A：${mediaSeconds(start)}　B：${mediaSeconds(end)}　C：${cover?.let(::mediaSeconds) ?: "未截取"}")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = enabled, onClick = { start = playback.current }) { Text("设为 A") }

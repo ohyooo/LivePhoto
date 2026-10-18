@@ -47,7 +47,7 @@ try {
     const player=createPlayer(file,s=>state=s);document.body.append(player.element);
     const until=async predicate=>{const end=Date.now()+30000;while(!predicate()){if(Date.now()>end)throw Error('Video player timeout');await new Promise(r=>setTimeout(r,20));}};
     await until(()=>state?.ready);
-    const loaded=state.duration>2.9&&player.element.videoWidth===64&&player.element.paused;
+    const loaded=state.duration>2.9&&player.video.videoWidth===64&&player.video.paused;
     player.seek(0.4);await until(()=>!state.seeking&&Math.abs(state.current-.4)<.01);
     const first=await player.capture();
     player.seek(1.4);await until(()=>!state.seeking&&Math.abs(state.current-1.4)<.01);

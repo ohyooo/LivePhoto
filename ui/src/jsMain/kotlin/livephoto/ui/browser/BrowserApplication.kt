@@ -125,7 +125,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan,
                 "视频范围或编码已改变，请在当前视频上重新截取 C 封面；不会猜测旧封面的时间。"))
         val key = frame?.let { CoverPosition.Timestamp(Time(((it.sourceTime - timeline!!.origin) * 1_000_000).roundToLong(), 1_000_000u),
-            Selection.AtOrBefore, Time(1, 1u)) }
+            Selection.Nearest, Time(1, 1u)) }
         if (photo.size.toLong() + movie.size.toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
         suspend fun bytes(file: File): ByteArray {
@@ -219,7 +219,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             HtmlElementView(factory = {
                 val callback: (dynamic) -> Unit = { value ->
                     if (!disposed) state.value = VideoPlayback(value.duration.unsafeCast<Double>(), value.current.unsafeCast<Double>(),
-                        value.seeking.unsafeCast<Boolean>(), value.ready.unsafeCast<Boolean>(), value.error.unsafeCast<String?>())
+                        value.seeking.unsafeCast<Boolean>(), value.ready.unsafeCast<Boolean>(), value.error.unsafeCast<String?>(),
+                        value.width.unsafeCast<Double>(), value.height.unsafeCast<Double>())
                 }
                 surface = media[0].createPlayer(file, callback, onScroll)
                 surface.element.unsafeCast<HTMLElement>()

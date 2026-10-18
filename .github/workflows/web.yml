@@ -177,6 +177,13 @@ jobs:
           set -o pipefail
           node scripts/web/verify-ui.mjs 2>&1 | tee ci-output/web-ui-browser.log
 
+      - name: Test adaptive player with real pointer, keyboard and fullscreen
+        if: ${{ !cancelled() && steps.web_package.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/web/verify-player.mjs 2>&1 | tee ci-output/web-player.log
+
       - name: Upload verified shared Compose website
         uses: actions/upload-artifact@v7
         with:
@@ -199,6 +206,8 @@ jobs:
             ci-output/web-ui-browser-evidence.json
             ci-output/web-media.log
             ci-output/web-media-evidence.json
+            ci-output/web-player.log
+            ci-output/web-player-evidence.json
             ci-output/web-ui-*.png
             ci-output/web-ui-failure.html
             ci-output/web-ui-failure-a11y.txt

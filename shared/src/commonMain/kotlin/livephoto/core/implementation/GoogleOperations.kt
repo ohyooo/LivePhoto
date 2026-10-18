@@ -345,7 +345,35 @@ internal fun checkResourceAliases(session: SourceSession, selected: List<Resourc
 }
 
 internal fun selectKey(video: VideoStructure, requested: CoverPosition?, protocolTimescale: UInt? = null): KeyPhotoResult {
-    if (requested != null) return KeyPhotoResult(selectFrame(video, requested).time, source = KeySource.ProtocolField)
+    if (requested != null) {
+        val actual = selectFrame(video, requested).time
+        // Explicit approximate timestamp selection may spend its tolerance on
+        // the target's integer clock too. Exact/FrameIndex remain exact. Never
+        // change frame/sample timing just to encode key-photo metadata.
+        if (protocolTimescale != null && requested is CoverPosition.Timestamp &&
+            requested.selection != Selection.Exact && requested.tolerance > Time.Zero) {
+            val scale = protocolTimescale.toULong()
+            val product = (actual.value % actual.timescale.toLong()).toULong() * scale
+            val remainder = product % actual.timescale.toULong()
+            if (remainder != 0uL) {
+                var ticks = checkedAdd(checkedMultiply((actual.value / actual.timescale.toLong()).toULong(), scale), product / actual.timescale.toULong())
+                if (requested.selection == Selection.Nearest && remainder * 2uL > actual.timescale.toULong()) ticks = checkedAdd(ticks, 1uL)
+                if (ticks > Long.MAX_VALUE.toULong()) fail("VALUE_NOT_REPRESENTABLE", "Key timestamp exceeds the signed target clock", Stage.Plan)
+                val encoded = Time(ticks.toLong(), protocolTimescale)
+                val track = video.tracks.single { it.handler == "vide" }
+                val visibleStart = track.edit?.let { Time(it.emptyDuration.toLong(), it.movieTimescale) } ?: Time.Zero
+                if (encoded < visibleStart || encoded >= track.presentationDuration ||
+                    !withinPresentationTolerance(actual, encoded, requested.tolerance) ||
+                    !withinPresentationTolerance(requested.time, encoded, requested.tolerance) ||
+                    requested.selection == Selection.AtOrBefore && encoded > requested.time)
+                    fail("VALUE_NOT_REPRESENTABLE", "Target timestamp precision exceeds the requested tolerance or visible range", Stage.Plan)
+                return KeyPhotoResult(encoded, source = KeySource.ProtocolField, issues = listOf(
+                    Issue(IssueCode("KEY_TIMESTAMP_QUANTIZED"), Severity.Info, Layer.Protocol,
+                        expected = Value.Text("${actual.value}/${actual.timescale}"), observed = Value.Text("${encoded.value}/${encoded.timescale}"))))
+            }
+        }
+        return KeyPhotoResult(actual, source = KeySource.ProtocolField)
+    }
     val track = video.tracks.filter { it.handler == "vide" }.singleOrNull() ?: fail("FRAME_INDEX_UNAVAILABLE", "No unique presentation video track")
     val first = selectFrame(video, CoverPosition.FrameIndex(0uL))
     val middle = Time(track.presentationDuration.value / 2, track.presentationDuration.timescale)

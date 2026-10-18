@@ -61,6 +61,9 @@ private data class Distance(val whole: ULong, val numerator: ULong, val denomina
     }
 }
 
+internal fun withinPresentationTolerance(first: Time, second: Time, tolerance: Time): Boolean =
+    first >= Time.Zero && second >= Time.Zero && tolerance >= Time.Zero && distance(first, second) <= distance(tolerance, Time.Zero)
+
 private fun distance(first: Time, second: Time): Distance {
     val high = if (first >= second) first else second
     val low = if (first >= second) second else first

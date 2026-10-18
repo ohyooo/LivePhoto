@@ -197,6 +197,39 @@ class GoogleCoreMutationTest {
     }
 
     @Test
+    fun approximateFractionalKeyUsesTargetPrecisionWithinToleranceWithoutChangingVideo(): Unit = runImmediate {
+        val bytes = GoogleFixtures.video().bytes.copyOf()
+        for (type in listOf("mvhd", "mdhd")) {
+            val tag = type.encodeToByteArray()
+            val offset = (0..bytes.size - 4).single { start -> tag.indices.all { bytes[start + it] == tag[it] } }
+            GoogleFixtures.u32(3000u).copyInto(bytes, offset + 4 + 12)
+        }
+        for ((selection, requested) in listOf(Selection.Nearest to 13333L, Selection.AtOrBefore to 14000L)) {
+            val output = MemoryOutputTransaction(context, "approximate-$selection")
+            val operation = value(core.create(CreateRequest(source(GoogleFixtures.jpeg(), "approx-cover"), source(bytes, "approx-video"),
+                ProtocolSelector(ProtocolId("google.motionphoto.v2")), edits = EditSpec(keyPosition = CoverPosition.Timestamp(Time(requested, 1_000_000u), selection, Time(1, 1000u))), output = output, context = context)))
+            assertEquals(Time(13333, 1_000_000u), operation.keyPhoto?.position)
+            assertNull(operation.keyPhoto?.frameIndex)
+            assertTrue(operation.keyPhoto!!.issues.any { it.code.value == "KEY_TIMESTAMP_QUANTIZED" })
+            val carrier = output.committedAssets().values.single().toByteArray()
+            assertEquals(bytes.toList(), carrier.takeLast(bytes.size))
+            assertEquals(Time(13333, 1_000_000u), value(core.getKeyPhotoPosition(ReadRequest(input(carrier), context))).position)
+        }
+        // Nonzero tolerance is explicit permission, not an excuse to weaken
+        // Exact, FrameIndex, zero tolerance, or range checks.
+        for (position in listOf<CoverPosition>(CoverPosition.FrameIndex(1uL),
+            CoverPosition.Timestamp(Time(40, 3000u), Selection.Exact, Time(1, 1000u)),
+            CoverPosition.Timestamp(Time(40, 3000u), Selection.Nearest),
+            CoverPosition.Timestamp(Time(40, 3000u), Selection.Nearest, Time(1, 10_000_000u)))) {
+            val output = MemoryOutputTransaction(context, "strict-fractional")
+            val failure = assertIs<CoreResult.Failure>(core.create(CreateRequest(source(GoogleFixtures.jpeg(), "strict-cover"), source(bytes, "strict-video"),
+                ProtocolSelector(ProtocolId("google.motionphoto.v2")), edits = EditSpec(keyPosition = position), output = output, context = context)))
+            assertEquals(IssueCode("VALUE_NOT_REPRESENTABLE"), failure.error.code)
+            assertTrue(output.committedAssets().isEmpty())
+        }
+    }
+
+    @Test
     fun requestedKeySelectionUsesActualPresentationSamplesAndEarlierNearestTie(): Unit = runImmediate {
         val video = GoogleFixtures.video().bytes
         val cases = listOf(

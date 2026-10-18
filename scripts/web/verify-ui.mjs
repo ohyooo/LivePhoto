@@ -14,7 +14,9 @@ if (!ffmpeg) throw Error('Synthetic media generator required');
 const generate = args => execFileSync(ffmpeg, ['-nostdin', '-n', '-hide_banner', '-loglevel', 'error', ...args], { timeout: 60000 });
 const imagePath = join(fixtures, 'cover.jpg'), videoPath = join(fixtures, 'clip.mp4');
 generate(['-f','lavfi','-i','color=c=blue:s=64x64','-frames:v','1','-threads','1','-update','1',imagePath]);
-generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','25','-c:a','aac','-use_editlist','0','-video_track_timescale','1000000','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoPath]);
+// Deliberately fractional frame PTS: do not hide timestamp failures behind a
+// 25fps/microsecond-clock fixture. Audio and byte-exact extraction stay tested.
+generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=30000/1001','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','30','-c:a','aac','-use_editlist','0','-video_track_timescale','90000','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoPath]);
 const video = await readFile(videoPath);
 const videoHash = createHash('sha256').update(video).digest('hex');
 const server = createServer(async (req,res) => {
