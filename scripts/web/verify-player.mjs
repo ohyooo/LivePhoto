@@ -21,7 +21,7 @@ try {
   check('vfr-source-independently-confirmed',new Set(pts.slice(1).map((p,i)=>Math.round((p-pts[i])*1000))).size>1);
   for(const [size,viewport] of [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]) for(const [shape] of cases) {
     const context=await browser.newContext({viewport,serviceWorkers:'block'});await context.route('**/*',r=>r.request().url().startsWith(origin+'/')?r.continue():r.abort());
-    const page=await context.newPage();lastPage=page;await page.goto(origin+'/livephoto/');await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
+    const page=await context.newPage();lastPage=page;page.setDefaultTimeout(30000);await page.goto(origin+'/livephoto/');await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
     const driver=composeDriver(page,viewport),label=size+':'+shape;
     await driver.choose('选择视频',join(fixtures,shape+'.mp4'));
     const video=page.getByLabel('视频预览',{exact:true});await video.waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
@@ -40,6 +40,9 @@ try {
     // Deliver keys to the actual focus target selected by pointer interaction.
     await page.keyboard.press('ArrowDown');await page.waitForTimeout(150);
     check(label+':keyboard-seek',await video.evaluate(v=>v.currentTime>2.3));
+    // Do not race the 3-second fixture ending while looking for Pause. The
+    // pointer reset is itself real UI interaction, not an app-handler shortcut.
+    await driver.drag(progress,.8,.2,shape==='portrait');
     await driver.click('播放');await page.waitForFunction(()=>!document.querySelector('video').paused);await driver.click('暂停');
     check(label+':play-and-pause',await video.evaluate(v=>v.paused));
     await video.click();await page.waitForFunction(()=>!document.querySelector('video').paused);await video.click();

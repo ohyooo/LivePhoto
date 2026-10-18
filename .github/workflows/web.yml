@@ -171,11 +171,24 @@ jobs:
           node scripts/web/verify-media.mjs 2>&1 | tee ci-output/web-media.log
 
       - name: Test adaptive shared player with real pointer, keyboard and fullscreen
+        id: player
         if: ${{ !cancelled() && steps.web_package.outcome == 'success' }}
         shell: bash
         run: |
           set -o pipefail
           node scripts/web/verify-player.mjs 2>&1 | tee ci-output/web-player.log
+
+      - name: Upload player failure diagnostics immediately
+        if: ${{ !cancelled() && steps.player.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-player-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/web-player.log
+            ci-output/web-ui-player-failure.png
+            ci-output/web-ui-player-failure-a11y.txt
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Test mobile and wide layouts, chooser, errors and real downloads
         if: ${{ !cancelled() && steps.web_package.outcome == 'success' }}

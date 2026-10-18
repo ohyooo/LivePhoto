@@ -3,7 +3,7 @@ export function composeDriver(page,viewport) {
   const find=name=>page.getByRole('button',{name,exact:true}).or(page.getByRole('checkbox',{name,exact:true})).first();
   const reveal=async locator=>{
     for(let attempt=0;attempt<40;attempt++) {
-      const b=await locator.boundingBox().catch(()=>null);
+      const b=await locator.boundingBox({timeout:1000}).catch(()=>null);
       if(b&&b.width>0&&b.height>0&&b.y>=64&&b.y+b.height<=viewport.height) return b;
       await page.mouse.move(viewport.width/2,viewport.height/2);
       await page.mouse.wheel(0,b&&b.height>0?(b.y<64?-280:280):(attempt<25?280:-280));
