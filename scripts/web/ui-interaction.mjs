@@ -12,7 +12,10 @@ export function composeDriver(page,viewport) {
     throw Error('Shared Compose control is not reachable: '+await locator.count());
   };
   const click=async name=>{
-    const b=await reveal(find(name));await page.waitForTimeout(100);await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(100);
+    const locator=find(name);await reveal(locator);
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
+    await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
   };
   const drag=async(locator,from,to,vertical=false)=>{
     const b=await reveal(locator);

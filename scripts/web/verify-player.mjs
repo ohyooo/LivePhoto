@@ -28,7 +28,7 @@ try {
     check(label+':tools-collapsed-by-default',await page.locator('#trim-progress').count()===0&&await page.locator('#cover-progress').count()===0);
     const progress=page.locator('#playback-progress');await driver.reveal(progress);
     const v=await video.boundingBox(),bar=await progress.boundingBox(),play=await driver.find('播放').boundingBox();
-    check(label+':aspect-and-viewport',v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    check(label+':aspect-and-viewport',v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
     check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1);
     check(label+':native-overlays-disabled',await video.evaluate(v=>!v.controls));
     check(label+':correct-progress-axis',shape==='portrait'?bar.height>bar.width&&bar.x>=v.x+v.width:bar.width>bar.height);
@@ -44,7 +44,9 @@ try {
     // pointer reset is itself real UI interaction, not an app-handler shortcut.
     await driver.drag(progress,.8,.2,shape==='portrait');
     await driver.click('播放');await page.waitForFunction(()=>!document.querySelector('video').paused);await driver.click('暂停');
-    check(label+':play-and-pause',await video.evaluate(v=>v.paused));
+    await page.waitForFunction(()=>document.querySelector('video').paused);
+    console.log('Shared pause state',label,await video.evaluate(v=>({paused:v.paused,ended:v.ended,current:v.currentTime,scrollY,canvasTop:document.querySelector('canvas').getBoundingClientRect().top})));
+    check(label+':play-and-pause',await video.evaluate(v=>v.paused&&!v.ended&&v.currentTime<v.duration-.2&&scrollY===0));
     await video.click();await page.waitForFunction(()=>!document.querySelector('video').paused);await video.click();
     check(label+':picture-click-toggle',await video.evaluate(v=>v.paused));
     await driver.click('静音');await driver.click('取消静音');check(label+':mute-and-restore',await video.evaluate(v=>!v.muted&&v.volume>0));

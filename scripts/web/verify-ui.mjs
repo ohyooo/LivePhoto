@@ -140,7 +140,6 @@ try {
       // chase moving canvas targets while that intentional scroll animation is active.
       await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
       await page.waitForTimeout(500);
-      console.log('Generated key audit',label,{position:audit.key,source:audit.source,expectedKey});
     }
     await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
     check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1);
@@ -184,6 +183,7 @@ try {
       },Array.from(output));
       await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
       await page.waitForTimeout(500);
+      console.log('Generated key audit',label,{position:audit.key,source:audit.source,expectedKey});
       return audit.hash===expectedVideoHash&&audit.verdict!=='Invalid'&&audit.source==='ProtocolField'&&
         audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-expectedKey)<.05;
     };
