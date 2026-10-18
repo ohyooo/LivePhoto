@@ -359,9 +359,16 @@ internal fun selectKey(video: VideoStructure, requested: CoverPosition?, protoco
                 var ticks = checkedAdd(checkedMultiply((actual.value / actual.timescale.toLong()).toULong(), scale), product / actual.timescale.toULong())
                 if (requested.selection == Selection.Nearest && remainder * 2uL > actual.timescale.toULong()) ticks = checkedAdd(ticks, 1uL)
                 if (ticks > Long.MAX_VALUE.toULong()) fail("VALUE_NOT_REPRESENTABLE", "Key timestamp exceeds the signed target clock", Stage.Plan)
-                val encoded = Time(ticks.toLong(), protocolTimescale)
+                var encoded = Time(ticks.toLong(), protocolTimescale)
                 val track = video.tracks.single { it.handler == "vide" }
                 val visibleStart = track.edit?.let { Time(it.emptyDuration.toLong(), it.movieTimescale) } ?: Time.Zero
+                // At a fractional visible boundary the nearest tick may fall
+                // just outside the movie. Try the adjacent tick, not a clamp
+                // to a nonrepresentable boundary or a different video frame.
+                if (requested.selection == Selection.Nearest && (encoded < visibleStart || encoded >= track.presentationDuration)) {
+                    val adjacent = if (encoded < visibleStart) checkedAdd(ticks, 1uL) else ticks - 1uL
+                    if (adjacent <= Long.MAX_VALUE.toULong()) encoded = Time(adjacent.toLong(), protocolTimescale)
+                }
                 if (encoded < visibleStart || encoded >= track.presentationDuration ||
                     !withinPresentationTolerance(actual, encoded, requested.tolerance) ||
                     !withinPresentationTolerance(requested.time, encoded, requested.tolerance) ||

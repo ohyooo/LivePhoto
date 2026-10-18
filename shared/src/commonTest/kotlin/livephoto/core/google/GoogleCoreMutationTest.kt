@@ -227,6 +227,13 @@ class GoogleCoreMutationTest {
             assertEquals(IssueCode("VALUE_NOT_REPRESENTABLE"), failure.error.code)
             assertTrue(output.committedAssets().isEmpty())
         }
+        val parsed = value(BmffVideoProbe(BinaryReader(source(bytes, "boundary-clock"), context)).probe(ByteRange(0uL, bytes.size.toULong())))
+        val track = parsed.tracks.single()
+        val delayed = track.copy(samples = track.samples.map { it.copy(presentationTime = it.presentationTime + 40) },
+            edit = livephoto.core.bmff.VideoEdit(3000u, 40uL, 80uL, 0), presentationDuration = Time(120, 3000u))
+        val key = livephoto.core.implementation.selectKey(parsed.copy(tracks = listOf(delayed)),
+            CoverPosition.Timestamp(Time(40, 3000u), Selection.Nearest, Time(1, 1000u)), 1_000_000u)
+        assertEquals(Time(13334, 1_000_000u), key.position) // 13333 would precede the visible start.
     }
 
     @Test
