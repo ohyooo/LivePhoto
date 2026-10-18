@@ -33,14 +33,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
 
-private val PlayerInk = Color(0xff0f172a)
 private val PlayerBlue = Color(0xff3b82f6)
-private val PlayerTrack = Color(0xffcbd5e1)
 
 /** Shared pointer, touch, keyboard and accessibility control. Vertical grows downwards. */
 @Composable
 public fun MediaSeekBar(value: Double, duration: Double, enabled: Boolean, label: String,
     modifier: Modifier = Modifier, vertical: Boolean = false, onSeek: (Double) -> Unit) {
+    val track = MaterialTheme.colorScheme.outlineVariant
+    val thumbColor = MaterialTheme.colorScheme.surface
     val current by rememberUpdatedState(value)
     val seek by rememberUpdatedState(onSeek)
     val focus = remember { FocusRequester() }
@@ -76,10 +76,10 @@ public fun MediaSeekBar(value: Double, duration: Double, enabled: Boolean, label
         val a = if (vertical) Offset(size.width / 2, 7.dp.toPx()) else Offset(7.dp.toPx(), size.height / 2)
         val b = if (vertical) Offset(a.x, size.height - 7.dp.toPx()) else Offset(size.width - 7.dp.toPx(), a.y)
         val thumb = a + (b - a) * fraction
-        drawLine(PlayerTrack, a, b, 4.dp.toPx(), StrokeCap.Round)
-        drawLine(if (available) PlayerBlue else PlayerTrack, a, thumb, 4.dp.toPx(), StrokeCap.Round)
-        drawCircle(Color.White, 7.dp.toPx(), thumb)
-        drawCircle(PlayerTrack, 7.dp.toPx(), thumb, style = Stroke(1.dp.toPx()))
+        drawLine(track, a, b, 4.dp.toPx(), StrokeCap.Round)
+        drawLine(if (available) PlayerBlue else track, a, thumb, 4.dp.toPx(), StrokeCap.Round)
+        drawCircle(thumbColor, 7.dp.toPx(), thumb)
+        drawCircle(track, 7.dp.toPx(), thumb, style = Stroke(1.dp.toPx()))
     }
 }
 
@@ -91,6 +91,7 @@ private fun playerClock(time: Double): String {
 
 @Composable
 private fun PlayerButton(label: String, symbol: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val PlayerInk = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(36.dp).semantics { contentDescription = label }) {
         Canvas(Modifier.size(20.dp)) {
             val k = size.width / 24f
@@ -126,7 +127,7 @@ public fun VideoPlayerHost(editor: VideoEditor?, enabled: Boolean, onScroll: (Fl
         Box(Modifier.fillMaxSize().offset { if (fullscreen) IntOffset(window.width, 0) else IntOffset.Zero }) {
             content { if (!fullscreen) player() }
         }
-        if (fullscreen) Box(Modifier.matchParentSize().background(Color(0xfff5f7fb)).padding(12.dp), contentAlignment = Alignment.Center) {
+        if (fullscreen) Box(Modifier.matchParentSize().background(MaterialTheme.colorScheme.background).padding(12.dp), contentAlignment = Alignment.Center) {
             player()
         }
     }
@@ -135,6 +136,8 @@ public fun VideoPlayerHost(editor: VideoEditor?, enabled: Boolean, onScroll: (Fl
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) -> Unit, fullscreen: Boolean) {
+    val PlayerInk = MaterialTheme.colorScheme.onSurface
+    val palette = MaterialTheme.colorScheme
     val p by editor.playback
     var speedMenu by remember { mutableStateOf(false) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -156,7 +159,7 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
                 val pad = spread.dp.toPx()
                 drawRoundRect(Color(0x030f172a), Offset(-pad, pad), Size(size.width + pad * 2, size.height + pad), CornerRadius(14.dp.toPx() + pad))
             }
-        }.background(Color.White, RoundedCornerShape(14.dp)).border(1.dp, Color(0x140f172a), RoundedCornerShape(14.dp))) {
+        }.background(palette.surface, RoundedCornerShape(14.dp)).border(1.dp, palette.outlineVariant, RoundedCornerShape(14.dp))) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     editor.Player(Modifier.size(pictureWidth, pictureHeight).testTag("video-picture"), onScroll)

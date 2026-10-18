@@ -3,6 +3,11 @@
 package livephoto.ui.browser
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.window.ComposeViewport
 import androidx.compose.ui.Modifier
@@ -37,6 +42,13 @@ private suspend fun <T> browserAwait(promise: Promise<T>): T = promise.catch<T> 
 
 public fun main() {
     ComposeViewport(document.getElementById("app")!!, configure = { isA11YEnabled = true }) {
+        val browserDark = isSystemInDarkTheme()
+        var selectedDark by remember { mutableStateOf<Boolean?>(null) }
+        val dark = selectedDark ?: browserDark
+        SideEffect {
+            document.documentElement?.unsafeCast<HTMLElement>()?.style?.setProperty("color-scheme", if (dark) "dark" else "light")
+            document.documentElement?.unsafeCast<HTMLElement>()?.style?.setProperty("--livephoto-media-background", if (dark) "#151b26" else "#f5f7fb")
+        }
         val platform = remember { BrowserPlatform() }
         val resolver = LocalFontFamilyResolver.current
         var fontsReady by remember { mutableStateOf(false) }
@@ -53,9 +65,11 @@ public fun main() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { fontError = true }
         }
-        MaterialTheme {
-            if (fontsReady) LivePhotoScreen(platform)
-            else Text(if (fontError) "Unable to load bundled font. Reload the page or check the static server." else "Loading fonts...")
+        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+            Surface(Modifier.fillMaxSize()) {
+                if (fontsReady) LivePhotoScreen(platform, dark) { selectedDark = !dark }
+                else Text(if (fontError) "Unable to load bundled font. Reload the page or check the static server." else "Loading fonts...")
+            }
         }
     }
 }

@@ -148,6 +148,13 @@ jobs:
 
       - uses: ./.github/actions/setup-web-tests
 
+      - name: Test browser-following theme and real toggle rendering
+        if: ${{ matrix.kind == 'player' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/web/verify-theme.mjs 2>&1 | tee ci-output/web-theme.log
+
       - name: Run ${{ matrix.kind }} in real Chromium
         shell: bash
         run: |
@@ -164,6 +171,8 @@ jobs:
           path: |
             ci-output/${{ matrix.log }}
             ci-output/${{ matrix.evidence }}
+            ci-output/web-theme.log
+            ci-output/web-theme-evidence.json
             ci-output/web-ui-*.png
             ci-output/web-ui-failure*.html
             ci-output/web-ui-failure-a11y.txt
@@ -249,6 +258,8 @@ jobs:
             ci-output/web-media-evidence.json
             ci-output/web-player.log
             ci-output/web-player-evidence.json
+            ci-output/web-theme.log
+            ci-output/web-theme-evidence.json
             ci-output/web-ui-player-failure-a11y.txt
             ci-output/web-ui-*.png
             ci-output/web-ui-failure*.html

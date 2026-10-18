@@ -22,9 +22,9 @@ for(const [directory,document,scope] of [
 await mkdir(resolve(root,'browser-api'),{recursive:true});
 await cp(resolve(root,'web-library'),resolve(root,'browser-api/web-library'),{recursive:true});
 if(process.argv.includes('--tests')) {
-  for(const [file,count] of [['web-browser-evidence.json',70],['web-media-evidence.json',11],['web-player-evidence.json',91],['web-ui-browser-evidence.json',38]]) {
+  for(const [file,count] of [['web-browser-evidence.json',70],['web-media-evidence.json',11],['web-player-evidence.json',91],['web-ui-browser-evidence.json',38],['web-theme-evidence.json',12]]) {
     const proof=await json(file);
     if(proof.commit!==process.env.GITHUB_SHA||String(proof.run)!==process.env.GITHUB_RUN_ID||proof.tests!==count||proof.failures!==0||proof.checks?.length!==count||new Set(proof.checks).size!==count)throw Error('Incomplete/wrong-source test evidence: '+file);
   }
 }
-console.log('WEB_BUILD_INPUTS=VERIFIED; same-commit library and UI hashes'+(process.argv.includes('--tests')?'; four independent test suites complete':''));
+console.log('WEB_BUILD_INPUTS=VERIFIED; same-commit library and UI hashes'+(process.argv.includes('--tests')?'; independent test suites and theme checks complete':''));

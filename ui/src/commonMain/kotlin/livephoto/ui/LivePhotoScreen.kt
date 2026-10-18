@@ -17,7 +17,7 @@ import livephoto.core.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
+public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = false, onToggleTheme: (() -> Unit)? = null) {
     var image by rememberSaveable { mutableStateOf<String?>(null) }
     var video by rememberSaveable { mutableStateOf<String?>(null) }
     var profile by rememberSaveable { mutableIntStateOf(0) }
@@ -56,7 +56,8 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
     val editor = platform.rememberVideoEditor(video)
     VideoPlayerHost(editor, !busy && !mediaBusy, mediaScroll) { player ->
     Scaffold(topBar = {
-        TopAppBar(title = { Text("LivePhoto") }, modifier = Modifier.testTag("app-bar"))
+        TopAppBar(title = { Text("LivePhoto") }, modifier = Modifier.testTag("app-bar"),
+            actions = { if (onToggleTheme != null) ThemeToggle(darkTheme, onToggleTheme) })
     }) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
         Column(
