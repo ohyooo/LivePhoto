@@ -31,13 +31,15 @@ try {
     // full bounds instead, otherwise a half-visible portrait rail looks fitted.
     for(let attempt=0;attempt<20;attempt++) {
       const picture=await video.boundingBox(),button=await driver.find('播放').boundingBox({timeout:1000});
-      if(picture.y>=64&&button&&button.height>0&&button.y+button.height<=viewport.height)break;
-      const delta=picture.y<64?picture.y-76:picture.y+picture.height+80-viewport.height;
+      if(picture.y>=76&&button&&button.height>0&&button.y+button.height<=viewport.height-64)break;
+      const delta=picture.y<76?picture.y-76:picture.y+picture.height+144-viewport.height;
       await page.mouse.move(viewport.width/2,viewport.height/2);await page.mouse.wheel(0,delta);await page.waitForTimeout(200);
     }
     const v=await video.boundingBox(),bar=await progress.boundingBox(),play=await driver.find('播放').boundingBox();
-    check(label+':aspect-and-viewport',v.y>=64&&v.y+v.height<=viewport.height&&v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
-    check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1);
+    const card=await page.locator('#video-player').boundingBox(),volume=await page.locator('#volume-progress').boundingBox();
+    console.log('Player height and volume',label,{player:card.height,viewport:viewport.height,volume:volume.width});
+    check(label+':aspect-and-viewport',card.height<=viewport.height/2+1&&v.y>=76&&v.y+v.height<=viewport.height&&v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
+    check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1&&volume.y>=v.y+v.height-1&&volume.width>=80&&(shape!=='portrait'||volume.width>=card.width-68));
     check(label+':native-overlays-disabled',await video.evaluate(v=>!v.controls));
     check(label+':correct-progress-axis',shape==='portrait'?bar.height>bar.width&&bar.x>=v.x+v.width:bar.width>bar.height);
     await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`,omitBackground:true});
@@ -66,8 +68,12 @@ try {
     check(label+':play-and-pause',await video.evaluate(v=>v.paused&&!v.ended&&v.currentTime<v.duration-.2&&scrollY===0));
     await video.click();await page.waitForFunction(()=>!document.querySelector('video').paused);await video.click();
     check(label+':picture-click-toggle',await video.evaluate(v=>v.paused));
-    await driver.click('静音');await driver.click('取消静音');check(label+':mute-and-restore',await video.evaluate(v=>!v.muted&&v.volume>0));
-    await driver.click('播放倍速');await driver.click('1.5x');check(label+':rate-menu-outside-picture',await video.evaluate(v=>v.playbackRate===1.5));
+    await driver.drag(page.locator('#volume-progress'),.9,.4);
+    const changedVolume=await video.evaluate(v=>Math.abs(v.volume-.4)<.08);
+    await driver.click('静音');await driver.click('取消静音');check(label+':mute-and-restore',changedVolume&&await video.evaluate(v=>!v.muted&&v.volume>0));
+    await driver.click('播放倍速');
+    const menuCard=await page.locator('#video-player').boundingBox();
+    await driver.click('1.5x');check(label+':rate-menu-outside-picture',menuCard.height<=viewport.height/2+1&&await video.evaluate(v=>v.playbackRate===1.5));
     await driver.click('全屏');await page.waitForFunction(()=>!!document.fullscreenElement);
     await driver.find('退出全屏').waitFor({state:'attached'});await page.waitForTimeout(200);
     check(label+':fullscreen-ratio-controls',await video.evaluate(v=>Math.abs(v.getBoundingClientRect().width/v.getBoundingClientRect().height-v.videoWidth/v.videoHeight)<.01));

@@ -104,6 +104,8 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 ## 浏览器共享界面
 
+页面默认跟随浏览器深浅色，右上角太阳／月亮按钮可在当前页面手动切换；刷新后重新跟随。普通播放器整体不超过浏览器可视高度的一半，保持视频比例，全屏不受半屏限制。宽布局加长音量条；竖屏或窄布局的音量控件单独一行铺满可用宽度。
+
 浏览器界面直接运行 `ui/commonMain` 中与 Android 相同的 Compose 屏幕，不是另外维护的 HTML 表单。浏览器适配层负责文件选择、元信息读取及下载，协议封装仍调用公共 Core；媒体只在本机浏览器处理，不上传服务器。
 
 在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
