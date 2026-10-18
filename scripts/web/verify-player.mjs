@@ -51,7 +51,15 @@ try {
     // Do not race the 3-second fixture ending while looking for Pause. The
     // pointer reset is itself real UI interaction, not an app-handler shortcut.
     await driver.drag(progress,.8,.2,shape==='portrait');
-    await driver.click('播放');await page.waitForFunction(()=>!document.querySelector('video').paused);await driver.click('暂停');
+    // Play/pause is the same physical button. Do not scroll/search for a newly
+    // renamed semantic node while this 3-second fixture is already playing.
+    await driver.reveal(driver.find('播放'));
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    const playBounds=await driver.find('播放').boundingBox({timeout:1000});
+    await page.mouse.click(playBounds.x+playBounds.width/2,playBounds.y+playBounds.height/2);
+    await page.waitForFunction(()=>!document.querySelector('video').paused);
+    await page.waitForTimeout(100);
+    await page.mouse.click(playBounds.x+playBounds.width/2,playBounds.y+playBounds.height/2);
     await page.waitForFunction(()=>document.querySelector('video').paused);
     console.log('Shared pause state',label,await video.evaluate(v=>({paused:v.paused,ended:v.ended,current:v.currentTime,scrollY})),
       'canvasBounds',await page.locator('canvas').first().boundingBox());
