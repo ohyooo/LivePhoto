@@ -41,11 +41,6 @@ try {
     check(label+':native-overlays-disabled',await video.evaluate(v=>!v.controls));
     check(label+':correct-progress-axis',shape==='portrait'?bar.height>bar.width&&bar.x>=v.x+v.width:bar.width>bar.height);
     await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`,omitBackground:true});
-    if(size==='mobile'&&shape==='landscape') {
-      console.log('Initial surface layout',JSON.stringify(await page.evaluate(()=>({video:document.querySelector('video').outerHTML,ancestors:[...function*(node){while(node){yield {tag:node.tagName,style:node.getAttribute('style')};node=node.parentElement}}(document.querySelector('video'))]}))));
-      const image=await page.locator('canvas').first().evaluate(canvas=>new Promise(resolve=>requestAnimationFrame(()=>resolve(canvas.toDataURL('image/png')))));
-      await writeFile('ci-output/web-ui-player-canvas-diagnostic.png',Buffer.from(image.split(',')[1],'base64'));
-    }
     await driver.drag(progress,.1,.6,shape==='portrait');await page.waitForFunction(()=>!document.querySelector('video').seeking);
     const seekState=await video.evaluate(v=>({paused:v.paused,current:v.currentTime,duration:v.duration}));
     console.log('Shared pointer seek',label,seekState);

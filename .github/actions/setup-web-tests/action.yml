@@ -1,0 +1,28 @@
+name: Set up Web test runtime
+description: Cached browser tooling and stable native fixture generator; no Gradle or JDK.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/.npm
+          ~/.cache/ms-playwright
+        key: livephoto-web-${{ runner.os }}-${{ hashFiles('scripts/web/package.json') }}
+
+    - name: Install pinned browser tooling
+      shell: bash
+      working-directory: scripts/web
+      run: |
+        npm install --ignore-scripts --no-audit --no-fund
+        npx playwright install --with-deps chromium
+
+    - name: Cache stable FFmpeg fixture generator
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.tool_cache }}/livephoto-web-ffmpeg/n9.0
+        key: web-ffmpeg-n9.0-v1-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Validate cached FFmpeg or download stable prebuilt tools
+      shell: bash
+      run: bash scripts/prepare-web-ffmpeg.sh
