@@ -29,10 +29,10 @@ export function createPlayer(file, changed, scroll) {
     setMuted(value){video.muted=!!value;if(!value&&video.volume===0)video.volume=lastVolume;},
     setRate(value){if([.5,.75,1,1.25,1.5,2].includes(value))video.playbackRate=value;},
     setFullscreen(value){
-      if(!value){if(document.fullscreenElement)document.exitFullscreen().catch(publish);return;}
+      if(!value){if(document.fullscreenElement)document.exitFullscreen().then(publish,publish);else publish();return;}
       // Fullscreen includes Compose's canvas and media overlays together. The
       // shared Kotlin dialog renders the player, not a separate Web toolbar.
-      document.documentElement.requestFullscreen?.().catch(publish);
+      document.documentElement.requestFullscreen?.().then(publish,publish);
     },
     async capture(){
       if(disposed||video.seeking||video.readyState<2||!video.videoWidth)throw Error('等待视频画面加载完成后再截取');

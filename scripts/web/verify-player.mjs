@@ -56,13 +56,22 @@ try {
     await driver.find('退出全屏').waitFor({state:'attached'});await page.waitForTimeout(200);
     check(label+':fullscreen-ratio-controls',await video.evaluate(v=>Math.abs(v.getBoundingClientRect().width/v.getBoundingClientRect().height-v.videoWidth/v.videoHeight)<.01));
     await driver.click('退出全屏');await page.waitForFunction(()=>!document.fullscreenElement);
+    await driver.find('全屏').waitFor({state:'attached'});
     await driver.drag(page.locator('#playback-progress'),.6,1,shape==='portrait');await page.waitForFunction(()=>!document.querySelector('video').seeking);
+    console.log('Shared end seek',label,await video.evaluate(v=>({current:v.currentTime,duration:v.duration,fullscreen:!!document.fullscreenElement})));
     check(label+':ended-progress-complete',await video.evaluate(v=>Math.abs(v.currentTime-v.duration)<.05));
     await driver.click('截取封面');
     await page.getByText('名称：video-cover.jpg',{exact:true}).waitFor({state:'attached'});
     const pictureHash=()=>page.getByAltText('已选封面预览').last().evaluate(async image=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await(await fetch(image.src)).arrayBuffer()))).join(','));
     const oldPicture=await pictureHash();
-    await driver.drag(page.locator('#cover-progress'),.9,.4);
+    const coverBounds=await driver.reveal(page.locator('#cover-progress'));
+    await page.mouse.move(coverBounds.x+coverBounds.width*.9,coverBounds.y+coverBounds.height/2);await page.mouse.down();
+    try {
+      await page.mouse.move(coverBounds.x+coverBounds.width*.4,coverBounds.y+coverBounds.height/2,{steps:12});
+      // Check before mouseup: a release-only/debounced screenshot is not live preview.
+      await page.waitForTimeout(450);
+      if(oldPicture===await pictureHash())throw Error(label+':cover-preview-not-updated-during-drag');
+    } finally { await page.mouse.up(); }
     await page.waitForTimeout(350);
     await page.waitForFunction(()=>[...document.querySelectorAll('img[alt="已选封面预览"]')].some(i=>i.complete&&i.naturalWidth>0));
     check(label+':current-picture-capture',oldPicture!==await pictureHash()&&await page.getByAltText('已选封面预览').last().evaluate(i=>i.complete&&i.naturalWidth>0));
@@ -74,5 +83,12 @@ try {
   if(checks.length!==91||new Set(checks).size!==91)throw Error('Incomplete player evidence');
   await writeFile('ci-output/web-player-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'shared-kotlin-compose-controls-real-browser-pointer-keys-fullscreen-live-cover-preview'},null,2)+'\n');
   console.log('WEB_PLAYER_EVIDENCE=SUCCESS 91 checks; actual shared Kotlin controls, optional range handles and live cover preview on two viewports');
-}catch(error){console.error('Player failure after checks:',checks,error);if(lastPage&&!lastPage.isClosed()){await lastPage.screenshot({path:'ci-output/web-ui-player-failure.png'}).catch(()=>{});await writeFile('ci-output/web-ui-player-failure-a11y.txt',await lastPage.locator('body').ariaSnapshot()).catch(()=>{});}throw error;}
+}catch(error){console.error('Player failure after checks:',checks,error);if(lastPage&&!lastPage.isClosed()){
+  console.log('Failure layout',await lastPage.evaluate(()=>{
+    const nodes=[];function visit(root){for(const element of root.querySelectorAll('*')){const r=element.getBoundingClientRect(),s=getComputedStyle(element);
+      if(r.width>0&&r.height>0&&(element.tagName==='CANVAS'||element.tagName==='VIDEO'||element.scrollTop||element.scrollLeft||s.backgroundColor==='rgb(255, 255, 255)'))nodes.push({tag:element.tagName,id:element.id,role:element.getAttribute('role'),label:element.getAttribute('aria-label'),rect:{x:r.x,y:r.y,width:r.width,height:r.height},scroll:[element.scrollLeft,element.scrollTop],background:s.backgroundColor,position:s.position});
+      if(element.shadowRoot)visit(element.shadowRoot);}}
+    visit(document);return {fullscreen:!!document.fullscreenElement,scrollY,nodes};
+  }).catch(()=>null));
+  await lastPage.screenshot({path:'ci-output/web-ui-player-failure.png'}).catch(()=>{});await writeFile('ci-output/web-ui-player-failure-a11y.txt',await lastPage.locator('body').ariaSnapshot()).catch(()=>{});}throw error;}
 finally{await browser.close();await new Promise(r=>server.close(r));}
