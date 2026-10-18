@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -122,11 +124,13 @@ public fun SharedVideoPlayer(editor: VideoEditor, enabled: Boolean, onScroll: (F
 private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) -> Unit, fullscreen: Boolean) {
     val p by editor.playback
     var speedMenu by remember { mutableStateOf(false) }
+    val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         val aspect = if (p.width > 0 && p.height > 0) (p.width / p.height).toFloat() else 16f / 9f
         val portrait = aspect < 1f
         val room = (maxWidth - 24.dp - if (portrait) 40.dp else 0.dp).coerceAtLeast(1.dp)
-        val heightLimit = if (fullscreen) (maxHeight - 92.dp - if (speedMenu) 96.dp else 0.dp).coerceAtLeast(1.dp) else if (portrait) 1200.dp else 1080.dp
+        val heightLimit = if (fullscreen) (maxHeight - 92.dp - if (speedMenu) 96.dp else 0.dp).coerceAtLeast(1.dp)
+            else minOf(if (portrait) 1200.dp else 1080.dp, (windowHeight - 180.dp).coerceAtLeast(1.dp))
         val pictureWidth = minOf(room, if (portrait) 720.dp else 1920.dp, heightLimit * aspect)
         val pictureHeight = pictureWidth / aspect
         val cardWidth = pictureWidth + 24.dp + if (portrait) 40.dp else 0.dp
