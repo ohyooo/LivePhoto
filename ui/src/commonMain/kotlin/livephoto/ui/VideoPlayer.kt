@@ -31,8 +31,7 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.IntOffset
 
 private val PlayerInk = Color(0xff0f172a)
 private val PlayerBlue = Color(0xff3b82f6)
@@ -110,17 +109,27 @@ private fun PlayerButton(label: String, symbol: String, enabled: Boolean = true,
     }
 }
 
-/** The complete visual player is Kotlin commonMain. Only the picture surface is platform-owned. */
+/** Keep the media node in one composition/owner when changing presentation. */
 @Composable
-public fun SharedVideoPlayer(editor: VideoEditor, enabled: Boolean, onScroll: (Float) -> Unit) {
-    val playback by editor.playback
-    if (playback.fullscreen) {
-        Dialog(onDismissRequest = { editor.setFullscreen(false) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Box(Modifier.fillMaxSize().background(Color(0xfff5f7fb)).padding(12.dp), contentAlignment = Alignment.Center) {
-                PlayerCard(editor, enabled, onScroll, fullscreen = true)
-            }
+public fun VideoPlayerHost(editor: VideoEditor?, enabled: Boolean, onScroll: (Float) -> Unit,
+    content: @Composable (@Composable () -> Unit) -> Unit) {
+    val currentEnabled by rememberUpdatedState(enabled)
+    val currentScroll by rememberUpdatedState(onScroll)
+    val fullscreen = editor?.playback?.value?.fullscreen == true
+    val window = LocalWindowInfo.current.containerSize
+    val player = remember(editor) { movableContentOf {
+        if (editor != null) PlayerCard(editor, currentEnabled, currentScroll, editor.playback.value.fullscreen)
+    } }
+    Box(Modifier.fillMaxSize()) {
+        // Retain the editor/tool state while hiding the ordinary page, including
+        // native media views which cannot be hidden by painting a Canvas over them.
+        Box(Modifier.fillMaxSize().offset { if (fullscreen) IntOffset(window.width, 0) else IntOffset.Zero }) {
+            content { if (!fullscreen) player() }
         }
-    } else PlayerCard(editor, enabled, onScroll, fullscreen = false)
+        if (fullscreen) Box(Modifier.matchParentSize().background(Color(0xfff5f7fb)).padding(12.dp), contentAlignment = Alignment.Center) {
+            player()
+        }
+    }
 }
 
 @Composable

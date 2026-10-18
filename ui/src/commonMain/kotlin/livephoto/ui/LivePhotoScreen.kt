@@ -54,6 +54,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
         }
     }
     val editor = platform.rememberVideoEditor(video)
+    VideoPlayerHost(editor, !busy && !mediaBusy, mediaScroll) { player ->
     Scaffold(topBar = {
         TopAppBar(title = { Text("LivePhoto") }, modifier = Modifier.testTag("app-bar"))
     }) { innerPadding ->
@@ -91,6 +92,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
             if (editor != null) VideoEditingPanel(editor, busy, { mediaBusy = it },
                 onImage = { image = it; failed = false; status = "封面已更新" },
                 onVideo = { video = it.reference; failed = false; status = it.summary + "\n原文件未修改。" }, onScroll = mediaScroll,
+                player = player,
                 preview = { reference, modifier -> platform.ImagePreview(reference, modifier, mediaScroll) })
             // Updating a generated cover must not insert/remove a large image
             // above the player's active pointer/drag target.
@@ -149,5 +151,6 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
             }
         }
         }
+    }
     }
 }

@@ -50,6 +50,7 @@ public fun mediaSeconds(value: Double): String {
 @Composable
 public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (Boolean) -> Unit,
     onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit,
+    player: @Composable () -> Unit,
     preview: @Composable (String, Modifier) -> Unit) {
     val playback by editor.playback
     var start by remember(editor) { mutableDoubleStateOf(0.0) }
@@ -111,7 +112,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SharedVideoPlayer(editor, !parentBusy && !working, onScroll)
+        player()
         playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Checkbox(checked = trimOpen, enabled = enabled, onCheckedChange = { trimOpen = it }, modifier = Modifier.semantics { contentDescription = "裁剪视频" })

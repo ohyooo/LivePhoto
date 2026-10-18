@@ -21,7 +21,7 @@ try {
   check('vfr-source-independently-confirmed',new Set(pts.slice(1).map((p,i)=>Math.round((p-pts[i])*1000))).size>1);
   for(const [size,viewport] of [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]) for(const [shape] of cases) {
     const context=await browser.newContext({viewport,serviceWorkers:'block'});await context.route('**/*',r=>r.request().url().startsWith(origin+'/')?r.continue():r.abort());
-    const page=await context.newPage();lastPage=page;page.setDefaultTimeout(30000);await page.goto(origin+'/livephoto/');await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
+    const page=await context.newPage();lastPage=page;page.setDefaultTimeout(30000);page.on('pageerror',error=>console.error('Player page error',String(error)));await page.goto(origin+'/livephoto/');await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
     const driver=composeDriver(page,viewport),label=size+':'+shape;
     await driver.choose('选择视频',join(fixtures,shape+'.mp4'));
     const video=page.getByLabel('视频预览',{exact:true});await video.waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
@@ -84,11 +84,11 @@ try {
   await writeFile('ci-output/web-player-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'shared-kotlin-compose-controls-real-browser-pointer-keys-fullscreen-live-cover-preview'},null,2)+'\n');
   console.log('WEB_PLAYER_EVIDENCE=SUCCESS 91 checks; actual shared Kotlin controls, optional range handles and live cover preview on two viewports');
 }catch(error){console.error('Player failure after checks:',checks,error);if(lastPage&&!lastPage.isClosed()){
-  console.log('Failure layout',await lastPage.evaluate(()=>{
+  console.log('Failure layout',JSON.stringify(await lastPage.evaluate(()=>{
     const nodes=[];function visit(root){for(const element of root.querySelectorAll('*')){const r=element.getBoundingClientRect(),s=getComputedStyle(element);
       if(r.width>0&&r.height>0&&(element.tagName==='CANVAS'||element.tagName==='VIDEO'||element.scrollTop||element.scrollLeft||s.backgroundColor==='rgb(255, 255, 255)'))nodes.push({tag:element.tagName,id:element.id,role:element.getAttribute('role'),label:element.getAttribute('aria-label'),rect:{x:r.x,y:r.y,width:r.width,height:r.height},scroll:[element.scrollLeft,element.scrollTop],background:s.backgroundColor,position:s.position});
       if(element.shadowRoot)visit(element.shadowRoot);}}
     visit(document);return {fullscreen:!!document.fullscreenElement,scrollY,nodes};
-  }).catch(()=>null));
+  }).catch(()=>null)));
   await lastPage.screenshot({path:'ci-output/web-ui-player-failure.png'}).catch(()=>{});await writeFile('ci-output/web-ui-player-failure-a11y.txt',await lastPage.locator('body').ariaSnapshot()).catch(()=>{});}throw error;}
 finally{await browser.close();await new Promise(r=>server.close(r));}
