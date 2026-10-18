@@ -26,7 +26,10 @@ try {
     await driver.choose('选择视频',join(fixtures,shape+'.mp4'));
     const video=page.getByLabel('视频预览',{exact:true});await video.waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
     check(label+':tools-collapsed-by-default',await page.locator('#trim-progress').count()===0&&await page.locator('#cover-progress').count()===0);
-    const progress=page.locator('#playback-progress');await driver.reveal(progress);
+    const progress=page.locator('#playback-progress');
+    // A partially clipped portrait rail is still a visible semantic node. Bring
+    // its bottom controls into view before measuring the complete player.
+    await driver.reveal(driver.find('播放'));await driver.reveal(progress);
     const v=await video.boundingBox(),bar=await progress.boundingBox(),play=await driver.find('播放').boundingBox();
     check(label+':aspect-and-viewport',v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
     check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1);
