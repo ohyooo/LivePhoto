@@ -30,8 +30,11 @@ export function composeDriver(page,viewport) {
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared drag control');
     const point=f=>vertical?[b.x+b.width/2,b.y+b.height*f]:[b.x+b.width*f,b.y+b.height/2];
     const a=point(from),z=point(to);
+    if(minHeight>1)console.log('Range pointer geometry',{bounds:b,from:a,to:z});
     await page.mouse.move(...a);await page.mouse.down();
     try {
+      // Give Compose a rendered frame to register down before crossing slop.
+      await page.waitForTimeout(100);
       // Deliver a human-speed drag across rendering frames, rather than a burst
       // of moves and mouseup before a new range control has processed its down.
       for(let step=1;step<=12;step++){await page.mouse.move(a[0]+(z[0]-a[0])*step/12,a[1]+(z[1]-a[1])*step/12);await page.waitForTimeout(20);}
