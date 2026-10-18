@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.collect
 
 /** UI adapter contract: no paths, browser objects or media processing in the shared screen. */
 public data class VideoPlayback(
