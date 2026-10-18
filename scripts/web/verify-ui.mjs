@@ -189,8 +189,8 @@ try {
     };
     check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash,1.4));
     await driver.click('裁剪视频');
-    await driver.drag(page.locator('#trim-progress'),.02,1.2/await player.evaluate(v=>v.duration));
-    await driver.drag(page.locator('#trim-progress'),.98,2.6/await player.evaluate(v=>v.duration));
+    await driver.dragRange('start',1.2/await player.evaluate(v=>v.duration));
+    await driver.dragRange('end',2.6/await player.evaluate(v=>v.duration));
     await click('应用裁剪（音视频 copy）');
     await text('名称：trimmed-video.mp4').waitFor({state:'attached',timeout:120000});
     check(label+':AB-copy-video-used',await text(/copy 裁剪完成；请求/).count()===1);

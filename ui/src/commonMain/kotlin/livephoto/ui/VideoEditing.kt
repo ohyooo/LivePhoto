@@ -1,6 +1,7 @@
 package livephoto.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -48,6 +49,7 @@ public fun mediaSeconds(value: Double): String {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (Boolean) -> Unit,
     onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit,
     player: @Composable () -> Unit,
@@ -64,6 +66,8 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var coverPreview by remember(editor) { mutableStateOf<String?>(null) }
     var capturing by remember(editor) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val trimStartInteraction = remember(editor) { MutableInteractionSource() }
+    val trimEndInteraction = remember(editor) { MutableInteractionSource() }
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
     val enabled = !parentBusy && !working && playback.ready
     val canCapture by rememberUpdatedState(enabled)
@@ -130,6 +134,9 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             Text("保留片段：${mediaSeconds(start)} ～ ${mediaSeconds(end)}")
             RangeSlider(value = start.toFloat()..end.toFloat(), enabled = enabled && playback.duration > 0,
                 valueRange = 0f..playback.duration.coerceAtLeast(0.001).toFloat(),
+                startInteractionSource = trimStartInteraction, endInteractionSource = trimEndInteraction,
+                startThumb = { SliderDefaults.Thumb(trimStartInteraction, Modifier.testTag("trim-start-thumb"), enabled = enabled) },
+                endThumb = { SliderDefaults.Thumb(trimEndInteraction, Modifier.testTag("trim-end-thumb"), enabled = enabled) },
                 onValueChange = { range ->
                     val moved = if (range.start.toDouble() != start) range.start.toDouble() else range.endInclusive.toDouble()
                     start = range.start.toDouble(); end = range.endInclusive.toDouble(); editor.seek(moved)

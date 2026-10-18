@@ -94,9 +94,9 @@ try {
     await page.waitForTimeout(350);
     await page.waitForFunction(()=>[...document.querySelectorAll('img[alt="已选封面预览"]')].some(i=>i.complete&&i.naturalWidth>0));
     check(label+':current-picture-capture',oldPicture!==await pictureHash()&&await page.getByAltText('已选封面预览').last().evaluate(i=>i.complete&&i.naturalWidth>0));
-    await driver.click('裁剪视频');await driver.drag(page.locator('#trim-progress'),.02,.25);
+    await driver.click('裁剪视频');await driver.dragRange('start',.25);
     console.log('Shared range start',label,await page.getByText(/^保留片段：/).first().textContent());
-    await driver.drag(page.locator('#trim-progress'),.98,.75);
+    await driver.dragRange('end',.75);
     const rangeText=await page.getByText(/^保留片段：/).first().textContent(),values=[...rangeText.matchAll(/([0-9.]+) 秒/g)].map(m=>Number(m[1]));
     console.log('Shared range end',label,rangeText);
     check(label+':range-handles-select-inner-segment',values.length===2&&values[0]>0&&values[0]<values[1]&&values[1]<await video.evaluate(v=>v.duration));
