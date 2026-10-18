@@ -37,9 +37,15 @@ try {
     }
     const v=await video.boundingBox(),bar=await progress.boundingBox(),play=await driver.find('播放').boundingBox();
     const card=await page.locator('#video-player').boundingBox(),volume=await page.locator('#volume-progress').boundingBox();
+    const controls=await page.locator('#player-controls').boundingBox(),mute=await driver.find('静音').boundingBox(),rate=await driver.find('播放倍速').boundingBox(),full=await driver.find('全屏').boundingBox();
+    const portraitRow=shape!=='portrait'||([play,mute,volume,rate,full].every((b,i,items)=>
+      b&&Math.abs(b.y+b.height/2-(play.y+play.height/2))<=1&&b.x>=controls.x&&b.x+b.width<=controls.x+controls.width+1&&
+      (i===0||b.x>=items[i-1].x+items[i-1].width+1))&&
+      play.width>=32&&mute.width>=32&&rate.width>=48&&full.width>=32&&volume.width>=120&&
+      Math.abs(volume.width-(controls.width-play.width-mute.width-rate.width-full.width-8))<=2);
     console.log('Player height and volume',label,{player:card.height,viewport:viewport.height,volume:volume.width});
     check(label+':aspect-and-viewport',card.height<=viewport.height/2+1&&v.y>=76&&v.y+v.height<=viewport.height&&v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
-    check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1&&volume.y>=v.y+v.height-1&&volume.width>=80&&(shape!=='portrait'||volume.width>=card.width-68));
+    check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1&&volume.y>=v.y+v.height-1&&volume.width>=80&&portraitRow);
     check(label+':native-overlays-disabled',await video.evaluate(v=>!v.controls));
     check(label+':correct-progress-axis',shape==='portrait'?bar.height>bar.width&&bar.x>=v.x+v.width:bar.width>bar.height);
     await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`,omitBackground:true});
