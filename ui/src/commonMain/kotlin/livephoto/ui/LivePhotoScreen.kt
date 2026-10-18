@@ -77,11 +77,8 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                 Text(if (image == null) "选择图片" else "重新选择图片")
             }
             Text(if (image == null) "图片：未选择" else "图片：已选择", modifier = Modifier.testTag("image-selection"))
-            if (image != null) {
-                platform.ImagePreview(image!!, Modifier.fillMaxWidth().heightIn(max = 180.dp), mediaScroll)
-                Text("名称：${imageInfo?.displayName ?: "未知"}", modifier = Modifier.testTag("image-name"))
-                Text("大小：${if (imageInfo == null) "正在读取…" else formatMediaSize(imageInfo?.sizeBytes)}", modifier = Modifier.testTag("image-size"))
-            }
+            Text("名称：${if (image == null) "—" else imageInfo?.displayName ?: "未知"}", maxLines = 1, modifier = Modifier.testTag("image-name"))
+            Text("大小：${if (image == null) "—" else if (imageInfo == null) "正在读取…" else formatMediaSize(imageInfo?.sizeBytes)}", modifier = Modifier.testTag("image-size"))
             OutlinedButton(onClick = { videoPicker() }, enabled = !busy && !mediaBusy,
                 modifier = Modifier.fillMaxWidth().testTag("select-video")) {
                 Text(if (video == null) "选择视频" else "重新选择视频")
@@ -95,6 +92,9 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                 onImage = { image = it; failed = false; status = "封面已更新" },
                 onVideo = { video = it.reference; failed = false; status = it.summary + "\n原文件未修改。" }, onScroll = mediaScroll,
                 preview = { reference, modifier -> platform.ImagePreview(reference, modifier, mediaScroll) })
+            // Updating a generated cover must not insert/remove a large image
+            // above the player's active pointer/drag target.
+            if (image != null) platform.ImagePreview(image!!, Modifier.fillMaxWidth().heightIn(max = 180.dp), mediaScroll)
             Text("目标协议", style = MaterialTheme.typography.titleMedium)
             listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1").forEachIndexed { index, label ->
                 OutlinedButton(onClick = { profile = index }, enabled = !busy && !mediaBusy,

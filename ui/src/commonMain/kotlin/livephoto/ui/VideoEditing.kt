@@ -12,6 +12,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.conflate
 
 /** UI adapter contract: no paths, browser objects or media processing in the shared screen. */
 public data class VideoPlayback(
@@ -61,6 +62,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     val scope = rememberCoroutineScope()
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
     val enabled = !parentBusy && !working && playback.ready
+    val canCapture by rememberUpdatedState(enabled)
     fun process(transcode: Boolean) {
         scope.launch {
             working = true; onBusy(true)
@@ -78,20 +80,27 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             finally { working = false; onBusy(false) }
         }
     }
-    LaunchedEffect(editor, coverOpen, coverPosition) {
-        if (coverOpen && enabled) {
-            onBusy(true)
-            capturing = true
+    LaunchedEffect(editor, coverOpen) {
+        if (coverOpen) {
             try {
-                delay(100)
-                editor.seek(coverPosition)
-                snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
-                val frame = editor.capture()
-                coverPreview = frame
-                onImage(frame)
-                status = "封面已更新。画面时间按协议精度自动换算，不要求逐帧精确。"
+                // Conflate, do not debounce: long drags produce live previews
+                // periodically instead of waiting until the user lets go.
+                snapshotFlow { coverPosition }.conflate().collect { position ->
+                    if (canCapture) {
+                        onBusy(true); capturing = true
+                        try {
+                            editor.seek(position)
+                            snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
+                            val frame = editor.capture()
+                            coverPreview = frame; onImage(frame)
+                            status = "封面已更新。画面时间按协议精度自动换算，不要求逐帧精确。"
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) { status = "截取失败：${error.message ?: error.toString()}" }
+                        if (position == coverPosition) { capturing = false; onBusy(false) }
+                        delay(80)
+                    }
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { status = "截取失败：${error.message ?: error.toString()}" }
             finally { capturing = false; onBusy(false) }
         }
     }
