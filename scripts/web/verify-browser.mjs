@@ -18,14 +18,7 @@ generate(['-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=25', '-t', '1', '-an', 
   '-pix_fmt', 'yuv420p', '-bf', '0', '-g', '25', '-use_editlist', '0', '-movflags', '+faststart', '-map_metadata', '-1',
   '-metadata:s:v', 'encoder=', '-fflags', '+bitexact', '-flags:v', '+bitexact', '-write_btrt', '0', videoPath]);
 const image = await readFile(imagePath), video = await readFile(videoPath);
-const worker = `import {createLivePhoto,extractVideo,repairLivePhoto} from '/livephoto.mjs';
-onmessage=async()=>{try{const image=await(await fetch('/fixture-image')).blob();const video=await(await fetch('/fixture-video')).blob();
-const result=await createLivePhoto(image,video);if(!result.success)throw Error(result.code+': '+result.message);
-const extracted=await extractVideo(result.blob);if(!extracted.success)throw Error(extracted.code);
-const repairable=await createLivePhoto(image,video,{target:'google.microvideo.v1'});if(!repairable.success)throw Error('Worker repair fixture');
-const preview=await repairLivePhoto(repairable.blob);if(!preview.success||preview.report.kind!=='Repair'||!preview.report.dryRun||preview.assets.length||preview.report.blocked.length)throw Error('Worker repair preview');
-const a=new Uint8Array(await extracted.blob.arrayBuffer()),b=new Uint8Array(await video.arrayBuffer());
-postMessage({success:a.length===b.length&&a.every((v,i)=>v===b[i])});}catch(e){postMessage({success:false,message:String(e)})}};`;
+const worker = await readFile('scripts/web/verify-worker.mjs', 'utf8');
 const server = createServer(async (request, response) => {
   try {
     const name = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -47,7 +40,7 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(120000);
   await page.goto(origin);
-  const checks = await page.evaluate(async () => {
+  const {checks, workerProof} = await page.evaluate(async () => {
     const api = await import('/livephoto.mjs');
     const image = new File([await (await fetch('/fixture-image')).blob()], 'misleading.mp4', { type: 'application/octet-stream' });
     const video = new File([await (await fetch('/fixture-video')).blob()], 'misleading.jpg', { type: 'application/octet-stream' });
@@ -236,19 +229,24 @@ try {
       const timeout = setTimeout(() => { worker.terminate(); reject(Error('Worker timeout')); }, 120000);
       worker.onmessage = event => { clearTimeout(timeout); worker.terminate(); resolve(event.data); };
       worker.onerror = event => { clearTimeout(timeout); worker.terminate(); reject(Error(event.message)); };
-      worker.postMessage({});
+      worker.postMessage({image, video});
     });
-    check('module-worker-round-trip', workerResult.success, workerResult.message);
-    return checks;
+    check('module-worker-round-trip', workerResult.success && workerResult.tests === 42 && workerResult.failures === 0 &&
+      workerResult.returnedVideo instanceof Blob && await digest(workerResult.returnedVideo) === beforeVideo &&
+      workerResult.imageSha256 === beforeImage && workerResult.videoSha256 === beforeVideo, workerResult.message);
+    const {returnedVideo, ...workerProof} = workerResult;
+    return {checks, workerProof};
   });
   if (checks.length !== 70 || new Set(checks).size !== 70) throw new Error('Incomplete browser check count');
   const evidence = {
     commit: process.env.GITHUB_SHA, run: process.env.GITHUB_RUN_ID,
     browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,
+    worker: workerProof,
     imageSha256: createHash('sha256').update(image).digest('hex'),
     videoSha256: createHash('sha256').update(video).digest('hex'),
     scope: 'real-browser-production-js-library-synthetic-media-no-decoder-no-device-proof-no-ui',
   };
   await writeFile('ci-output/web-browser-evidence.json', JSON.stringify(evidence, null, 2) + '\n');
   console.log('WEB_BROWSER_EVIDENCE=SUCCESS ' + checks.length + ' checks; no source or generated media uploaded');
+  console.log('WEB_WORKER_EVIDENCE=SUCCESS 42 checks; all ten public APIs in a real module Worker; cross-thread Blob hash verified');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

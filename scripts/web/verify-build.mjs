@@ -26,5 +26,12 @@ if(process.argv.includes('--tests')) {
     const proof=await json(file);
     if(proof.commit!==process.env.GITHUB_SHA||String(proof.run)!==process.env.GITHUB_RUN_ID||proof.tests!==count||proof.failures!==0||proof.checks?.length!==count||new Set(proof.checks).size!==count)throw Error('Incomplete/wrong-source test evidence: '+file);
   }
+  const browser=await json('web-browser-evidence.json'),worker=browser.worker;
+  const workerChecks=['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].flatMap(protocol=>
+    ['create','detect','validate','inspect','analyze','key','extract','split','same-target','convert','repair','immutable'].map(name=>protocol+':'+name))
+    .concat(['malformed-structured-error','unsupported-no-output','ordinary-convert-not-create','missing-target','invalid-input-type','budget-rejected']);
+  if(!worker?.success||worker.tests!==42||worker.failures!==0||worker.checks?.length!==42||new Set(worker.checks).size!==42||
+    JSON.stringify([...worker.checks].sort())!==JSON.stringify(workerChecks.sort())||
+    worker.imageSha256!==browser.imageSha256||worker.videoSha256!==browser.videoSha256)throw Error('Incomplete/wrong-input module Worker evidence');
 }
 console.log('WEB_BUILD_INPUTS=VERIFIED; same-commit library and UI hashes'+(process.argv.includes('--tests')?'; independent test suites and theme checks complete':''));
