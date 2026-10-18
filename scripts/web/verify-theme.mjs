@@ -50,7 +50,9 @@ try {
     check(size+':browser-preference-updates-rendering',await theme('light','ci-output/web-ui-theme-'+size+'-light.png'));
     const button=await driver.find('切换到深色模式').boundingBox();
     check(size+':toggle-in-top-right',button&&button.x>viewport.width/2&&button.x+button.width<=viewport.width&&button.y>=0&&button.y+button.height<=64);
-    await driver.click('切换到深色模式');
+    // Unlike body controls, this button deliberately lives inside the fixed
+    // app bar. Deliver a real pointer click to its already-checked bounds.
+    await page.mouse.click(button.x+button.width/2,button.y+button.height/2);
     check(size+':manual-toggle-keeps-selected-media',await theme('dark')&&await video.getAttribute('src')===source&&await page.getByText('名称：theme.mp4',{exact:true}).count()===1);
     await page.emulateMedia({colorScheme:'dark'});await page.emulateMedia({colorScheme:'light'});
     check(size+':manual-override-is-respected',await theme('dark'));
