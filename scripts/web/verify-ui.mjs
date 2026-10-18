@@ -61,10 +61,10 @@ try {
       const locator=button(name);
       for(let attempt=0;attempt<20;attempt++) {
         await settle();
-        const bounds=await locator.boundingBox().catch(()=>null);
+        const bounds=await locator.boundingBox({timeout:1000}).catch(()=>null);
         await settle();
         await page.waitForTimeout(200);
-        const current=await locator.boundingBox().catch(()=>null);
+        const current=await locator.boundingBox({timeout:1000}).catch(()=>null);
         if(bounds && current && ['x','y','width','height'].some(key=>Math.abs(bounds[key]-current[key])>0.5)) {
           await page.waitForTimeout(150);
           continue;

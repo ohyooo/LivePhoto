@@ -185,7 +185,7 @@ jobs:
           name: web-player-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-output/web-player.log
-            ci-output/web-ui-player-failure.png
+            ci-output/web-ui-player-*.png
             ci-output/web-ui-player-failure-a11y.txt
           if-no-files-found: warn
           retention-days: 14
