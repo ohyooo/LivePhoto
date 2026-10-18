@@ -1,10 +1,10 @@
 /** Drive actual Compose canvas hit regions, never call app handlers or semantic actions. */
 export function composeDriver(page,viewport) {
   const find=name=>page.getByRole('button',{name,exact:true}).or(page.getByRole('checkbox',{name,exact:true})).first();
-  const reveal=async locator=>{
+  const reveal=async (locator,minHeight=1)=>{
     for(let attempt=0;attempt<40;attempt++) {
       const b=await locator.boundingBox({timeout:1000}).catch(()=>null);
-      if(b&&b.width>0&&b.height>0&&b.y>=64&&b.y+b.height<=viewport.height) {
+      if(b&&b.width>0&&b.height>=minHeight&&b.y>=64&&b.y+b.height<=viewport.height) {
         // Focus/bring-into-view can still animate after a control first becomes
         // visible. Do not use coordinates captured halfway through that scroll.
         await page.waitForTimeout(120);
@@ -24,14 +24,12 @@ export function composeDriver(page,viewport) {
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
   };
-  const drag=async(locator,from,to,vertical=false,whileHeld=null,startHandle=null)=>{
-    await reveal(locator);
+  const drag=async(locator,from,to,vertical=false,whileHeld=null,minHeight=1)=>{
+    await reveal(locator,minHeight);
     await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared drag control');
     const point=f=>vertical?[b.x+b.width/2,b.y+b.height*f]:[b.x+b.width*f,b.y+b.height/2];
-    const handle=startHandle?await startHandle.boundingBox({timeout:1000}):null;
-    if(startHandle&&(!handle||handle.width<=0||handle.height<=0))throw Error('Missing visible range handle');
-    const a=handle?[handle.x+handle.width/2,handle.y+handle.height/2]:point(from),z=point(to);
+    const a=point(from),z=point(to);
     await page.mouse.move(...a);await page.mouse.down();
     try {
       // Deliver a human-speed drag across rendering frames, rather than a burst
@@ -43,7 +41,14 @@ export function composeDriver(page,viewport) {
   };
   const dragRange=async(side,to)=>{
     if(!['start','end'].includes(side))throw Error('Invalid range handle');
-    await drag(page.locator('#trim-progress'),0,to,false,null,page.locator('#trim-'+side+'-thumb'));
+    // Live cover capture temporarily disables editing. A pointer-down while
+    // disabled is correctly ignored, even if capture finishes during the drag.
+    const apply=find('应用裁剪（音视频 copy）');
+    for(let attempt=0;!(await apply.isEnabled())&&attempt<100;attempt++)await page.waitForTimeout(50);
+    if(!await apply.isEnabled())throw Error('Range editing is still busy');
+    // Compose accessibility bounds are clipped to the viewport: require the
+    // full 48dp range row, not a sliver whose centre misses the actual track.
+    await drag(page.locator('#trim-progress'),side==='start'?.02:.98,to,false,null,48);
   };
   const choose=async(name,path)=>{const pending=page.waitForEvent('filechooser');pending.catch(()=>{});await click(name);await(await pending).setFiles(path);await page.waitForTimeout(200);};
   return {find,reveal,click,drag,dragRange,choose};
