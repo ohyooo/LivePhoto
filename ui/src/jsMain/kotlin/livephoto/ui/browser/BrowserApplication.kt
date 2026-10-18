@@ -123,7 +123,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         val timeline = timelines[video]
         if (frame != null && (timeline == null || frame.root != timeline.root || frame.sourceTime < timeline.origin))
             return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan,
-                "视频范围或编码已改变，请在当前视频上重新截取 C 封面；不会猜测旧封面的时间。"))
+                "视频范围或编码已改变，请在当前视频上重新选择封面；不会猜测旧封面的时间。"))
         val key = frame?.let { CoverPosition.Timestamp(Time(((it.sourceTime - timeline!!.origin) * 1_000_000).roundToLong(), 1_000_000u),
             Selection.Nearest, Time(1, 1u)) }
         if (photo.size.toLong() + movie.size.toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
@@ -220,20 +220,28 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 val callback: (dynamic) -> Unit = { value ->
                     if (!disposed) state.value = VideoPlayback(value.duration.unsafeCast<Double>(), value.current.unsafeCast<Double>(),
                         value.seeking.unsafeCast<Boolean>(), value.ready.unsafeCast<Boolean>(), value.error.unsafeCast<String?>(),
-                        value.width.unsafeCast<Double>(), value.height.unsafeCast<Double>())
+                        value.width.unsafeCast<Double>(), value.height.unsafeCast<Double>(),
+                        value.paused.unsafeCast<Boolean>(), value.volume.unsafeCast<Double>(), value.muted.unsafeCast<Boolean>(),
+                        value.rate.unsafeCast<Double>(), value.fullscreen.unsafeCast<Boolean>())
                 }
-                surface = media[0].createPlayer(file, callback, onScroll)
+                if (surface == null) surface = media[0].createPlayer(file, callback, onScroll)
                 surface.element.unsafeCast<HTMLElement>()
-            }, modifier = modifier, onRelease = { surface?.dispose(); surface = null })
+            }, modifier = modifier)
             }
         }
         override fun seek(seconds: Double) { surface?.seek(seconds) }
+        override val canFullscreen: Boolean get() = document.asDynamic().fullscreenEnabled.unsafeCast<Boolean>()
+        override fun togglePlayback() { surface?.togglePlayback() }
+        override fun setVolume(volume: Double) { surface?.setVolume(volume) }
+        override fun setMuted(muted: Boolean) { surface?.setMuted(muted) }
+        override fun setRate(rate: Double) { surface?.setRate(rate) }
+        override fun setFullscreen(fullscreen: Boolean) { surface?.setFullscreen(fullscreen) }
         override suspend fun capture(): String {
             check(surface != null && !disposed) { "播放器不可用" }
             val result = browserAwait(surface.capture().unsafeCast<Promise<dynamic>>())
             check(!disposed) { "输入已改变" }
             val blob = result.blob.unsafeCast<Blob>()
-            val file = js("new File([blob], 'cover-C.jpg', {type:'image/jpeg'})").unsafeCast<File>()
+            val file = js("new File([blob], 'video-cover.jpg', {type:'image/jpeg'})").unsafeCast<File>()
             val reference = register(MediaKind.Image, file)
             selectedFrame = Frame(reference, timeline.root, timeline.origin + result.time.unsafeCast<Double>())
             return reference
@@ -247,18 +255,18 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 val result = browserAwait(job.promise.unsafeCast<Promise<dynamic>>())
                 check(!disposed) { "输入已改变" }
                 val blob = result.blob.unsafeCast<Blob>()
-                val name = if (transcodeVideo) "transcoded-H264.mp4" else "trimmed-AB.mp4"
+                val name = if (transcodeVideo) "transcoded-H264.mp4" else "trimmed-video.mp4"
                 val editedFile = js("new File([blob], name, {type:'video/mp4'})").unsafeCast<File>()
                 val known = result.timelineKnown.unsafeCast<Boolean>()
                 val mapped = if (known) Timeline(timeline.root, timeline.origin + result.origin.unsafeCast<Double>()) else null
                 val reference = register(MediaKind.Video, editedFile, mapped)
                 val summary = if (known) "copy 裁剪完成；请求 ${mediaSeconds(start)}～${mediaSeconds(end)}，实际保留的视频帧 ${mediaSeconds(result.actualStart.unsafeCast<Double>())}～${mediaSeconds(result.actualEnd.unsafeCast<Double>())}。音视频编码数据包已核对。" else
-                    "显式 H.264 转码完成，音频数据包 copy 已核对；未证明原始时间映射，请在新视频上重新截取 C。"
+                    "显式 H.264 转码完成，音频数据包 copy 已核对；未证明原始时间映射，请在新视频上重新选择封面。"
                 return EditedVideo(reference, summary + " 普通 metadata 保留不作完整保证。")
             } finally { job = null }
         }
         override fun cancel() { job?.cancel() }
-        fun dispose() { disposed = true; cancel() }
+        fun dispose() { disposed = true; cancel(); surface?.dispose(); surface = null }
     }
 
     override fun formatFailure(error: Exception, imageName: String?, videoName: String?): String =

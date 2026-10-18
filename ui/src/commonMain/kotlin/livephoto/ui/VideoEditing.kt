@@ -4,21 +4,34 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 /** UI adapter contract: no paths, browser objects or media processing in the shared screen. */
 public data class VideoPlayback(
     val duration: Double = 0.0, val current: Double = 0.0, val seeking: Boolean = true,
     val ready: Boolean = false, val error: String? = null,
     val width: Double = 0.0, val height: Double = 0.0,
+    val paused: Boolean = true, val volume: Double = 1.0, val muted: Boolean = false,
+    val rate: Double = 1.0, val fullscreen: Boolean = false,
 )
 public data class EditedVideo(val reference: String, val summary: String)
 public interface VideoEditor {
     public val playback: State<VideoPlayback>
     public val coverTime: Double? get() = null
     public fun seek(seconds: Double)
+    public val canFullscreen: Boolean get() = false
+    public fun togglePlayback() {}
+    public fun setVolume(volume: Double) {}
+    public fun setMuted(muted: Boolean) {}
+    public fun setRate(rate: Double) {}
+    public fun setFullscreen(fullscreen: Boolean) {}
     public suspend fun capture(): String
     public suspend fun process(start: Double, end: Double, transcodeVideo: Boolean): EditedVideo
     public fun cancel()
@@ -32,67 +45,89 @@ public fun mediaSeconds(value: Double): String {
 
 @Composable
 public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (Boolean) -> Unit,
-    onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit) {
+    onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit,
+    preview: @Composable (String, Modifier) -> Unit) {
     val playback by editor.playback
     var start by remember(editor) { mutableDoubleStateOf(0.0) }
     var end by remember(editor) { mutableDoubleStateOf(0.0) }
     val cover = editor.coverTime
     var working by remember(editor) { mutableStateOf(false) }
-    var status by remember(editor) { mutableStateOf("暂停并拖动进度条。A/B 选择裁剪范围，C 截取当前画面作为封面。") }
+    var status by remember(editor) { mutableStateOf("") }
+    var trimOpen by remember(editor) { mutableStateOf(false) }
+    var coverOpen by remember(editor) { mutableStateOf(false) }
+    var coverPosition by remember(editor) { mutableDoubleStateOf(0.0) }
+    var coverPreview by remember(editor) { mutableStateOf<String?>(null) }
+    var capturing by remember(editor) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
     val enabled = !parentBusy && !working && playback.ready
+    fun process(transcode: Boolean) {
+        scope.launch {
+            working = true; onBusy(true)
+            status = "正在本地加载和执行 FFmpeg；不会上传视频…"
+            try {
+                val from = if (trimOpen) start else 0.0
+                val until = if (trimOpen) end else playback.duration
+                require(from >= 0 && from < until && until <= playback.duration + 0.001) { "请选择视频时长内的有效片段。" }
+                require(cover == null || cover >= from && cover < until) { "封面位置不在保留片段内，请调整封面或裁剪范围。" }
+                val result = editor.process(from, until, transcode)
+                onVideo(result)
+                status = result.summary
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { status = "处理失败：${error.message ?: error.toString()}。没有替换输入视频。" }
+            finally { working = false; onBusy(false) }
+        }
+    }
+    LaunchedEffect(editor, coverOpen, coverPosition) {
+        if (coverOpen && enabled) {
+            onBusy(true)
+            capturing = true
+            try {
+                delay(100)
+                editor.seek(coverPosition)
+                snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
+                val frame = editor.capture()
+                coverPreview = frame
+                onImage(frame)
+                status = "封面已更新。画面时间按协议精度自动换算，不要求逐帧精确。"
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { status = "截取失败：${error.message ?: error.toString()}" }
+            finally { capturing = false; onBusy(false) }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("视频预览与 A / B / C", style = MaterialTheme.typography.titleMedium)
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val aspect = if (playback.width > 0 && playback.height > 0) (playback.width / playback.height).toFloat() else 16f / 9f
-            val portrait = aspect < 1f
-            val videoWidth = (maxWidth - if (portrait) 56.dp else 24.dp).coerceAtLeast(1.dp)
-            val videoHeight = (videoWidth / aspect).coerceAtMost(if (portrait) 1200.dp else 1080.dp)
-            editor.Player(Modifier.fillMaxWidth().height(videoHeight + 84.dp), onScroll)
-        }
+        SharedVideoPlayer(editor, !parentBusy && !working, onScroll)
         playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Text("A：${mediaSeconds(start)}　B：${mediaSeconds(end)}　C：${cover?.let(::mediaSeconds) ?: "未截取"}")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = enabled, onClick = { start = playback.current }) { Text("设为 A") }
-            OutlinedButton(enabled = enabled, onClick = { end = playback.current }) { Text("设为 B") }
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Checkbox(checked = trimOpen, enabled = enabled, onCheckedChange = { trimOpen = it }, modifier = Modifier.semantics { contentDescription = "裁剪视频" })
+            Text("裁剪视频")
+            Spacer(Modifier.width(16.dp))
+            Checkbox(checked = coverOpen, enabled = enabled, onCheckedChange = { coverOpen = it; if (it) coverPosition = playback.current }, modifier = Modifier.semantics { contentDescription = "截取封面" })
+            Text("截取封面")
         }
-        OutlinedButton(enabled = enabled && !playback.seeking, modifier = Modifier.fillMaxWidth(), onClick = {
-            scope.launch {
-                working = true; onBusy(true)
-                try {
-                    require(start < end && playback.current >= start && playback.current < end) { "C 必须位于 A（含）与 B（不含）之间。" }
-                    val selected = editor.capture()
-                    onImage(selected)
-                    status = "已将当前画面设为 C 和封面。截图会重新编码，不保证原视频 HDR/色彩信息。"
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { status = "截取失败：${error.message ?: error.toString()}" }
-                finally { working = false; onBusy(false) }
-            }
-        }) { Text("截取当前画面为 C／封面") }
-        fun process(transcode: Boolean) {
-            scope.launch {
-                working = true; onBusy(true)
-                status = "正在本地加载和执行 FFmpeg；不会上传视频…"
-                try {
-                    require(start >= 0 && start < end && end <= playback.duration + 0.001) { "需要 0 ≤ A < B ≤ 视频时长。" }
-                    require(cover == null || cover >= start && cover < end) { "C 必须位于 A～B 内，请重新选点或截图。" }
-                    val result = editor.process(start, end, transcode)
-                    onVideo(result)
-                    status = result.summary
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { status = "处理失败：${error.message ?: error.toString()}。没有替换输入视频。" }
-                finally { working = false; onBusy(false) }
+        if (coverOpen) {
+            Text("封面位置：${mediaSeconds(coverPosition)}")
+            MediaSeekBar(coverPosition, playback.duration, enabled, "封面位置", Modifier.fillMaxWidth().height(40.dp).testTag("cover-progress"), onSeek = { coverPosition = it })
+            coverPreview?.let { preview(it, Modifier.fillMaxWidth().height(160.dp)) }
+        }
+        if (trimOpen) {
+            Text("保留片段：${mediaSeconds(start)} ～ ${mediaSeconds(end)}")
+            RangeSlider(value = start.toFloat()..end.toFloat(), enabled = enabled && playback.duration > 0,
+                valueRange = 0f..playback.duration.coerceAtLeast(0.001).toFloat(),
+                onValueChange = { range ->
+                    val moved = if (range.start.toDouble() != start) range.start.toDouble() else range.endInclusive.toDouble()
+                    start = range.start.toDouble(); end = range.endInclusive.toDouble(); editor.seek(moved)
+                }, modifier = Modifier.fillMaxWidth().testTag("trim-progress").semantics { contentDescription = "裁剪范围" })
+            Text("拖动两端手柄，保留中间高亮片段。")
+            Button(enabled = enabled && !capturing && start < end, modifier = Modifier.fillMaxWidth(), onClick = { process(false) }) {
+                Text("应用裁剪（音视频 copy）")
             }
         }
-        Button(enabled = enabled, modifier = Modifier.fillMaxWidth(), onClick = { process(false) }) {
-            Text("裁剪 A～B 并使用（音视频 copy）")
-        }
-        OutlinedButton(enabled = enabled, modifier = Modifier.fillMaxWidth(), onClick = { process(true) }) {
+        OutlinedButton(enabled = enabled && !capturing, modifier = Modifier.fillMaxWidth(), onClick = { process(true) }) {
             Text("显式转为 H.264 并使用（音频 copy）")
         }
         if (working) OutlinedButton(onClick = { editor.cancel() }) { Text("取消媒体处理") }
-        Text(status)
+        if (status.isNotEmpty()) Text(status)
         Text("编辑仅限 32 MiB / 60 秒内视频。copy 裁剪可能提前至关键帧，以实际保留范围为准；转码仅支持 8-bit SDR，需显式点击，音频不编码。截图不保证 HDR/色彩信息，普通 metadata 不作完整保留保证。")
     }
 }

@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve, sep, join, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import {composeDriver} from './ui-interaction.mjs';
 
 const root = resolve('ci-output/web-ui');
 const apiRoot = resolve('ci-output/browser-api/web-library');
@@ -47,6 +48,7 @@ try {
     const loaded = [];
     page.on('response', response => loaded.push({url:response.url(),status:response.status()}));
     lastPage = page;
+    const driver=composeDriver(page,viewport);
     const errors=[]; page.on('pageerror', error => errors.push(String(error)));
     page.setDefaultTimeout(30000);
     await page.goto(origin + '/livephoto/');
@@ -101,7 +103,7 @@ try {
     let downloads=0; page.on('download',()=>downloads++);
     await click('生成并保存 Live Photo');
     await page.waitForTimeout(200);
-    check(label+':initial-create-disabled',downloads===0&&await text(/当前不自动从视频抽取封面/).count()===1);
+    check(label+':initial-create-disabled',downloads===0&&await text(/可选择 JPEG 图片/).count()===1);
     await page.mouse.move(viewport.width/2,viewport.height/2);
     await page.mouse.wheel(0,-2000);
     await page.waitForTimeout(200);
@@ -161,10 +163,11 @@ try {
       await page.waitForTimeout(150);
     };
     await seek(1.4);
-    await click('截取当前画面为 C／封面');
-    await text('名称：cover-C.jpg').waitFor({state:'attached'});
+    await driver.click('截取封面');
+    await driver.drag(page.locator('#cover-progress'),.1,1.4/await player.evaluate(v=>v.duration));
+    await text('名称：video-cover.jpg').waitFor({state:'attached'});
     await page.waitForFunction(()=>{const image=document.querySelector('img[alt="已选封面预览"]');return image?.complete&&image.naturalWidth>0;});
-    check(label+':current-frame-cover-selected',await page.getByAltText('已选封面预览').evaluate(image=>image.complete&&image.naturalWidth===64));
+    check(label+':current-frame-cover-selected',await page.getByAltText('已选封面预览').last().evaluate(image=>image.complete&&image.naturalWidth===64));
     const generateAndAudit=async(expectedVideoHash,expectedKey=.4)=>{
       const pending=page.waitForEvent('download');pending.catch(()=>{});
       await click('生成并保存 Live Photo');
@@ -184,10 +187,11 @@ try {
         audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-expectedKey)<.05;
     };
     check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash,1.4));
-    await seek(1.2);await click('设为 A');
-    await seek(2.6);await click('设为 B');
-    await click('裁剪 A～B 并使用（音视频 copy）');
-    await text('名称：trimmed-AB.mp4').waitFor({state:'attached',timeout:120000});
+    await driver.click('裁剪视频');
+    await driver.drag(page.locator('#trim-progress'),.02,1.2/await player.evaluate(v=>v.duration));
+    await driver.drag(page.locator('#trim-progress'),.98,2.6/await player.evaluate(v=>v.duration));
+    await click('应用裁剪（音视频 copy）');
+    await text('名称：trimmed-video.mp4').waitFor({state:'attached',timeout:120000});
     check(label+':AB-copy-video-used',await text(/copy 裁剪完成；请求/).count()===1);
     await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
     const trimmedHash=await player.evaluate(async video=>{
@@ -200,15 +204,16 @@ try {
     check(label+':explicit-transcode-used',await text(/显式 H.264 转码完成/).count()===1);
     const priorDownloads=downloads;
     await click('生成并保存 Live Photo');
-    await text(/视频范围或编码已改变，请在当前视频上重新截取 C/).waitFor({state:'visible'});
+    await text(/视频范围或编码已改变，请在当前视频上重新选择封面/).waitFor({state:'visible'});
     check(label+':transcode-stale-C-rejected',downloads===priorDownloads);
     await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
     await seek(.2);
-    await click('截取当前画面为 C／封面');
+    await driver.click('截取封面');
+    await driver.drag(page.locator('#cover-progress'),.1,.2/await player.evaluate(v=>v.duration));
     // Compose also exposes this status in its hidden accessibility bridge.
     // Existence acknowledges the callback; the real download/key/video audit
     // below, not DOM visibility of that bridge, proves the recaptured C works.
-    await text('当前画面已选为封面 C').waitFor({state:'attached'});
+    await text('封面已更新').waitFor({state:'attached'});
     const transcodedHash=await player.evaluate(async video=>{
       const data=await(await fetch(video.currentSrc)).arrayBuffer();
       return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');

@@ -22,9 +22,10 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
     var video by rememberSaveable { mutableStateOf<String?>(null) }
     var profile by rememberSaveable { mutableIntStateOf(0) }
     var status by rememberSaveable { mutableStateOf(if (platform.supportsVideoEditing)
-        "当前不自动从视频抽取封面；可选择 JPEG 图片，或在视频预览中手动截取 C。裁剪默认 copy，转码需显式点击。"
+        "可选择 JPEG 图片，或展开截取封面时间轴选择视频画面。裁剪默认 copy，转码需显式点击。"
         else "当前不自动从视频抽取封面；需要 JPEG 图片＋MP4 视频。不裁剪或转码。") }
     var busy by remember { mutableStateOf(false) }
+    var mediaBusy by remember { mutableStateOf(false) }
     var failed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
@@ -71,7 +72,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                 }
             }
             Text("输入合计上限 32 MiB，不修改原片。生成后保存到 ${platform.outputDescription}。")
-            OutlinedButton(onClick = { imagePicker() }, enabled = !busy,
+            OutlinedButton(onClick = { imagePicker() }, enabled = !busy && !mediaBusy,
                 modifier = Modifier.fillMaxWidth().testTag("select-image")) {
                 Text(if (image == null) "选择图片" else "重新选择图片")
             }
@@ -81,7 +82,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                 Text("名称：${imageInfo?.displayName ?: "未知"}", modifier = Modifier.testTag("image-name"))
                 Text("大小：${if (imageInfo == null) "正在读取…" else formatMediaSize(imageInfo?.sizeBytes)}", modifier = Modifier.testTag("image-size"))
             }
-            OutlinedButton(onClick = { videoPicker() }, enabled = !busy,
+            OutlinedButton(onClick = { videoPicker() }, enabled = !busy && !mediaBusy,
                 modifier = Modifier.fillMaxWidth().testTag("select-video")) {
                 Text(if (video == null) "选择视频" else "重新选择视频")
             }
@@ -90,17 +91,18 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform) {
                 Text("名称：${videoInfo?.displayName ?: "未知"}", modifier = Modifier.testTag("video-name"))
                 Text("大小：${if (videoInfo == null) "正在读取…" else formatMediaSize(videoInfo?.sizeBytes)}", modifier = Modifier.testTag("video-size"))
             }
-            if (editor != null) VideoEditingPanel(editor, busy, { busy = it },
-                onImage = { image = it; failed = false; status = "当前画面已选为封面 C" },
-                onVideo = { video = it.reference; failed = false; status = it.summary + "\n原文件未修改。" }, onScroll = mediaScroll)
+            if (editor != null) VideoEditingPanel(editor, busy, { mediaBusy = it },
+                onImage = { image = it; failed = false; status = "封面已更新" },
+                onVideo = { video = it.reference; failed = false; status = it.summary + "\n原文件未修改。" }, onScroll = mediaScroll,
+                preview = { reference, modifier -> platform.ImagePreview(reference, modifier, mediaScroll) })
             Text("目标协议", style = MaterialTheme.typography.titleMedium)
             listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1").forEachIndexed { index, label ->
-                OutlinedButton(onClick = { profile = index }, enabled = !busy,
+                OutlinedButton(onClick = { profile = index }, enabled = !busy && !mediaBusy,
                     modifier = Modifier.fillMaxWidth().testTag("profile-$index")) {
                     Text(if (profile == index) "✓ $label" else label)
                 }
             }
-            Button(enabled = !busy && image != null && video != null,
+            Button(enabled = !busy && !mediaBusy && image != null && video != null,
                 modifier = Modifier.fillMaxWidth().testTag("create"), onClick = {
                     val chosenImage = image ?: return@Button
                     val chosenVideo = video ?: return@Button
