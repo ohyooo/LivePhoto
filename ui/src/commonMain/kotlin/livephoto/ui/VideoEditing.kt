@@ -11,6 +11,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.collect
@@ -90,12 +92,15 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                     if (canCapture) {
                         onBusy(true); capturing = true
                         try {
-                            editor.seek(position)
-                            snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
-                            val frame = editor.capture()
+                            val frame = withTimeout(5000) {
+                                editor.seek(position)
+                                snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
+                                editor.capture()
+                            }
                             coverPreview = frame; onImage(frame)
                             status = "封面已更新。画面时间按协议精度自动换算，不要求逐帧精确。"
-                        } catch (cancelled: CancellationException) { throw cancelled }
+                        } catch (timeout: TimeoutCancellationException) { status = "画面加载超时，请重试或重新选择视频。" }
+                        catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) { status = "截取失败：${error.message ?: error.toString()}" }
                         if (position == coverPosition) { capturing = false; onBusy(false) }
                         delay(80)

@@ -10,7 +10,9 @@ export function createPlayer(file, changed, scroll) {
   video.style.cssText='display:block;width:100%;height:100%;object-fit:contain;border-radius:11px;background:#f5f7fb';
   let frameTime=null,callback=null,disposed=false,lastVolume=1;
   const publish=()=>{if(!disposed)changed({duration:Number.isFinite(video.duration)?video.duration:0,current:video.currentTime,
-    seeking:video.seeking,ready:video.readyState>=2&&video.videoWidth>0,width:video.videoWidth,height:video.videoHeight,
+    // Seeking briefly drops decoded-picture readiness. Keep the timeline
+    // interactive or the shared drag gesture gets cancelled after its first move.
+    seeking:video.seeking||video.readyState<2,ready:Number.isFinite(video.duration)&&video.duration>0&&video.videoWidth>0&&!video.error,width:video.videoWidth,height:video.videoHeight,
     paused:video.paused,volume:video.volume,muted:video.muted,rate:video.playbackRate,fullscreen:!!document.fullscreenElement,
     error:video.error?'浏览器不能播放此视频，不能预览或截取；不会自动转码。':null});};
   const frame=(_,metadata)=>{frameTime=metadata.mediaTime;publish();if(!disposed)callback=video.requestVideoFrameCallback(frame);};

@@ -32,8 +32,11 @@ try {
     check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1);
     check(label+':native-overlays-disabled',await video.evaluate(v=>!v.controls));
     check(label+':correct-progress-axis',shape==='portrait'?bar.height>bar.width&&bar.x>=v.x+v.width:bar.width>bar.height);
+    await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`});
     await driver.drag(progress,.1,.6,shape==='portrait');await page.waitForFunction(()=>!document.querySelector('video').seeking);
-    check(label+':pointer-seek-paused',await video.evaluate(v=>v.paused&&Math.abs(v.currentTime/v.duration-.6)<.08));
+    const seekState=await video.evaluate(v=>({paused:v.paused,current:v.currentTime,duration:v.duration}));
+    console.log('Shared pointer seek',label,seekState);
+    check(label+':pointer-seek-paused',seekState.paused&&Math.abs(seekState.current/seekState.duration-.6)<.08);
     // Deliver keys to the actual focus target selected by pointer interaction.
     await page.keyboard.press('ArrowDown');await page.waitForTimeout(150);
     check(label+':keyboard-seek',await video.evaluate(v=>v.currentTime>2.3));
@@ -60,7 +63,7 @@ try {
     await driver.click('裁剪视频');await driver.drag(page.locator('#trim-progress'),.02,.25);await driver.drag(page.locator('#trim-progress'),.98,.75);
     const rangeText=await page.getByText(/^保留片段：/).first().textContent(),values=[...rangeText.matchAll(/([0-9.]+) 秒/g)].map(m=>Number(m[1]));
     check(label+':range-handles-select-inner-segment',values.length===2&&values[0]>0&&values[0]<values[1]&&values[1]<await video.evaluate(v=>v.duration));
-    await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`});await context.close();
+    if(shape==='landscape')await page.screenshot({path:`ci-output/web-ui-tools-${size}.png`});await context.close();
   }
   if(checks.length!==91||new Set(checks).size!==91)throw Error('Incomplete player evidence');
   await writeFile('ci-output/web-player-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'shared-kotlin-compose-controls-real-browser-pointer-keys-fullscreen-live-cover-preview'},null,2)+'\n');
