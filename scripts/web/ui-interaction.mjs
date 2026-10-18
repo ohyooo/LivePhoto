@@ -51,7 +51,14 @@ export function composeDriver(page,viewport) {
     if(!await apply.isEnabled())throw Error('Range editing is still busy');
     // Compose accessibility bounds are clipped to the viewport: require the
     // full 48dp range row, not a sliver whose centre misses the actual track.
-    await drag(page.locator('#trim-progress'),side==='start'?.02:.98,to,false,null,48);
+    const range=page.locator('#trim-progress'),from=side==='start'?.02:.98;
+    // The first pointer-down can focus the Compose canvas and bring its prior
+    // focus target into view (observed shifts of 74/278px). Activate with a real
+    // click, then remeasure after that scroll before beginning the actual drag.
+    const b=await reveal(range,48);
+    await page.mouse.click(b.x+b.width*from,b.y+b.height/2);
+    await page.waitForTimeout(200);
+    await drag(range,from,to,false,null,48);
   };
   const choose=async(name,path)=>{const pending=page.waitForEvent('filechooser');pending.catch(()=>{});await click(name);await(await pending).setFiles(path);await page.waitForTimeout(200);};
   return {find,reveal,click,drag,dragRange,choose};
