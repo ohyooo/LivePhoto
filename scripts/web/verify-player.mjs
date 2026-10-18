@@ -86,14 +86,11 @@ try {
     await page.getByText('名称：video-cover.jpg',{exact:true}).waitFor({state:'attached'});
     const pictureHash=()=>page.getByAltText('已选封面预览').last().evaluate(async image=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await(await fetch(image.src)).arrayBuffer()))).join(','));
     const oldPicture=await pictureHash();
-    const coverBounds=await driver.reveal(page.locator('#cover-progress'));
-    await page.mouse.move(coverBounds.x+coverBounds.width*.9,coverBounds.y+coverBounds.height/2);await page.mouse.down();
-    try {
-      await page.mouse.move(coverBounds.x+coverBounds.width*.4,coverBounds.y+coverBounds.height/2,{steps:12});
+    await driver.drag(page.locator('#cover-progress'),.9,.4,false,async()=>{
       // Check before mouseup: a release-only/debounced screenshot is not live preview.
       await page.waitForTimeout(450);
       if(oldPicture===await pictureHash())throw Error(label+':cover-preview-not-updated-during-drag');
-    } finally { await page.mouse.up(); }
+    });
     await page.waitForTimeout(350);
     await page.waitForFunction(()=>[...document.querySelectorAll('img[alt="已选封面预览"]')].some(i=>i.complete&&i.naturalWidth>0));
     check(label+':current-picture-capture',oldPicture!==await pictureHash()&&await page.getByAltText('已选封面预览').last().evaluate(i=>i.complete&&i.naturalWidth>0));

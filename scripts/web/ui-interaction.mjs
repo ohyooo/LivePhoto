@@ -4,7 +4,14 @@ export function composeDriver(page,viewport) {
   const reveal=async locator=>{
     for(let attempt=0;attempt<40;attempt++) {
       const b=await locator.boundingBox({timeout:1000}).catch(()=>null);
-      if(b&&b.width>0&&b.height>0&&b.y>=64&&b.y+b.height<=viewport.height) return b;
+      if(b&&b.width>0&&b.height>0&&b.y>=64&&b.y+b.height<=viewport.height) {
+        // Focus/bring-into-view can still animate after a control first becomes
+        // visible. Do not use coordinates captured halfway through that scroll.
+        await page.waitForTimeout(120);
+        const next=await locator.boundingBox({timeout:1000}).catch(()=>null);
+        if(next&&['x','y','width','height'].every(key=>Math.abs(next[key]-b[key])<.5))return next;
+        continue;
+      }
       await page.mouse.move(viewport.width/2,viewport.height/2);
       await page.mouse.wheel(0,b&&b.height>0?(b.y<64?-280:280):(attempt<25?280:-280));
       await page.waitForTimeout(100);
@@ -17,7 +24,7 @@ export function composeDriver(page,viewport) {
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
   };
-  const drag=async(locator,from,to,vertical=false)=>{
+  const drag=async(locator,from,to,vertical=false,whileHeld=null)=>{
     await reveal(locator);
     await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared drag control');
@@ -27,6 +34,7 @@ export function composeDriver(page,viewport) {
       // Deliver a human-speed drag across rendering frames, rather than a burst
       // of moves and mouseup before a new range control has processed its down.
       for(let step=1;step<=12;step++){await page.mouse.move(...point(from+(to-from)*step/12));await page.waitForTimeout(20);}
+      if(whileHeld)await whileHeld();
     } finally {await page.mouse.up();}
     await page.waitForTimeout(180);
   };
