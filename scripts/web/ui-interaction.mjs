@@ -18,9 +18,17 @@ export function composeDriver(page,viewport) {
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
   };
   const drag=async(locator,from,to,vertical=false)=>{
-    const b=await reveal(locator);
+    await reveal(locator);
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared drag control');
     const point=f=>vertical?[b.x+b.width/2,b.y+b.height*f]:[b.x+b.width*f,b.y+b.height/2];
-    const a=point(from),z=point(to);await page.mouse.move(...a);await page.mouse.down();await page.mouse.move(...z,{steps:12});await page.mouse.up();await page.waitForTimeout(180);
+    const a=point(from);await page.mouse.move(...a);await page.mouse.down();
+    try {
+      // Deliver a human-speed drag across rendering frames, rather than a burst
+      // of moves and mouseup before a new range control has processed its down.
+      for(let step=1;step<=12;step++){await page.mouse.move(...point(from+(to-from)*step/12));await page.waitForTimeout(20);}
+    } finally {await page.mouse.up();}
+    await page.waitForTimeout(180);
   };
   const choose=async(name,path)=>{const pending=page.waitForEvent('filechooser');pending.catch(()=>{});await click(name);await(await pending).setFiles(path);await page.waitForTimeout(200);};
   return {find,reveal,click,drag,choose};
