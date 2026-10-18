@@ -27,15 +27,25 @@ try {
     const video=page.getByLabel('视频预览',{exact:true});await video.waitFor({state:'attached'});await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
     check(label+':tools-collapsed-by-default',await page.locator('#trim-progress').count()===0&&await page.locator('#cover-progress').count()===0);
     const progress=page.locator('#playback-progress');
-    // A partially clipped portrait rail is still a visible semantic node. Bring
-    // its bottom controls into view before measuring the complete player.
-    await driver.reveal(driver.find('播放'));await driver.reveal(progress);
+    // Semantic rails are clipped to the viewport. Check the native picture's
+    // full bounds instead, otherwise a half-visible portrait rail looks fitted.
+    for(let attempt=0;attempt<20;attempt++) {
+      const picture=await video.boundingBox(),button=await driver.find('播放').boundingBox({timeout:1000});
+      if(picture.y>=64&&button&&button.height>0&&button.y+button.height<=viewport.height)break;
+      const delta=picture.y<64?picture.y-76:picture.y+picture.height+80-viewport.height;
+      await page.mouse.move(viewport.width/2,viewport.height/2);await page.mouse.wheel(0,delta);await page.waitForTimeout(200);
+    }
     const v=await video.boundingBox(),bar=await progress.boundingBox(),play=await driver.find('播放').boundingBox();
-    check(label+':aspect-and-viewport',v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
+    check(label+':aspect-and-viewport',v.y>=64&&v.y+v.height<=viewport.height&&v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
     check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1);
     check(label+':native-overlays-disabled',await video.evaluate(v=>!v.controls));
     check(label+':correct-progress-axis',shape==='portrait'?bar.height>bar.width&&bar.x>=v.x+v.width:bar.width>bar.height);
-    await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`});
+    await page.screenshot({path:`ci-output/web-ui-player-${size}-${shape}.png`,omitBackground:true});
+    if(size==='mobile'&&shape==='landscape') {
+      console.log('Initial surface layout',JSON.stringify(await page.evaluate(()=>({video:document.querySelector('video').outerHTML,ancestors:[...function*(node){while(node){yield {tag:node.tagName,style:node.getAttribute('style')};node=node.parentElement}}(document.querySelector('video'))]}))));
+      const image=await page.locator('canvas').first().evaluate(canvas=>new Promise(resolve=>requestAnimationFrame(()=>resolve(canvas.toDataURL('image/png')))));
+      await writeFile('ci-output/web-ui-player-canvas-diagnostic.png',Buffer.from(image.split(',')[1],'base64'));
+    }
     await driver.drag(progress,.1,.6,shape==='portrait');await page.waitForFunction(()=>!document.querySelector('video').seeking);
     const seekState=await video.evaluate(v=>({paused:v.paused,current:v.currentTime,duration:v.duration}));
     console.log('Shared pointer seek',label,seekState);

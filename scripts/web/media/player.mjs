@@ -7,7 +7,7 @@ export function createPlayer(file, changed, scroll) {
   const video=document.createElement('video'),url=URL.createObjectURL(file);
   video.controls=false;video.disablePictureInPicture=true;video.disableRemotePlayback=true;
   video.playsInline=true;video.preload='metadata';video.setAttribute('aria-label','视频预览');
-  video.style.cssText='display:block;width:100%;height:100%;object-fit:contain;border-radius:11px;background:#f5f7fb;isolation:isolate;transform:translateZ(0)';
+  video.style.cssText='display:block;width:100%;height:100%;object-fit:contain;border-radius:11px;background:#f5f7fb';
   let frameTime=null,callback=null,disposed=false,lastVolume=1;
   const publish=()=>{if(!disposed)changed({duration:Number.isFinite(video.duration)?video.duration:0,current:video.currentTime,
     // Seeking briefly drops decoded-picture readiness. Keep the timeline
