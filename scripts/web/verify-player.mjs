@@ -45,7 +45,8 @@ try {
     await driver.drag(progress,.8,.2,shape==='portrait');
     await driver.click('播放');await page.waitForFunction(()=>!document.querySelector('video').paused);await driver.click('暂停');
     await page.waitForFunction(()=>document.querySelector('video').paused);
-    console.log('Shared pause state',label,await video.evaluate(v=>({paused:v.paused,ended:v.ended,current:v.currentTime,scrollY,canvasTop:document.querySelector('canvas').getBoundingClientRect().top})));
+    console.log('Shared pause state',label,await video.evaluate(v=>({paused:v.paused,ended:v.ended,current:v.currentTime,scrollY})),
+      'canvasBounds',await page.locator('canvas').first().boundingBox());
     check(label+':play-and-pause',await video.evaluate(v=>v.paused&&!v.ended&&v.currentTime<v.duration-.2&&scrollY===0));
     await video.click();await page.waitForFunction(()=>!document.querySelector('video').paused);await video.click();
     check(label+':picture-click-toggle',await video.evaluate(v=>v.paused));

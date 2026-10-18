@@ -2,6 +2,7 @@ package livephoto.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,6 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -135,8 +139,15 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
         val pictureHeight = pictureWidth / aspect
         val cardWidth = pictureWidth + 24.dp + if (portrait) 40.dp else 0.dp
         val compact = cardWidth < 480.dp
-        Surface(modifier = Modifier.width(cardWidth).testTag("video-player"), color = Color.White, contentColor = PlayerInk,
-            shape = RoundedCornerShape(14.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x140f172a)), shadowElevation = 3.dp) {
+        // Keep the platform video outside offscreen/clipping layers. Draw the
+        // lightweight card directly so scrolling cannot leave a second opaque
+        // rectangle where the interop surface used to be.
+        Box(Modifier.width(cardWidth).testTag("video-player").drawBehind {
+            for (spread in 1..3) {
+                val pad = spread.dp.toPx()
+                drawRoundRect(Color(0x030f172a), Offset(-pad, pad), Size(size.width + pad * 2, size.height + pad), CornerRadius(14.dp.toPx() + pad))
+            }
+        }.background(Color.White, RoundedCornerShape(14.dp)).border(1.dp, Color(0x140f172a), RoundedCornerShape(14.dp))) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     editor.Player(Modifier.size(pictureWidth, pictureHeight).testTag("video-picture"), onScroll)
