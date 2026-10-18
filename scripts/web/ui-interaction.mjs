@@ -2,8 +2,10 @@
 export function composeDriver(page,viewport) {
   const find=name=>page.getByRole('button',{name,exact:true}).or(page.getByRole('checkbox',{name,exact:true})).first();
   const reveal=async (locator,minHeight=1)=>{
+    const history=[];
     for(let attempt=0;attempt<40;attempt++) {
       const b=await locator.boundingBox({timeout:1000}).catch(()=>null);
+      history.push(b);
       if(b&&b.width>0&&b.height>=minHeight&&b.y>=64&&b.y+b.height<=viewport.height) {
         // Focus/bring-into-view can still animate after a control first becomes
         // visible. Do not use coordinates captured halfway through that scroll.
@@ -16,7 +18,7 @@ export function composeDriver(page,viewport) {
       await page.mouse.wheel(0,b&&b.height>0?(b.y<64?-280:280):(attempt<25?280:-280));
       await page.waitForTimeout(100);
     }
-    throw Error('Shared Compose control is not reachable: '+await locator.count());
+    throw Error('Shared Compose control is not reachable: '+await locator.count()+'; bounds='+JSON.stringify(history));
   };
   const click=async name=>{
     const locator=find(name);await reveal(locator);

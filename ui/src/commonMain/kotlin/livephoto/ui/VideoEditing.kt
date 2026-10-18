@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var coverPreview by remember(editor) { mutableStateOf<String?>(null) }
     var capturing by remember(editor) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
     val enabled = !parentBusy && !working && playback.ready
     val canCapture by rememberUpdatedState(enabled)
@@ -115,10 +117,12 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
         player()
         playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(checked = trimOpen, enabled = enabled, onCheckedChange = { trimOpen = it }, modifier = Modifier.semantics { contentDescription = "裁剪视频" })
+            // Do not keep the cover timeline as the scroll/focus target when
+            // opening another editor; it can move the page during a range drag.
+            Checkbox(checked = trimOpen, enabled = enabled, onCheckedChange = { focus.clearFocus(); trimOpen = it }, modifier = Modifier.semantics { contentDescription = "裁剪视频" })
             Text("裁剪视频")
             Spacer(Modifier.width(16.dp))
-            Checkbox(checked = coverOpen, enabled = enabled, onCheckedChange = { coverOpen = it; if (it) coverPosition = playback.current }, modifier = Modifier.semantics { contentDescription = "截取封面" })
+            Checkbox(checked = coverOpen, enabled = enabled, onCheckedChange = { focus.clearFocus(); coverOpen = it; if (it) coverPosition = playback.current }, modifier = Modifier.semantics { contentDescription = "截取封面" })
             Text("截取封面")
         }
         if (coverOpen) {
