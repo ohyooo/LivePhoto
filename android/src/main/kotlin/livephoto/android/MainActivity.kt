@@ -25,6 +25,8 @@ class MainActivity : ComponentActivity() {
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).convertPhoto(input, target)
                 }, repairPhoto = { input, review ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).repairPhoto(input, review)
+                }, setPhotoKey = { input, requested ->
+                    AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).setPhotoKey(input, requested)
                 }) { image, video, target ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core)
                         .create(image, video, target)

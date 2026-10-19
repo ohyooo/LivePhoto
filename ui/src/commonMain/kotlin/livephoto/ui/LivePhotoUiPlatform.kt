@@ -20,6 +20,8 @@ public interface LivePhotoUiPlatform {
     public val supportsCleanSplit: Boolean get() = false
     public val supportsConversion: Boolean get() = false
     public val supportsRepair: Boolean get() = false
+    public val supportsPhotoKey: Boolean get() = false
+    public val keySuccessMessage: String get() = "已修改关键照片时间并另存。"
     public val repairSuccessMessage: String get() = "已应用修复并另存。"
     public val conversionSuccessMessage: String get() = "已转换并另存。"
     public val videoExportSuccessMessage: String get() = "已保存原始视频。"
@@ -40,6 +42,8 @@ public interface LivePhotoUiPlatform {
         CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "Conversion is not available in this adapter"))
     public suspend fun repairPhoto(reference: String, review: RepairReview? = null): CoreResult<PhotoRepairReport> = CoreResult.Failure(
         CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "Repair is not available in this adapter"))
+    public suspend fun setPhotoKey(reference: String, requested: Time): CoreResult<PhotoKeyReport> = CoreResult.Failure(
+        CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "Key editing is not available in this adapter"))
     public fun formatFailure(error: Exception, imageName: String?, videoName: String?): String
     @Composable
     public fun rememberVideoEditor(reference: String?): VideoEditor? = null

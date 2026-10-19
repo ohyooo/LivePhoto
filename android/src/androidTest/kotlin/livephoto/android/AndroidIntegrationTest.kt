@@ -21,6 +21,47 @@ class AndroidIntegrationTest {
     private val context = Context(Limits(32_000_000u, 48_000_000u))
     private fun fixture(name: String): ByteArray = InstrumentationRegistry.getInstrumentation().context.assets.open("reference/$name").use { it.readBytes() }
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+    @Test fun controllerSetsOnlyKeyMetadataAndPublishesVerifiedJpegForThreeProfiles() = runBlocking {
+        val file = app.getFileStreamPath("key-${UUID.randomUUID()}.jpg")
+        try {
+            for (target in livephoto.ui.ConversionTarget.entries) {
+                val original = syntheticRepairCarrier(target)
+                file.writeBytes(original)
+                val result = success(AndroidCreateController(app, app.core).setPhotoKey(Uri.fromFile(file), Time.Zero))
+                try {
+                    val bytes = app.contentResolver.openInputStream(result.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
+                    assertEquals(sha(bytes), result.report.digest.value)
+                    assertEquals(0, result.report.actual.compareTo(Time.Zero))
+                    assertTrue(result.report.preservation.records.filter { it.guarantee in setOf(Guarantee.ImageDataPreserving, Guarantee.BitstreamPreserving) }.all { it.outcome == GuaranteeOutcome.Verified && it.sourceDigest == it.outputDigest })
+                    val source = MemoryBinarySource(Bytes(bytes), SourceId("key-output"))
+                    val transaction = MemoryOutputTransaction(context, "key-extract")
+                    var extracted: OperationResult? = null
+                    try {
+                        assertEquals(0, success(app.core.getKeyPhotoPosition(ReadRequest(SourceSet.Single(source), context))).position!!.compareTo(Time.Zero))
+                        extracted = success(app.core.extract(ExtractRequest(SourceSet.Single(source), emptyList(), output = transaction, context = context)))
+                        assertContentEquals(fractionalAudioVideo(), transaction.committedAssets().getValue(extracted.output.assets.single().id).toByteArray())
+                    } finally { extracted?.output?.assets?.forEach { it.readableSource?.close() }; source.close() }
+                    app.contentResolver.query(result.uri, arrayOf(MediaStore.Images.Media.IS_PENDING, MediaStore.MediaColumns.RELATIVE_PATH), null, null, null)!!.use {
+                        assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Pictures/LivePhoto/", it.getString(1))
+                    }
+                    assertContentEquals(original, file.readBytes())
+                } finally { app.contentResolver.delete(result.uri, null, null) }
+            }
+        } finally { file.delete() }
+    }
+    @Test fun controllerRejectsInvalidKeyRequestsWithoutPublication() = runBlocking {
+        val file = app.getFileStreamPath("key-invalid-${UUID.randomUUID()}.jpg")
+        val count = { app.contentResolver.query(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-key-%"), null)!!.use { it.count } }
+        val before = count()
+        try {
+            for (bytes in listOf(syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1), conversionImage(), byteArrayOf(0, 1, 2, 3))) {
+                file.writeBytes(bytes)
+                assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).setPhotoKey(Uri.fromFile(file), Time(999, 1u)))
+                assertContentEquals(bytes, file.readBytes()); assertEquals(before, count())
+            }
+        } finally { file.delete() }
+    }
     private fun <T> success(result: CoreResult<T>): T = assertIs<CoreResult.Success<T>>(result, result.toString()).value
 
     @Test fun applicationUsesSharedCoreWithoutBackend() {

@@ -7,6 +7,27 @@ import livephoto.core.memory.*
 import kotlin.test.*
 
 class KeyMetadataTest {
+    @Test fun approximateSetMayQuantizeButFrameIndexStillRequiresExactMicroseconds(): Unit = runImmediate {
+        val video = GoogleFixtures.video().bytes.copyOf()
+        for (type in listOf("mvhd", "mdhd")) {
+            val tag = type.encodeToByteArray()
+            val index = (0..video.size - 4).single { start -> tag.indices.all { video[start + it] == tag[it] } }
+            GoogleFixtures.u32(3000u).copyInto(video, index + 4 + 12)
+        }
+        val carrier = GoogleFixtures.jpeg(GoogleFixtures.xmpSegment(GoogleFixtures.v2Xml(video.size))) + video
+        val source = source(carrier)
+        val approximate = MemoryOutputTransaction(context, "key-approximate")
+        val result = value(core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source),
+            CoverPosition.Timestamp(Time(13_333, 1_000_000u), Selection.Nearest, Time(1, 1000u)), output = approximate, context = context)))
+        assertEquals(Time(13_333, 1_000_000u), result.keyPhoto?.position)
+        assertTrue(result.keyPhoto!!.issues.any { it.code.value == "KEY_TIMESTAMP_QUANTIZED" })
+        val exact = MemoryOutputTransaction(context, "key-exact")
+        val failure = assertIs<CoreResult.Failure>(core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source),
+            CoverPosition.FrameIndex(1u), output = exact, context = context)))
+        assertEquals("VALUE_NOT_REPRESENTABLE", failure.error.code.value)
+        assertTrue(exact.committedAssets().isEmpty())
+        result.output.assets.forEach { it.readableSource?.close() }; source.close()
+    }
     private val context = Context(Limits(4_000_000uL, 4_000_000uL, maxMetadataBytes = 4_000_000uL))
     private val core: LivePhotoCore = DefaultLivePhotoCore()
     private fun source(bytes: ByteArray, id: String = "source") = MemoryBinarySource(Bytes(bytes), SourceId(id))

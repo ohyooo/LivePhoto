@@ -19,7 +19,7 @@ private fun value(v: Value?): dynamic = when (v) {
     is Value.ArrayValue -> record("kind" to "Array", "values" to v.values.map { value(it) }.toTypedArray())
     is Value.ObjectValue -> record("kind" to "Object", "entries" to record(*v.entries.map { it.key to value(it.value) }.toTypedArray()))
 }
-private fun time(v: Time?): dynamic = v?.let { record("value" to it.value.toString(), "timescale" to it.timescale.toDouble()) }
+internal fun time(v: Time?): dynamic = v?.let { record("value" to it.value.toString(), "timescale" to it.timescale.toDouble()) }
 private fun range(v: ByteRange?): dynamic = v?.let { record("offset" to it.offset.toString(), "length" to it.length.toString()) }
 private fun location(v: Location?): dynamic = v?.let { record("source" to it.source?.value, "resource" to it.resource?.value,
     "range" to range(it.range), "selector" to it.selector, "track" to it.track?.value) }
@@ -45,7 +45,7 @@ private fun metadata(v: MetadataEntry): dynamic = record("selector" to v.selecto
 private fun color(v: ColorFacts?): dynamic = v?.let { record("primaries" to it.primaries, "transfer" to it.transfer,
     "matrix" to it.matrix, "range" to it.range, "bitDepth" to it.bitDepth?.toDouble(), "icc" to it.icc?.value,
     "hdr" to it.hdr.map { m -> metadata(m) }.toTypedArray()) }
-private fun media(v: MediaFacts): dynamic = record("imageFormat" to v.imageFormat?.name, "videoContainer" to v.videoContainer?.name,
+internal fun media(v: MediaFacts): dynamic = record("imageFormat" to v.imageFormat?.name, "videoContainer" to v.videoContainer?.name,
     "mime" to v.mime, "width" to v.width?.toDouble(), "height" to v.height?.toDouble(), "duration" to time(v.duration),
     "coverage" to v.coverage.name, "orientation" to value(v.orientation), "color" to color(v.color),
     "auxiliary" to v.auxiliary.map { it.value }.toTypedArray(),

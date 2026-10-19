@@ -74,7 +74,9 @@ internal object KeyMetadataOperations {
                     GuaranteeRecord(id, Guarantee.MetadataPreserving, if (opaqueOffsetsPreserved(session, staged)) GuaranteeOutcome.Verified else GuaranteeOutcome.Unknown, metadata, outputMetadata)),
                     staged.inspection.keyPhoto)
             })
-        publish(request.output, request.policy, request.context, session.readers, listOf(asset), prepared.changes).orThrow()
+        val published = publish(request.output, request.policy, request.context, session.readers, listOf(asset), prepared.changes).orThrow()
+        published.copy(keyPhoto = published.keyPhoto?.let { it.copy(issues = (it.issues + prepared.key.issues).distinct()) },
+            issues = (published.issues + prepared.key.issues).distinct())
     }
 
     private suspend fun prepare(request: SetKeyRequest, session: SourceSession): Prepared {
@@ -116,7 +118,7 @@ internal object KeyMetadataOperations {
                 (description.attributes.map { it.name.expanded } + description.children.filterIsInstance<XmlElement>().map { it.name.expanded })
                     .any { it.uri == vendorUri && it.local !in vendorFields }
             }) fail("CAPABILITY_UNSUPPORTED", "Unknown vendor fields may change timestamp semantics", Stage.Plan)
-        val key = selectKey(session.videos.values.first(), request.position)
+        val key = selectKey(session.videos.values.first(), request.position, protocolTimescale = 1_000_000u)
         val timestamp = microseconds(key.position!!).toString()
         val updates = session.bindings.associate { binding -> ExpandedName(CAMERA_URI, if (binding.protocol == ProtocolIds.GoogleV1) "MicroVideoPresentationTimestampUs" else "MotionPhotoPresentationTimestampUs") to timestamp }
         val xml = XmpWriter.merge(xmp.packets.single(), updates, request.context).orThrow()

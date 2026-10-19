@@ -649,6 +649,23 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [ ] Web 后续协议接口、公共 JS 回归与浏览器媒体后端，分项状态见 [Web 路线与 TODO](docs/web-roadmap.md)。
 - [ ] 完整 Compose Multiplatform GUI：当前 Android/Web 共享有限测试界面，更完整的工具界面仍待实现，不扩大 Core 业务范围。
 
+### 浏览器可选 Core 媒体后端
+
+`createMediaBackend({ runtimeUrl, signal })` 返回 `probe`、`remux`、`trim`、`extractFrame`、`transcode`，调用统一 Core `MediaBackend` 和已有 FFmpeg 验证代码。`runtimeUrl` 指向同源网站部署中的 `media/core-runtime.mjs`，其相邻 vendor 资源须完整部署；JS 功能库不自动下载或捆绑 FFmpeg。输入最多 32 MiB、输出最多 48 MiB，单次执行超时 120 秒。后端为有限 Experimental profile，遇到未知轨道、metadata、HDR/变换或无法证明的时间线会拒绝，不默认丢弃或降级。
+
+```javascript
+const media = createMediaBackend({ runtimeUrl: '/livephoto/media/core-runtime.mjs' });
+const info = await media.probe(video);
+const copied = await media.remux(video); // 当前有限 MP4→MP4；不编码音视频
+const trimmed = await media.trim(video, { start: 0.4, end: 1.6 });
+const frame = await media.extractFrame(video, { start: 0.4 });
+const encoded = await media.transcode(video, { authorizeTranscode: true });
+```
+
+只有显式 `authorizeTranscode: true` 才允许视频编码，音频始终 copy。输出 `assets` 与 `report` 包含 Core 保真及执行记录；裁剪报告实际边界，probe 的解码成功仍是 Partial，而非完整兼容认证。返回 Blob 不会自行下载。独立 Core 抽帧不等同于播放器当前画面截图；现有播放器预处理尚未全部迁移，不宣称两个入口支持范围相同。实际验收见当前提交 CI。
+
+已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
+
 ### 诊断日志
 
 排查异常时可使用 `LivePhoto detect --input 'livephoto.jpg' --log-level trace 2>trace.log`。默认不记录日志；debug 提供操作结果，trace 增加阶段进度、耗时及未捕获异常的有界调用栈。异常消息和命令参数不写入诊断，避免泄露素材路径或 metadata。已转为结构化 Core 错误的异常仅记录错误码和阶段，不保证拥有底层调用栈。独立 `--help` / `--version` 不产生诊断。

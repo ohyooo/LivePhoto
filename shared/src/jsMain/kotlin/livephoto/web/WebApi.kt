@@ -33,10 +33,10 @@ public class WebAsset(public val id: String, public val role: String, public val
     public val byteLength: String, public val digest: String, public val recommendedName: String?, public val bytes: ByteArray)
 
 private fun context(inputLimit: Int = INPUT_LIMIT): Context = Context(Limits(inputLimit.toULong(), OUTPUT_LIMIT.toULong()))
-private fun failure(error: CoreError): WebResult = WebResult(false, error.code.value, error.stage.name, error.message,
+internal fun failure(error: CoreError): WebResult = WebResult(false, error.code.value, error.stage.name, error.message,
     reportJson = reportJson(errorReport(error)))
 private fun invalid(code: String, message: String): WebResult = WebResult(false, code, "Read", message)
-private fun promise(block: suspend () -> WebResult): Promise<WebResult> = Promise { resolve, reject ->
+internal fun promise(block: suspend () -> WebResult): Promise<WebResult> = Promise { resolve, reject ->
     block.startCoroutine(object : Continuation<WebResult> {
         override val context: CoroutineContext = EmptyCoroutineContext
         override fun resumeWith(result: Result<WebResult>) { result.fold(resolve, reject) }
@@ -50,7 +50,7 @@ private fun selector(target: String): ProtocolSelector? = when (target) {
     else -> null
 }
 
-private fun operation(result: OperationResult, output: MemoryOutputTransaction, protocol: String = "",
+internal fun operation(result: OperationResult, output: MemoryOutputTransaction, protocol: String = "",
     report: String = reportJson(operationReport(result))): WebResult {
     val committed = output.committedAssets()
     val assets = result.output.assets.map { asset -> WebAsset(asset.id.value, asset.role.name, asset.mime,

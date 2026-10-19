@@ -559,11 +559,64 @@ try {
     check(label+':repair-selection-state-isolated',cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
     check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+3&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+
+    const beforeKey=downloads,keyReport=()=>text(/^(?:已修改关键照片时间并发起下载|关键照片修改失败)/);
+    const readKeyReport=()=>keyReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+    const enterKey=async value=>{
+      const field=page.locator('#key-seconds'),bounds=await driver.reveal(field);
+      await page.mouse.click(bounds.x+Math.min(70,bounds.width/2),bounds.y+bounds.height*.65);
+      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText(value);await page.keyboard.press('Tab');
+      await page.waitForTimeout(200);
+    };
+    let keyAnalysisPreserved=true;
+    for(const {target,output} of analysisInputs) {
+      const inspection=await analyze({name:'key-'+target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
+      await enterKey('0.47');
+      const pending=page.waitForEvent('download');pending.catch(()=>{});
+      await driver.click('修改关键照片时间并另存');
+      const download=await pending;if(await download.failure())throw Error('Key photo download failed');
+      const edited=await readFile(await download.path());
+      await keyReport().waitFor({state:'attached'});
+      const report=await readKeyReport();
+      const audit=await page.evaluate(async data=>{
+        const api=await import('/api/livephoto.mjs'),blob=new Blob([new Uint8Array(data)]);
+        const key=await api.getKeyPhotoPosition(blob),extracted=await api.extractVideo(blob),valid=await api.validateLivePhoto(blob);
+        if(!key.success||!extracted.success||!key.report.position)throw Error('Cannot inspect edited key');
+        const position=Number(key.report.position.value)/key.report.position.timescale;
+        const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await extracted.blob.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
+        return {position,hash,valid:valid.success&&valid.verdict!=='Invalid'&&valid.coverage==='Complete'};
+      },Array.from(edited));
+      check(label+':key-'+target+'-preserving',audit.valid&&Math.abs(audit.position-.47)<=.1&&audit.hash===videoHash&&
+        report.includes('实际时间：')&&report.includes('ImageDataPreserving: Verified')&&report.includes('BitstreamPreserving: Verified')&&
+        report.includes(createHash('sha256').update(edited).digest('hex'))&&download.suggestedFilename()==='LivePhoto-key.jpg');
+      keyAnalysisPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+      if(target==='google.microvideo.v1')await page.screenshot({path:`ci-output/web-ui-key-${label}.png`});
+    }
+    const beforeInvalid=downloads;
+    let invalidNoOutput=true;
+    for(const value of ['-1','NaN','0.0000001']) {
+      await enterKey(value);await driver.click('修改关键照片时间并另存');
+      invalidNoOutput&&=downloads===beforeInvalid&&await keyReport().count()===0;
+    }
+    check(label+':key-invalid-value-no-output',invalidNoOutput);
+    await enterKey('999');await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
+    check(label+':key-outside-no-output',downloads===beforeInvalid&&(await readKeyReport()).includes('INVALID_PRESENTATION_TIMESTAMP'));
+    for(const [kind,input] of [['ordinary',imagePath],['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
+      ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],['budget',oversized]]) {
+      await analysisPicker(input);await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
+      const report=await readKeyReport();
+      check(label+':key-'+kind+'-no-output',downloads===beforeInvalid&&report.includes('关键照片修改失败')&&report.includes('错误码：')&&
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')));
+    }
+    await analysisPicker({name:'key-reselect.jpg',mimeType:'image/jpeg',buffer:v1.output});
+    check(label+':key-selection-state-isolated',await keyReport().count()===0);
+    check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+3&&
+      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==156||new Set(checks).size!==156) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==178||new Set(checks).size!==178) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 156 checks; shared Compose operations and reviewed safe repair under /livephoto/, two sizes, fifty audited downloads, no-op/blocked/stale inputs never published');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 178 checks; shared Compose key editing and reviewed safe repair under /livephoto/, two sizes, fifty-six audited downloads, no-op/blocked/stale inputs never published');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

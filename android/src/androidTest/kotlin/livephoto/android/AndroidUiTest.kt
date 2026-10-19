@@ -32,6 +32,40 @@ import livephoto.ui.MediaKind
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun keyEditingHasIndependentInputValidationAndClearsStaleReports() {
+        var calls = 0
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "unused"
+            override val supportsAnalysis = true
+            override val supportsPhotoKey = true
+            override val keySuccessMessage = "TEST_KEY_SAVED"
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = { onResult("same-key-uri") }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("live.jpg", 100)
+            override suspend fun setPhotoKey(reference: String, requested: livephoto.core.Time): CoreResult<livephoto.ui.PhotoKeyReport> {
+                check(reference == "same-key-uri"); calls++
+                return CoreResult.Success(livephoto.ui.PhotoKeyReport(requested, requested, livephoto.core.Digest("0".repeat(64)), 100u, livephoto.core.PreservationReport(), emptyList()))
+            }
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> = error("Must not create")
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
+        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("set-photo-key").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("key-seconds").performScrollTo().performTextReplacement("-1")
+        compose.onNodeWithTag("set-photo-key").assertIsNotEnabled(); assertTrue(calls == 0)
+        compose.onNodeWithTag("key-seconds").performTextReplacement("0.5")
+        compose.onNodeWithTag("set-photo-key").performScrollTo().performClick()
+        compose.onNodeWithTag("key-report").assertTextContains("TEST_KEY_SAVED", substring = true); assertTrue(calls == 1)
+        compose.onNodeWithTag("key-seconds").performScrollTo().performTextReplacement("0")
+        compose.onNodeWithTag("key-report").assertDoesNotExist()
+        compose.onNodeWithTag("set-photo-key").performScrollTo().performClick()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("key-report").assertDoesNotExist()
+        compose.onNodeWithTag("key-seconds").assertTextContains("0")
+        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+    }
+
     @Test fun repairRequiresPreviewAndClearsReviewAfterApplyOrSameUriReselection() {
         var applied = 0
         var blockNext = false

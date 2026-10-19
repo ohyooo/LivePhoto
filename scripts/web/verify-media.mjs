@@ -13,12 +13,24 @@ const source=join(directory,'input.mp4');
 execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=64x64:rate=25',
   '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libx264','-threads','1','-pix_fmt','yuv420p',
   '-bf','0','-g','25','-c:a','aac','-movflags','+faststart',source],{timeout:60000});
-const input=await readFile(source), root=resolve('ci-output/web-ui');
+const coreSource=join(directory,'core-input.mp4');
+execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=64x64:rate=25',
+  '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','25',
+  '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-c:a','aac','-use_editlist','0',
+  '-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0','-movflags','+faststart',coreSource],{timeout:60000});
+const coreInput=await readFile(coreSource);
+const input=await readFile(source), root=resolve('ci-output/web-ui'),apiRoot=resolve('ci-output/browser-api/web-library');
 const server=createServer(async(req,res)=>{
   try {
     const path=new URL(req.url,'http://localhost').pathname;
     if(path==='/livephoto/test') {res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Media adapter validation</title>');return;}
     if(path==='/fixture') {res.setHeader('Content-Type','video/mp4');res.end(input);return;}
+    if(path==='/core-fixture') {res.setHeader('Content-Type','video/mp4');res.end(coreInput);return;}
+    if(path.startsWith('/api/')) {
+      const file=resolve(apiRoot,'.'+path.slice(4));
+      if(!file.startsWith(apiRoot+sep)){res.writeHead(403).end();return;}
+      res.setHeader('Content-Type','text/javascript');res.end(await readFile(file));return;
+    }
     if(!path.startsWith('/livephoto/')) {res.writeHead(404).end();return;}
     const file=resolve(root,'.'+path.slice('/livephoto'.length));
     if(!file.startsWith(root+sep)) {res.writeHead(403).end();return;}
@@ -98,9 +110,53 @@ try {
     }
     check(kind+'-independent-native-packet-audit',true);
   }
-  if(checks.length!==11||new Set(checks).size!==11)throw Error('Incomplete media evidence');
+  const coreResults=await page.evaluate(async()=>{
+    const {createMediaBackend}=await import('/api/livephoto.mjs');
+    const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs'});
+    const file=await(await fetch('/core-fixture')).blob();
+    const hash=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');
+    const before=await hash(file),results={};
+    for(const [action,options] of [['probe',undefined],['remux',undefined],['trim',{start:.4,end:1.6}],['extractFrame',{start:.4}],['transcode',{authorizeTranscode:true}]]) {
+      const value=await backend[action](file,options);
+      if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message);
+      results[action]={...value,assets:undefined,blob:undefined,bytes:value.blob?Array.from(new Uint8Array(await value.blob.arrayBuffer())):null};
+    }
+    const forbidden=await backend.transcode(file);
+    const malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
+    const controller=new AbortController();controller.abort();
+    const cancelled=await createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).probe(file);
+    let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
+    return {results,forbidden,malformed,cancelled,budget,immutable:before===await hash(file)};
+  });
+  const r=coreResults.results;
+  check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes);
+  const coreBefore=probe(coreSource);
+  for(const action of ['remux','trim','transcode']) {
+    const value=r[action],path=join(directory,'core-'+action+'.mp4');await writeFile(path,new Uint8Array(value.bytes));
+    const after=probe(path);
+    if(!value.report.execution.some(e=>e.backendId==='ffmpeg-wasm'))throw Error('Actual Wasm backend identity missing');
+    for(const type of action==='transcode'?['audio']:['video','audio']) {
+      const a=coreBefore.streams.find(s=>s.codec_type===type),b=after.streams.find(s=>s.codec_type===type);
+      if(!a||!b||a.codec_name!==b.codec_name)throw Error('Core dropped/encoded '+type);
+      const original=coreBefore.packets.filter(p=>p.stream_index===a.index).map(p=>p.data_hash),retained=after.packets.filter(p=>p.stream_index===b.index).map(p=>p.data_hash);
+      if(!retained.length||!original.some((_,i)=>retained.every((hash,j)=>hash===original[i+j])))throw Error('Core packet proof failed: '+action+'/'+type);
+      if(action!=='trim'&&original.length!==retained.length)throw Error('Whole-stream packet count changed');
+    }
+    if(action==='remux')check('core-remux-independent-video-audio',value.report.execution.some(e=>e.remuxed&&!e.transcoded));
+    if(action==='trim')check('core-trim-actual-timeline',!value.report.actual.wasTranscoded&&value.report.actual.actualStart&&value.report.actual.actualEnd);
+    if(action==='transcode')check('core-transcode-explicit-audio-copy',value.report.execution.some(e=>e.transcoded&&e.hardwareUsed===false));
+  }
+  const frame=await page.evaluate(async data=>{
+    const bitmap=await createImageBitmap(new Blob([new Uint8Array(data)],{type:'image/jpeg'}));
+    const valid=bitmap.width===64&&bitmap.height===64;bitmap.close();return valid;
+  },r.extractFrame.bytes);
+  check('core-extract-frame-decodes',frame&&r.extractFrame.report.actual.actualTime&&r.extractFrame.report.execution.some(e=>e.backendId==='ffmpeg-wasm'));
+  check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob);
+  check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&coreResults.budget);
+  check('core-input-bytes-immutable',coreResults.immutable);
+  if(checks.length!==19||new Set(checks).size!==19)throw Error('Incomplete media evidence');
   await writeFile('ci-output/web-media-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
     browserVersion:browser.version(),tests:checks.length,failures:0,checks,inputSha256:createHash('sha256').update(input).digest('hex'),
     scope:'browser-video-canvas-real-single-thread-ffmpeg-wasm-native-packet-audit-synthetic-audio-no-device-proof'},null,2)+'\n');
-  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 11 checks; real Wasm editing, native independent audio/video packet audit');
+  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 19 checks; real Wasm editing and Core backend, native independent audio/video packet audit');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

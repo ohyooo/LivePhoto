@@ -21,10 +21,11 @@ internal fun LivePhotoScreen(
     saveSplitFile: (suspend (livephoto.ui.SplitFile) -> Uri)? = null,
     convertPhoto: (suspend (Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Converted>)? = null,
     repairPhoto: (suspend (Uri, livephoto.ui.RepairReview?) -> CoreResult<AndroidCreateController.Repaired>)? = null,
+    setPhotoKey: (suspend (Uri, Time) -> CoreResult<AndroidCreateController.Keyed>)? = null,
     create: suspend (Uri, Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Created>,
 ) {
     val context = LocalContext.current.applicationContext
-    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, repairPhoto, create) {
+    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, repairPhoto, setPhotoKey, create) {
         object : LivePhotoUiPlatform {
             override val outputDescription = "Pictures/LivePhoto"
             override val supportsAnalysis = analyze != null
@@ -32,6 +33,8 @@ internal fun LivePhotoScreen(
             override val supportsCleanSplit = cleanSplit != null && saveSplitFile != null
             override val supportsConversion = convertPhoto != null
             override val supportsRepair = repairPhoto != null
+            override val supportsPhotoKey = setPhotoKey != null
+            override val keySuccessMessage = "已修改关键照片时间并另存到 Pictures/LivePhoto。"
             override val repairSuccessMessage = "已应用修复并另存到 Pictures/LivePhoto。"
             override val conversionSuccessMessage = "已转换并另存到 Pictures/LivePhoto。"
             override val videoExportSuccessMessage = "已提取并保存到 Movies/LivePhoto。"
@@ -60,6 +63,12 @@ internal fun LivePhotoScreen(
             override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<livephoto.ui.ConvertedPhoto> =
                 when (val result = convertPhoto?.invoke(Uri.parse(reference), target)) {
                     null -> super.convertPhoto(reference, target)
+                    is CoreResult.Failure -> result
+                    is CoreResult.Success -> CoreResult.Success(result.value.report)
+                }
+            override suspend fun setPhotoKey(reference: String, requested: Time): CoreResult<livephoto.ui.PhotoKeyReport> =
+                when (val result = setPhotoKey?.invoke(Uri.parse(reference), requested)) {
+                    null -> super.setPhotoKey(reference, requested)
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }

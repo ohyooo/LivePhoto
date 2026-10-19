@@ -41,6 +41,20 @@ export async function extractVideo(input) { return result(await core.extractVide
 export async function inspectLivePhoto(input) { return result(await core.inspectLivePhoto(await bytes(input, CARRIER_LIMIT))); }
 export async function analyzeLivePhoto(input) { return result(await core.analyzeLivePhoto(await bytes(input, CARRIER_LIMIT))); }
 export async function getKeyPhotoPosition(input) { return result(await core.getKeyPhotoPosition(await bytes(input, CARRIER_LIMIT))); }
+/** Optional same-origin Worker backend. Does not change existing protocol-only defaults. */
+export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs',import.meta.url),signal}={}) {
+  const runtime=new URL(runtimeUrl,import.meta.url);
+  if(runtime.origin!==globalThis.location.origin)throw new TypeError('Media runtime must be same-origin');
+  const run=async(input,action,{start=0,end=0,authorizeTranscode=false}={})=>{
+    if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<0||start>60||end>60||typeof authorizeTranscode!=='boolean')throw new TypeError('Invalid media range or authorization');
+    const data=await bytes(input,INPUT_LIMIT);
+    const executor=async(...args)=>(await import(runtime.href)).executeCoreFfmpeg(...args);
+    return result(await core.processMedia(data,action,executor,Math.round(start*1e6),Math.round(end*1e6),authorizeTranscode,()=>signal?.aborted===true));
+  };
+  return Object.freeze({probe:input=>run(input,'probe'),remux:input=>run(input,'remux'),
+    trim:(input,options)=>run(input,'trim',options),extractFrame:(input,options)=>run(input,'frame',options),
+    transcode:(input,options)=>run(input,'transcode',options)});
+}
 export async function splitLivePhoto(input) { return result(await core.splitLivePhoto(await bytes(input, CARRIER_LIMIT))); }
 export async function convertLivePhoto(input, { target } = {}) {
   if (typeof target !== 'string') throw new TypeError('Convert requires a target protocol');

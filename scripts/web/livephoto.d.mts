@@ -16,7 +16,7 @@ export interface WebResult {
 /** Int64/UInt64 and exact decimal metadata are strings, never rounded JS numbers. */
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export interface WebReport {
-  readonly kind: 'Detection' | 'Validation' | 'Inspection' | 'Analysis' | 'KeyPhoto' | 'Operation' | 'Repair' | 'Error';
+  readonly kind: 'Detection' | 'Validation' | 'Inspection' | 'Analysis' | 'KeyPhoto' | 'Operation' | 'Repair' | 'Error' | 'MediaProbe';
   readonly [key: string]: JsonValue;
 }
 export interface WebAsset {
@@ -52,3 +52,14 @@ export interface RepairOptions {
 }
 /** Inspect report.blocked/changesApplied/operation; success alone does not mean repaired. */
 export function repairLivePhoto(input: Blob, options?: RepairOptions): Promise<WebResult>;
+
+export interface BrowserMediaBackend {
+  probe(input: Blob): Promise<WebResult>;
+  remux(input: Blob): Promise<WebResult>;
+  trim(input: Blob, options: { start: number; end: number }): Promise<WebResult>;
+  extractFrame(input: Blob, options?: { start?: number }): Promise<WebResult>;
+  /** Only explicit authorizeTranscode:true permits video encoding. Audio is copy only. */
+  transcode(input: Blob, options?: { authorizeTranscode?: boolean }): Promise<WebResult>;
+}
+/** Optional same-origin runtime + vendor assets must be hosted separately. Finite Experimental profiles. */
+export function createMediaBackend(options?: { runtimeUrl?: string | URL; signal?: AbortSignal }): BrowserMediaBackend;

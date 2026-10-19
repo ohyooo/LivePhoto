@@ -17,7 +17,7 @@
 - [x] Clean Split 接口实现：多资产 Blob 输出、变化清单及分项保真证明；与 Raw Extract 分开。
 - [x] 有限 JPEG Convert 接口实现：与 Create 分开，不隐式修复或转码；下述 EXIF 限制仍保留。
 - [x] 有限 Repair：默认 dry-run，显式应用安全修改；结构化报告保留阻止/无操作/修复前后问题。Google V1/V2 长度修复通过浏览器验证；默认新建 OPPO 布局保留安全拒绝，见下方限制。
-- [ ] 关键照片 metadata 写入；与视频抽帧、替换封面分开。
+- [x] 已有 JPEG 关键照片 metadata 修改共享入口：输入十进制秒，明确 Nearest/100ms、报告请求和实际时间，Core 验证图片编码/视频保留后另存；不抽帧或替换封面。分数时钟可在明确容差内量化并报告，Exact/FrameIndex/零容差保持严格。新增代码实际验收以对应 CI 为准。
 - [x] 共享 Kotlin `commonTest` 的浏览器运行：804 项原有纯内存测试在 `f742538` 的 [真实 Chrome 测试 job](https://github.com/ohyooo/LivePhoto/actions/runs/39184904432/job/117845433218) 全部通过，零失败、零跳过，逐类 JUnit XML 与源声明核对。47 项桌面素材/真实 FFmpeg 测试与宿主适配移入 `desktopTest`，测试内容及素材字节不改；`7190817` 的[三平台 Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/39180470040) 各 925 项 shared＋44 项 CLI 测试通过并独立核验。不是重写 JavaScript 测试，也不是 Kotlin/Wasm 迁移；Android 尚未执行这 804 项共用测试。
 - [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
 - [x] 当前十个公开 API 的 Worker 专项：42 项检查覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；在 `5009915` 的 [Web CI 协议 job](https://github.com/ohyooo/LivePhoto/actions/runs/39141307170/job/117716540201) 由真实 Chromium 全部执行成功。此处仅指该组验收，不冒充整轮 UI/播放器或发布成功；未来新接口仍须补充专项。
@@ -34,7 +34,8 @@
 - [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。当前不是任意大文件流式实现。
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
-- [ ] 将浏览器媒体能力正式接入统一 Core MediaBackend，补齐独立 probe/remux 等接口及相应能力与保真报告。当前网页预处理可用，不表示协议功能库已公开媒体后端或完整媒体 API。
+- [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。
+- [ ] 将现有播放器的宽松预处理操作逐项迁移到上述严格 Core 媒体 profile。目前保留原有 Video/Canvas 当前画面截图及 ffmpeg.wasm 预处理，避免缩小已可用输入范围；不能把新有限 API 当作全部播放器流程已统一或全部媒体格式支持。
 - [x] Kotlin/Wasm Compose 应用：`6837e1a` 的 [Web CI 39190852421](https://github.com/ohyooo/LivePhoto/actions/runs/39190852421) 全部 7 个 job 通过。复用现有 `ui/commonMain`，浏览器入口采用类型化互操作；公共 Kotlin 测试在 JS/Wasm 下各 804 项、零失败零跳过，原有 222 项外围检查及 Worker 内部 42 项也通过。真实界面生成和下载由 Wasm 应用执行，独立 JS 库用于审计输出，不重写界面或协议。后续产物命名和缓存调整须再次通过相同 CI，在线状态以实际部署为准；不能仅凭 Skiko/FFmpeg 的 Wasm 文件宣称完成。
 - [ ] 搁置的观察项：播放器画面外透明孔洞/残影。用户未观察到，暂不投入处理、不阻塞后续任务，也不标记为已修复。
 
