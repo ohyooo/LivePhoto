@@ -21,7 +21,8 @@
 - [x] 共享 Kotlin `commonTest` 的浏览器运行：804 项原有纯内存测试在 `f742538` 的 [真实 Chrome 测试 job](https://github.com/ohyooo/LivePhoto/actions/runs/39184904432/job/117845433218) 全部通过，零失败、零跳过，逐类 JUnit XML 与源声明核对。47 项桌面素材/真实 FFmpeg 测试与宿主适配移入 `desktopTest`，测试内容及素材字节不改；`7190817` 的[三平台 Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/39180470040) 各 925 项 shared＋44 项 CLI 测试通过并独立核验。不是重写 JavaScript 测试，也不是 Kotlin/Wasm 迁移；Android 尚未执行这 804 项共用测试。
 - [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
 - [x] 当前十个公开 API 的 Worker 专项：42 项检查覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；在 `5009915` 的 [Web CI 协议 job](https://github.com/ohyooo/LivePhoto/actions/runs/39141307170/job/117716540201) 由真实 Chromium 全部执行成功。此处仅指该组验收，不冒充整轮 UI/播放器或发布成功；未来新接口仍须补充专项。
-- [ ] 后续按需将已验证能力接入共享 UI，不另写网页业务逻辑。
+- [x] 共享 Compose UI 接入只读 Analyze：单独选择待检查照片，不依赖或覆盖生成用的图片、视频；展示多重匹配、分层验证/覆盖、关键照片、媒体信息与问题代码，Unknown/NonLive、未知/零时间和 Partial/NotRun 分开。Android/Wasm 复用同一控件，输入只读、无输出事务，不增加网页协议实现。当前提交的实际编译、两端 UI/IO 验收以 CI 为准，不用此前 Wasm 迁移结果代替。
+- [ ] 按需继续接入提取、拆分、转换等共享 UI；不能把只读检查入口视为这些操作已开放。
 
 ## 后续、尚未实现
 

@@ -28,6 +28,36 @@ class AndroidIntegrationTest {
         assertTrue(app.core.getMediaCapabilities().backendIds.isEmpty())
     }
 
+    @Test fun controllerAnalyzesLiveAndOrdinaryPhotosWithoutWritingOrChangingInputs() = runBlocking {
+        val file = app.getFileStreamPath("analysis-${UUID.randomUUID()}.jpg")
+        try {
+            for ((name, disposition) in listOf("livephoto.jpg" to Disposition.Live, "video.jpg" to Disposition.NonLive)) {
+                val bytes = fixture(name)
+                file.writeBytes(bytes)
+                val filesBefore = app.filesDir.list()!!.toSet()
+                val modified = file.lastModified()
+                val result = success(AndroidCreateController(app, app.core).analyze(Uri.fromFile(file)))
+                assertEquals(disposition, result.inspection.detection.disposition)
+                assertEquals(filesBefore, app.filesDir.list()!!.toSet())
+                assertEquals(modified, file.lastModified())
+                assertContentEquals(bytes, file.readBytes())
+                assertTrue(result.validation.checks.any { it.layer == Layer.Structure })
+                assertTrue(result.validation.checks.any { it.layer == Layer.Protocol })
+            }
+        } finally { file.delete() }
+    }
+
+    @Test fun controllerReportsMalformedPhotoWithoutChangingItsBytes() = runBlocking {
+        val file = app.getFileStreamPath("analysis-bad-${UUID.randomUUID()}.jpg")
+        val bytes = byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0)
+        try {
+            file.writeBytes(bytes)
+            val result = assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).analyze(Uri.fromFile(file)))
+            assertTrue(result.error.code.value.isNotBlank())
+            assertContentEquals(bytes, file.readBytes())
+        } finally { file.delete() }
+    }
+
     @Test fun packagedOriginalFixturesAreByteIdentical() {
         assertEquals("18d7fe28bff459d41fb75fe8358bb6df0f7c5164c04158e8b120789af7da76a9", sha(fixture("video.jpg")))
         assertEquals("d334d2c36a821dfa82c2d0f1bb09948125596bf77fd8eff7034ae6c53b739b64", sha(fixture("video.mp4")))

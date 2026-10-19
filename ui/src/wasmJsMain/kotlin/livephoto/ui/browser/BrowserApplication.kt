@@ -92,6 +92,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     private var next = 0
     override val outputDescription = "浏览器下载"
     override val supportsVideoEditing = true
+    override val supportsAnalysis = true
     override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
 
@@ -100,8 +101,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         files.keys.filter { it.startsWith(prefix) }.forEach { files.remove(it) }
         val reference = "$prefix${next++}"
         files[reference] = file
-        if (kind == MediaKind.Image) selectedFrame = null
-        else { timelines.clear(); timelines[reference] = timeline ?: Timeline(reference, 0.0) }
+        when (kind) {
+            MediaKind.Image -> selectedFrame = null
+            MediaKind.Video -> { timelines.clear(); timelines[reference] = timeline ?: Timeline(reference, 0.0) }
+            MediaKind.LivePhoto -> Unit
+        }
         return reference
     }
 
@@ -111,8 +115,12 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         val input = remember {
             (document.createElement("input") as HTMLInputElement).apply {
                 type = "file"
-                accept = if (kind == MediaKind.Image) "image/*" else "video/*"
-                id = if (kind == MediaKind.Image) "livephoto-image-input" else "livephoto-video-input"
+                accept = if (kind == MediaKind.Video) "video/*" else "image/*"
+                id = when (kind) {
+                    MediaKind.Image -> "livephoto-image-input"
+                    MediaKind.Video -> "livephoto-video-input"
+                    MediaKind.LivePhoto -> "livephoto-analysis-input"
+                }
                 style.display = "none"
             }
         }
@@ -134,6 +142,14 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override suspend fun describe(reference: String): SelectedMediaInfo {
         val file = files[reference] ?: error("Selected browser file is no longer available; select it again")
         return SelectedMediaInfo(file.name, browserFileSize(file).toLong())
+    }
+
+    override suspend fun analyze(reference: String): CoreResult<AnalysisResult> {
+        val file = files[reference] ?: error("请重新选择待检查照片")
+        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Photo analysis input exceeds 32 MiB"))
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        return analyzeSelectedPhoto(DefaultLivePhotoCore(), browserBytes(file), Cancellation { job?.isActive == false })
     }
 
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {

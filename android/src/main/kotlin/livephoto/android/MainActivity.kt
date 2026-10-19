@@ -13,7 +13,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MaterialTheme {
-                LivePhotoScreen { image, video, target ->
+                LivePhotoScreen(analyze = { input ->
+                    AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).analyze(input)
+                }) { image, video, target ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core)
                         .create(image, video, target)
                 }

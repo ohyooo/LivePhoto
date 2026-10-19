@@ -16,6 +16,17 @@ import java.util.UUID
 class AndroidCreateController(private val android: AndroidContext, private val core: LivePhotoCore) {
     data class Created(val uri: Uri, val operation: OperationResult)
 
+    /** Read-only input adapter. No exporter, transaction, decoder or gallery write. */
+    suspend fun analyze(input: Uri): CoreResult<AnalysisResult> = withContext(Dispatchers.IO) {
+        val job = currentCoroutineContext()[Job]
+        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        catch (limit: InputBudgetExceededException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
+                limit.message ?: "Photo analysis input exceeds 32 MiB"))
+        }
+        livephoto.ui.analyzeSelectedPhoto(core, bytes, Cancellation { job?.isActive == false })
+    }
+
     suspend fun create(image: Uri, video: Uri, target: ProtocolSelector): CoreResult<Created> = withContext(Dispatchers.IO) {
         require(target in setOf(
             ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")),

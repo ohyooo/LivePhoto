@@ -122,6 +122,7 @@ try {
     check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).or(page.getByLabel(/大小：/)).count()>=2);
     await page.locator('#livephoto-image-input').setInputFiles([]);
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
+    const analysisInputs=[];
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await click(name);
       await button(name).filter({hasText:/^✓ /}).waitFor({state:'attached'});
@@ -131,6 +132,7 @@ try {
       const download=await pending;
       if(await download.failure()) throw Error('Browser download failed');
       const output=await readFile(await download.path());
+      analysisInputs.push({target,output});
       const audit=await page.evaluate(async ({data,target})=>{
         const api=await import('/api/livephoto.mjs');
         const blob=new Blob([new Uint8Array(data)]);
@@ -229,11 +231,48 @@ try {
     await click('生成并保存 Live Photo');
     await text(/错误码：/).waitFor({state:'visible'});
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
+
+    // A fresh shared screen proves analysis does not require creation inputs.
+    // Only synthetic media generated in this CI job is selected. Never upload it.
+    await page.reload();
+    await page.locator('canvas').first().waitFor({state:'visible'});
+    await page.keyboard.press('Tab');
+    await button('生成并保存 Live Photo').waitFor({state:'attached'});
+    await driver.click('检查已有动态照片');
+    const analysisPicker=async input=>driver.choose(await button('选择待检查照片').count()?'选择待检查照片':'重新选择待检查照片',input);
+    const analyze=async(input,expected)=>{
+      await analysisPicker(input);
+      await driver.click('开始检查（只读）');
+      await text(expected).waitFor({state:'attached'});
+      return text(expected).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+    };
+    const downloadsBeforeAnalysis=downloads;
+    for(const {target,output} of analysisInputs) {
+      const report=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
+      check(label+':analysis-live-'+target,report.includes('识别结果：Live')&&report.includes('首选协议：'+target)&&
+        report.includes('Structure /')&&report.includes('Protocol /')&&report.includes('Media /')&&
+        report.includes('关键照片来源：')&&report.includes('不是完整播放或设备相册兼容证明'));
+    }
+    const ordinary=await analyze(imagePath,/只读检查完成/);
+    check(label+':analysis-ordinary-not-live',ordinary.includes('识别结果：NonLive')&&ordinary.includes('首选协议：无'));
+    const unknown=await analyze({name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])},/只读检查完成/);
+    check(label+':analysis-unknown-not-nonlive',unknown.includes('识别结果：Unknown')&&!unknown.includes('识别结果：NonLive'));
+    const broken=await analyze({name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])},/检查失败/);
+    check(label+':analysis-malformed-error-not-nonlive',broken.includes('错误码：')&&broken.includes('阶段：')&&broken.includes('检查失败不等于普通照片'));
+    const oversized=join(fixtures,'oversized.jpg');
+    await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
+    const budget=await analyze(oversized,/检查失败/);
+    check(label+':analysis-budget-before-parse',budget.includes('RESOURCE_LIMIT_EXCEEDED')&&budget.includes('阶段：Read'));
+    await page.locator('#livephoto-analysis-input').setInputFiles([]);
+    check(label+':analysis-cancel-keeps-report',await text(/检查失败/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'')===budget&&await text('待检查文件：oversized.jpg').count()===1);
+    check(label+':analysis-does-not-alter-create-state',downloads===downloadsBeforeAnalysis&&
+      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&
+      errors.length===0);
     await context.close();
   }
-  if(checks.length!==38||new Set(checks).size!==38) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==56||new Set(checks).size!==56) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 38 checks; shared Compose A/B/C editor under /livephoto/, two sizes, twelve audited downloads, hold-to-play result');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 56 checks; shared Compose editor and read-only analysis under /livephoto/, two sizes, twelve audited downloads, no analysis downloads');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

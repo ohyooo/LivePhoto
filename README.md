@@ -110,6 +110,8 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 浏览器界面直接运行 `ui/commonMain` 中与 Android 相同的 Compose 屏幕，不是另外维护的 HTML 表单。浏览器适配层负责文件选择、元信息读取及下载，协议封装仍调用公共 Core；媒体只在本机浏览器处理，不上传服务器。
 
+在页面底部展开“检查已有动态照片”，选择单张照片后点击“开始检查（只读）”。无需另外选择视频；Android 和浏览器共用同一套检查界面。报告包含识别状态、首选及全部匹配协议、分层验证与覆盖、关键照片位置/来源、媒体信息和问题代码。Unknown 不当作普通照片，Partial/NotRun 不当作完整验证；损坏输入显示具体错误，检查不会修复、转码或生成文件。单文件上限 32 MiB，不展开私人元数据值，也不代替 Apple 配对或设备相册验收。各提交实际验证结果见 CI。
+
 在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
 
 ```sh

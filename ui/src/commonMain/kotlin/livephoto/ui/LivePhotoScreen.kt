@@ -25,6 +25,8 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
         "可选择 JPEG 图片，或展开截取封面时间轴选择视频画面。裁剪默认 copy，转码需显式点击。"
         else "当前不自动从视频抽取封面；需要 JPEG 图片＋MP4 视频。不裁剪或转码。") }
     var busy by remember { mutableStateOf(false) }
+    var analysisBusy by remember { mutableStateOf(false) }
+    val interactionBusy = busy || analysisBusy
     var mediaBusy by remember { mutableStateOf(false) }
     var failed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -54,7 +56,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
         }
     }
     val editor = platform.rememberVideoEditor(video)
-    VideoPlayerHost(editor, !busy && !mediaBusy, mediaScroll) { player ->
+    VideoPlayerHost(editor, !interactionBusy && !mediaBusy, mediaScroll) { player ->
     Scaffold(topBar = {
         TopAppBar(title = { Text("LivePhoto") }, modifier = Modifier.testTag("app-bar"),
             actions = { if (onToggleTheme != null) ThemeToggle(darkTheme, onToggleTheme) })
@@ -74,14 +76,14 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 }
             }
             Text("输入合计上限 32 MiB，不修改原片。生成后保存到 ${platform.outputDescription}。")
-            OutlinedButton(onClick = { imagePicker() }, enabled = !busy && !mediaBusy,
+            OutlinedButton(onClick = { imagePicker() }, enabled = !interactionBusy && !mediaBusy,
                 modifier = Modifier.fillMaxWidth().testTag("select-image")) {
                 Text(if (image == null) "选择图片" else "重新选择图片")
             }
             Text(if (image == null) "图片：未选择" else "图片：已选择", modifier = Modifier.testTag("image-selection"))
             Text("名称：${if (image == null) "—" else imageInfo?.displayName ?: "未知"}", maxLines = 1, modifier = Modifier.testTag("image-name"))
             Text("大小：${if (image == null) "—" else if (imageInfo == null) "正在读取…" else formatMediaSize(imageInfo?.sizeBytes)}", modifier = Modifier.testTag("image-size"))
-            OutlinedButton(onClick = { videoPicker() }, enabled = !busy && !mediaBusy,
+            OutlinedButton(onClick = { videoPicker() }, enabled = !interactionBusy && !mediaBusy,
                 modifier = Modifier.fillMaxWidth().testTag("select-video")) {
                 Text(if (video == null) "选择视频" else "重新选择视频")
             }
@@ -90,7 +92,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 Text("名称：${videoInfo?.displayName ?: "未知"}", modifier = Modifier.testTag("video-name"))
                 Text("大小：${if (videoInfo == null) "正在读取…" else formatMediaSize(videoInfo?.sizeBytes)}", modifier = Modifier.testTag("video-size"))
             }
-            if (editor != null) VideoEditingPanel(editor, busy, { mediaBusy = it },
+            if (editor != null) VideoEditingPanel(editor, interactionBusy, { mediaBusy = it },
                 onImage = { image = it; failed = false; status = "封面已更新" },
                 onVideo = { video = it.reference; failed = false; status = it.summary + "\n原文件未修改。" }, onScroll = mediaScroll,
                 player = player,
@@ -100,12 +102,12 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
             if (image != null) platform.ImagePreview(image!!, Modifier.fillMaxWidth().heightIn(max = 180.dp), mediaScroll)
             Text("目标协议", style = MaterialTheme.typography.titleMedium)
             listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1").forEachIndexed { index, label ->
-                OutlinedButton(onClick = { profile = index }, enabled = !busy && !mediaBusy,
+                OutlinedButton(onClick = { profile = index }, enabled = !interactionBusy && !mediaBusy,
                     modifier = Modifier.fillMaxWidth().testTag("profile-$index")) {
                     Text(if (profile == index) "✓ $label" else label)
                 }
             }
-            Button(enabled = !busy && !mediaBusy && image != null && video != null,
+            Button(enabled = !interactionBusy && !mediaBusy && image != null && video != null,
                 modifier = Modifier.fillMaxWidth().testTag("create"), onClick = {
                     val chosenImage = image ?: return@Button
                     val chosenVideo = video ?: return@Button
@@ -150,6 +152,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 Text("按住播放，松开回到封面（也可用空格或回车）。仅浏览器模拟，不代表手机相册兼容性。")
                 platform.ResultPreview(Modifier.fillMaxWidth().height(220.dp), mediaScroll)
             }
+            if (platform.supportsAnalysis) PhotoAnalysisPanel(platform, !interactionBusy && !mediaBusy) { analysisBusy = it }
         }
         }
     }

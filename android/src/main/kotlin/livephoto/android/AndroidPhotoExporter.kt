@@ -60,6 +60,8 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
 }
 
 /** Unknown length is bounded while reading, with no whole-input unbounded readBytes(). */
+internal class InputBudgetExceededException : IllegalArgumentException("Input byte budget exceeded")
+
 internal suspend fun readBounded(stream: InputStream, limit: Int, checkCancelled: suspend () -> Unit): ByteArray {
     require(limit >= 0)
     val output = ByteArrayOutputStream(minOf(limit, 64 * 1024))
@@ -70,7 +72,7 @@ internal suspend fun readBounded(stream: InputStream, limit: Int, checkCancelled
         val count = stream.read(buffer)
         if (count == -1) break
         check(count > 0) { "Input stream made no progress" }
-        require(count <= limit - total) { "Input byte budget exceeded" }
+        if (count > limit - total) throw InputBudgetExceededException()
         output.write(buffer, 0, count)
         total += count
     }

@@ -32,6 +32,32 @@ import livephoto.ui.MediaKind
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun sharedReadonlyPanelWorksWithoutCreationInputs() {
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "unused"
+            override val supportsAnalysis = true
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = {
+                check(kind == MediaKind.LivePhoto)
+                onResult("analysis-only")
+            }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("unknown.jpg", 4)
+            override suspend fun analyze(reference: String) = livephoto.ui.analyzeSelectedPhoto(AndroidCoreFactory.create(), byteArrayOf(0, 1, 2, 3))
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> =
+                error("Read-only analysis must not generate a photo")
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
+        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("analyze").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("analyze").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("analysis-report").assertTextContains("识别结果：Unknown", substring = true)
+            .assertTextContains("未修改输入、未生成文件", substring = true)
+        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("image-selection").assertTextEquals("图片：未选择")
+        compose.onNodeWithTag("video-selection").assertTextEquals("视频：未选择")
+    }
+
     @Test fun sharedScreenUsesOpaqueReferencesAndScrollsInAShortWindow() {
         val platform = object : LivePhotoUiPlatform {
             override val outputDescription = "test-output"
