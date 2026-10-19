@@ -9,18 +9,26 @@ import kotlinx.coroutines.ensureActive
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
-/** One app-created JPEG row only; not a generic multi-asset filesystem transaction. */
+/** One app-created photo/video row only; not a multi-asset filesystem transaction. */
 class AndroidPhotoExporter(private val resolver: ContentResolver) {
-    suspend fun publish(bytes: ByteArray, displayName: String): Uri {
+    suspend fun publish(bytes: ByteArray, displayName: String): Uri = publishMedia(bytes, displayName,
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), "image/jpeg", "Pictures/LivePhoto")
+
+    suspend fun publishVideo(bytes: ByteArray, displayName: String, mime: String): Uri {
+        require(mime in setOf("video/mp4", "video/quicktime")) { "Only identified MP4/MOV extraction can be saved here" }
+        return publishMedia(bytes, displayName, MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+            mime, "Movies/LivePhoto")
+    }
+
+    private suspend fun publishMedia(bytes: ByteArray, displayName: String, collection: Uri, mime: String, relativePath: String): Uri {
         require(bytes.isNotEmpty() && bytes.size <= AndroidCreateController.MAX_OUTPUT_BYTES)
         require(displayName.isNotBlank() && '/' !in displayName && '\\' !in displayName && '\u0000' !in displayName)
         currentCoroutineContext().ensureActive()
-        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/LivePhoto")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = checkNotNull(resolver.insert(collection, values)) { "Cannot create pending photo" }
         var published = false
@@ -40,7 +48,7 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
             }
             check(bytes.contentEquals(copied)) { "Pending photo differs from the verified Core output" }
             currentCoroutineContext().ensureActive()
-            check(resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null) == 1) {
+            check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) == 1) {
                 "Photo publication result is uncertain; check the gallery before retrying"
             }
             published = true
@@ -49,7 +57,7 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
             if (!published) {
                 // A lost commit response must never cause deletion of a published row.
                 try {
-                    resolver.query(uri, arrayOf(MediaStore.Images.Media.IS_PENDING), null, null, null)?.use { cursor ->
+                    resolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)?.use { cursor ->
                         if (cursor.moveToFirst() && cursor.getInt(0) == 1) resolver.delete(uri, null, null)
                     }
                 } catch (cleanup: Exception) { failure.addSuppressed(cleanup) }

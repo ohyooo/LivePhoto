@@ -16,6 +16,8 @@ public interface LivePhotoUiPlatform {
     public val successMessage: String get() = "已保存到 $outputDescription。"
     public val supportsVideoEditing: Boolean get() = false
     public val supportsAnalysis: Boolean get() = false
+    public val supportsVideoExtraction: Boolean get() = false
+    public val videoExportSuccessMessage: String get() = "已保存原始视频。"
     public val hasResultPreview: Boolean get() = false
     @Composable
     public fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit
@@ -23,6 +25,8 @@ public interface LivePhotoUiPlatform {
     public suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto>
     public suspend fun analyze(reference: String): CoreResult<AnalysisResult> = CoreResult.Failure(
         CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Inspect, "Photo analysis is not available in this adapter"))
+    public suspend fun extractVideo(reference: String): CoreResult<ExtractedVideo> = CoreResult.Failure(
+        CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Extract, "Video extraction is not available in this adapter"))
     public fun formatFailure(error: Exception, imageName: String?, videoName: String?): String
     @Composable
     public fun rememberVideoEditor(reference: String?): VideoEditor? = null

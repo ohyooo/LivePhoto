@@ -32,6 +32,36 @@ import livephoto.ui.MediaKind
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun sharedExtractionUsesItsOwnInputAndReportsExactExport() {
+        var extracted = false
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "unused"
+            override val supportsAnalysis = true
+            override val supportsVideoExtraction = true
+            override val videoExportSuccessMessage = "TEST_VIDEO_SAVED"
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = {
+                check(kind == MediaKind.LivePhoto); onResult("opaque-extraction")
+            }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("motion.jpg", 128)
+            override suspend fun extractVideo(reference: String): CoreResult<livephoto.ui.ExtractedVideo> {
+                check(reference == "opaque-extraction"); extracted = true
+                return CoreResult.Success(livephoto.ui.ExtractedVideo(4u, "video/mp4", "mp4", livephoto.core.Digest("0".repeat(64)),
+                    livephoto.core.PreservationReport(), emptyList()))
+            }
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> = error("Must not create")
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
+        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("extract-video").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("extract-video").performScrollTo().performClick()
+        compose.onNodeWithTag("extraction-report").assertTextContains("TEST_VIDEO_SAVED", substring = true)
+            .assertTextContains("ExactExtraction：Verified", substring = true)
+        assertTrue(extracted)
+        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+    }
+
     @Test fun sharedReadonlyPanelWorksWithoutCreationInputs() {
         val platform = object : LivePhotoUiPlatform {
             override val outputDescription = "unused"

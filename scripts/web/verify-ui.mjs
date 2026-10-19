@@ -273,11 +273,51 @@ try {
     check(label+':analysis-does-not-alter-create-state',downloads===downloadsBeforeAnalysis&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&
       errors.length===0);
+
+    const beforeExtraction=downloads;
+    let inspectionPreserved=true,staleExportCleared=true;
+    for(const {target,output} of analysisInputs) {
+      const inspection=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
+      const pending=page.waitForEvent('download');pending.catch(()=>{});
+      await driver.click('提取原始视频');
+      const download=await pending;
+      if(await download.failure())throw Error('Raw video download failed');
+      const bytes=await readFile(await download.path());
+      await text(/已提取并发起视频下载/).waitFor({state:'attached'});
+      const report=await text(/已提取并发起视频下载/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      check(label+':extract-'+target+'-exact-video',createHash('sha256').update(bytes).digest('hex')===videoHash&&
+        download.suggestedFilename()==='LivePhoto-video.mp4'&&report.includes(videoHash)&&
+        report.includes('ExactExtraction：Verified')&&report.includes('video/mp4')&&report.includes('不是 Clean Split'));
+      inspectionPreserved&&=await text(/只读检查完成/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'')===inspection;
+      if(target==='oplus.olive') {
+        await page.mouse.move(viewport.width/2,viewport.height*.6);
+        await page.mouse.wheel(0,180);await page.waitForTimeout(250);
+        await page.screenshot({path:`ci-output/web-ui-extraction-${label}.png`});
+      }
+    }
+    for(const [kind,input,code] of [
+      ['ordinary',imagePath,'MOTION_VIDEO_MISSING'],
+      ['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])},'MOTION_VIDEO_MISSING'],
+      ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])},null],
+      ['budget',oversized,'RESOURCE_LIMIT_EXCEEDED'],
+    ]) {
+      await analysisPicker(input);
+      staleExportCleared&&=await text(/已提取并发起视频下载/).count()===0;
+      const prior=downloads;
+      await driver.click('提取原始视频');
+      await text(/提取失败/).waitFor({state:'attached'});
+      const report=await text(/提取失败/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      check(label+':extract-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&
+        report.includes('阶段：')&&(!code||report.includes(code)));
+    }
+    check(label+':extract-clears-stale-report',staleExportCleared);
+    check(label+':extract-preserves-analysis-and-create-state',inspectionPreserved&&downloads===beforeExtraction+3&&
+      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==56||new Set(checks).size!==56) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==74||new Set(checks).size!==74) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 56 checks; shared Compose editor and read-only analysis under /livephoto/, two sizes, twelve audited downloads, no analysis downloads');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 74 checks; shared Compose editor, read-only analysis and exact video extraction under /livephoto/, two sizes, eighteen audited downloads, no analysis downloads');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

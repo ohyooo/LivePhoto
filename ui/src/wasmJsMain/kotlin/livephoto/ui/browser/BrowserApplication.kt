@@ -48,6 +48,15 @@ private fun outputBlob(bytes: ByteArray, mime: String): Blob {
     return browserBlob(values, mime)
 }
 
+private fun downloadBlob(blob: Blob, name: String) {
+    val url = browserObjectUrl(blob)
+    try {
+        val link = (document.createElement("a") as HTMLAnchorElement).apply { href = url; download = name }
+        document.body!!.appendChild(link)
+        try { link.click() } finally { link.remove() }
+    } finally { window.setTimeout({ browserRevokeUrl(url); null }, 60_000) }
+}
+
 public fun main() {
     browserRuntimeReady()
     ComposeViewport(document.getElementById("app")!!, configure = { isA11YEnabled = true }) {
@@ -93,6 +102,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val outputDescription = "浏览器下载"
     override val supportsVideoEditing = true
     override val supportsAnalysis = true
+    override val supportsVideoExtraction = true
+    override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
     override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
 
@@ -152,6 +163,21 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         return analyzeSelectedPhoto(DefaultLivePhotoCore(), browserBytes(file), Cancellation { job?.isActive == false })
     }
 
+    override suspend fun extractVideo(reference: String): CoreResult<ExtractedVideo> {
+        val file = files[reference] ?: error("请重新选择待检查照片")
+        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        return when (val result = prepareExtractedVideo(DefaultLivePhotoCore(), browserBytes(file), Cancellation { job?.isActive == false })) {
+            is CoreResult.Failure -> result
+            is CoreResult.Success -> {
+                val prepared = result.value
+                downloadBlob(outputBlob(prepared.bytes.toByteArray(), prepared.report.mime), "LivePhoto-video.${prepared.report.extension}")
+                CoreResult.Success(prepared.report)
+            }
+        }
+    }
+
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {
         val photo = files[image] ?: error("Select the image again")
         val movie = files[video] ?: error("Select the video again")
@@ -180,15 +206,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     val asset = result.value.output.assets.single()
                     val blob = outputBlob(output.committedAssets().getValue(asset.id).toByteArray(), asset.mime)
                     lastResult = blob to movie
-                    val url = browserObjectUrl(blob)
-                    try {
-                        val link = (document.createElement("a") as HTMLAnchorElement).apply {
-                            href = url
-                            download = "LivePhoto-${target.protocol.value}.jpg"
-                        }
-                        document.body!!.appendChild(link)
-                        try { link.click() } finally { link.remove() }
-                    } finally { window.setTimeout({ browserRevokeUrl(url); null }, 60_000) }
+                    downloadBlob(blob, "LivePhoto-${target.protocol.value}.jpg")
                     val operation = result.value.copy(output = MediaOutput(
                         listOf(asset.copy(readableSource = null, accessReference = "browser-download:${asset.id.value}")), result.value.output.receipt))
                     CoreResult.Success(CreatedPhoto(operation))

@@ -19,9 +19,12 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
     var report by rememberSaveable { mutableStateOf<String?>(null) }
     var failed by rememberSaveable { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
+    var extracting by remember { mutableStateOf(false) }
+    var exportReport by rememberSaveable { mutableStateOf<String?>(null) }
+    var exportFailed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val picker = platform.rememberPicker(MediaKind.LivePhoto) { selected ->
-        if (selected != null) { reference = selected; report = null; failed = false }
+        if (selected != null) { reference = selected; report = null; failed = false; exportReport = null; exportFailed = false }
     }
     val info by produceState<SelectedMediaInfo?>(null, reference, platform) {
         value = null
@@ -62,7 +65,34 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     }
                 }, enabled = enabled && !working && reference != null,
                     modifier = Modifier.fillMaxWidth().testTag("analyze")) {
-                    Text(if (working) "正在检查…" else "开始检查（只读）")
+                    Text(if (working && !extracting) "正在检查…" else "开始检查（只读）")
+                }
+                if (platform.supportsVideoExtraction) {
+                    Text("原始视频提取是单独操作：另存 MP4/MOV，不修改照片、不转码，不等于 Clean Split。")
+                    OutlinedButton(onClick = {
+                        val selected = reference ?: return@OutlinedButton
+                        scope.launch {
+                            working = true; extracting = true; onBusy(true); exportReport = null; exportFailed = false
+                            try {
+                                exportReport = when (val result = platform.extractVideo(selected)) {
+                                    is CoreResult.Success -> formatExtractedVideo(result.value, platform.videoExportSuccessMessage)
+                                    is CoreResult.Failure -> { exportFailed = true; formatVideoExtractionFailure(result.error) }
+                                }
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (error: Exception) {
+                                exportFailed = true
+                                exportReport = "提取或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查下载记录或相册，避免重复保存。"
+                            } finally { working = false; extracting = false; onBusy(false) }
+                        }
+                    }, enabled = enabled && !working && reference != null,
+                        modifier = Modifier.fillMaxWidth().testTag("extract-video")) {
+                        Text(if (working && extracting) "正在提取…" else "提取原始视频")
+                    }
+                    exportReport?.let { text ->
+                        Surface(color = if (exportFailed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
+                            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("extraction-report")) }
+                        }
+                    }
                 }
                 report?.let { text ->
                     Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {

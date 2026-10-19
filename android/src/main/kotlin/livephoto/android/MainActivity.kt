@@ -15,6 +15,8 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 LivePhotoScreen(analyze = { input ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).analyze(input)
+                }, extractVideo = { input ->
+                    AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).extractVideo(input)
                 }) { image, video, target ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core)
                         .create(image, video, target)

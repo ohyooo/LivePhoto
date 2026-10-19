@@ -15,6 +15,26 @@ import java.util.UUID
 /** App orchestration only. Protocol policy and serialization remain in the shared Core. */
 class AndroidCreateController(private val android: AndroidContext, private val core: LivePhotoCore) {
     data class Created(val uri: Uri, val operation: OperationResult)
+    data class Extracted(val uri: Uri, val report: livephoto.ui.ExtractedVideo)
+
+    suspend fun extractVideo(input: Uri): CoreResult<Extracted> = withContext(Dispatchers.IO) {
+        val job = currentCoroutineContext()[Job]
+        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        catch (limit: InputBudgetExceededException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
+                limit.message ?: "Video extraction input exceeds 32 MiB"))
+        }
+        when (val result = livephoto.ui.prepareExtractedVideo(core, bytes, Cancellation { job?.isActive == false })) {
+            is CoreResult.Failure -> result
+            is CoreResult.Success -> {
+                currentCoroutineContext().ensureActive()
+                val video = result.value
+                val name = "LivePhoto-video-${UUID.randomUUID()}.${video.report.extension}"
+                val uri = AndroidPhotoExporter(android.contentResolver).publishVideo(video.bytes.toByteArray(), name, video.report.mime)
+                CoreResult.Success(Extracted(uri, video.report))
+            }
+        }
+    }
 
     /** Read-only input adapter. No exporter, transaction, decoder or gallery write. */
     suspend fun analyze(input: Uri): CoreResult<AnalysisResult> = withContext(Dispatchers.IO) {

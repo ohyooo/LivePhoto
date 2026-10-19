@@ -28,6 +28,63 @@ class AndroidIntegrationTest {
         assertTrue(app.core.getMediaCapabilities().backendIds.isEmpty())
     }
 
+    @Test fun controllerExportsExactVideoToMediaStoreForAllThreeProfiles() = runBlocking {
+        val imageBytes = fixture("video.jpg")
+        val videoBytes = fixture("video.mp4")
+        val carrier = app.getFileStreamPath("extract-${UUID.randomUUID()}.jpg")
+        try {
+            for ((protocol, profile) in listOf(ProtocolIds.Oplus to "jpeg-no-tail", ProtocolIds.GoogleV2 to "jpeg", ProtocolIds.GoogleV1 to "jpeg")) {
+                val image = MemoryBinarySource(Bytes(imageBytes), SourceId("extract-image"))
+                val video = MemoryBinarySource(Bytes(videoBytes), SourceId("extract-video"))
+                val output = MemoryOutputTransaction(context, "extract-setup")
+                var created: OperationResult? = null
+                var published: Uri? = null
+                try {
+                    created = success(app.core.create(CreateRequest(image, video, ProtocolSelector(protocol, ProfileId(profile)), output = output, context = context)))
+                    val sourceBytes = output.committedAssets().getValue(created.output.assets.single().id).toByteArray()
+                    carrier.writeBytes(sourceBytes)
+                    val extracted = success(AndroidCreateController(app, app.core).extractVideo(Uri.fromFile(carrier)))
+                    published = extracted.uri
+                    val saved = app.contentResolver.openInputStream(extracted.uri)!!.use { readBounded(it, videoBytes.size) {} }
+                    assertContentEquals(videoBytes, saved)
+                    assertContentEquals(sourceBytes, carrier.readBytes())
+                    assertEquals(sha(videoBytes), extracted.report.digest.value)
+                    assertEquals("video/mp4", extracted.report.mime)
+                    assertTrue(extracted.report.preservation.records.any {
+                        it.guarantee == Guarantee.ExactExtraction && it.outcome == GuaranteeOutcome.Verified
+                    })
+                    app.contentResolver.query(extracted.uri, arrayOf(MediaStore.MediaColumns.IS_PENDING,
+                        MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.MIME_TYPE), null, null, null)!!.use {
+                        assertTrue(it.moveToFirst())
+                        assertEquals(0, it.getInt(0))
+                        assertEquals("Movies/LivePhoto/", it.getString(1))
+                        assertEquals("video/mp4", it.getString(2))
+                    }
+                } finally {
+                    published?.let { app.contentResolver.delete(it, null, null) }
+                    created?.output?.assets?.forEach { it.readableSource?.close() }
+                    image.close(); video.close()
+                }
+            }
+        } finally { carrier.delete() }
+    }
+
+    @Test fun controllerExtractionRejectsNonLiveAndMalformedInputsWithoutPublication() = runBlocking {
+        val file = app.getFileStreamPath("extract-rejected-${UUID.randomUUID()}.jpg")
+        fun countVideos(): Int = app.contentResolver.query(
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-video-%"), null)!!.use { it.count }
+        try {
+            for (bytes in listOf(fixture("video.jpg"), byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0))) {
+                file.writeBytes(bytes)
+                val count = countVideos()
+                assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).extractVideo(Uri.fromFile(file)))
+                assertEquals(count, countVideos())
+                assertContentEquals(bytes, file.readBytes())
+            }
+        } finally { file.delete() }
+    }
+
     @Test fun controllerKeepsNonCanonicalCandidateAndOrdinaryPhotoInputsReadOnly() = runBlocking {
         val file = app.getFileStreamPath("analysis-${UUID.randomUUID()}.jpg")
         try {

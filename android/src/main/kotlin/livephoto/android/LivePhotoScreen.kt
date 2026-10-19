@@ -16,13 +16,16 @@ import livephoto.ui.MediaKind
 internal fun LivePhotoScreen(
     describe: (suspend (Uri) -> SelectedMediaInfo)? = null,
     analyze: (suspend (Uri) -> CoreResult<AnalysisResult>)? = null,
+    extractVideo: (suspend (Uri) -> CoreResult<AndroidCreateController.Extracted>)? = null,
     create: suspend (Uri, Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Created>,
 ) {
     val context = LocalContext.current.applicationContext
-    val platform = remember(context, describe, analyze, create) {
+    val platform = remember(context, describe, analyze, extractVideo, create) {
         object : LivePhotoUiPlatform {
             override val outputDescription = "Pictures/LivePhoto"
             override val supportsAnalysis = analyze != null
+            override val supportsVideoExtraction = extractVideo != null
+            override val videoExportSuccessMessage = "已提取并保存到 Movies/LivePhoto。"
             @Composable
             override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit {
                 val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onResult(it?.toString()) }
@@ -32,6 +35,12 @@ internal fun LivePhotoScreen(
                 describe?.invoke(Uri.parse(reference)) ?: readSelectedMediaInfo(context.contentResolver, Uri.parse(reference))
             override suspend fun analyze(reference: String): CoreResult<AnalysisResult> =
                 analyze?.invoke(Uri.parse(reference)) ?: super.analyze(reference)
+            override suspend fun extractVideo(reference: String): CoreResult<livephoto.ui.ExtractedVideo> =
+                when (val result = extractVideo?.invoke(Uri.parse(reference))) {
+                    null -> super.extractVideo(reference)
+                    is CoreResult.Failure -> result
+                    is CoreResult.Success -> CoreResult.Success(result.value.report)
+                }
             override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> =
                 when (val result = create(Uri.parse(image), Uri.parse(video), target)) {
                     is CoreResult.Failure -> result
