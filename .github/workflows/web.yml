@@ -56,6 +56,12 @@ jobs:
           restore-keys: |
             web-gradle-tasks-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}-
 
+      - name: Cache Kotlin Wasm optimizer
+        uses: actions/cache@v6
+        with:
+          path: ~/.gradle/binaryen
+          key: web-binaryen-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+
       - name: Build production library and Compose website
         shell: bash
         run: |

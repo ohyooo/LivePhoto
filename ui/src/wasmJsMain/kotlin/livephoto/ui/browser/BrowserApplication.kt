@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class, kotlin.js.ExperimentalWasmJsInterop::class)
 
 package livephoto.ui.browser
 
@@ -124,7 +124,6 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     currentResult(reference)
                 } else currentResult(null)
                 input.value = ""
-                null
             }
             document.body!!.appendChild(input)
             onDispose { input.onchange = null; input.remove() }

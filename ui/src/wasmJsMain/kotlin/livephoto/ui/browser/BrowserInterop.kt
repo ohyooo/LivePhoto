@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
+
 package livephoto.ui.browser
 
 import kotlin.js.JsAny

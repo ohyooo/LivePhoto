@@ -12,7 +12,7 @@ for(const [directory,document,scope] of [
   if(manifest.commit!==process.env.GITHUB_SHA||String(manifest.run)!==process.env.GITHUB_RUN_ID||manifest.scope!==scope||!Array.isArray(manifest.files)||!manifest.files.length)throw Error('Wrong build identity: '+document);
   const seen=new Set();
   if(directory==='web-ui'&&(manifest.kotlinRuntime!=='wasmJs'||!manifest.applicationWasm?.length||
-    manifest.applicationWasm.some(name=>name.includes('/')||!name.endsWith('.wasm')||name.includes('skiko')||!manifest.files.some(file=>file.path===name))))throw Error('Missing Kotlin/Wasm Compose application');
+    manifest.applicationWasm.some(name=>!/^livephoto-ui\.[0-9a-f]+\.wasm$/.test(name)||!manifest.files.some(file=>file.path===name))))throw Error('Missing Kotlin/Wasm Compose application');
   for(const file of manifest.files) {
     const path=resolve(base,file.path);
     if(isAbsolute(file.path)||!path.startsWith(base+sep)||seen.has(file.path)||/\.(?:jpe?g|mp4|mov|heic|heif|apk|klib)$/i.test(file.path))throw Error('Unsafe/duplicate/media build asset');

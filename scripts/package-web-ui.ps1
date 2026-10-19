@@ -37,7 +37,7 @@ foreach ($name in @('index.html', 'livephoto-ui.js')) {
     if (-not (Test-Path (Join-Path $destination $name))) { throw "Missing browser entry: $name" }
 }
 $files = @(Get-ChildItem $destination -Recurse -File)
-$applicationWasm = @($files | Where-Object { $_.DirectoryName -eq (Resolve-Path $destination).Path -and $_.Extension -eq '.wasm' -and $_.Name -notmatch 'skiko' })
+$applicationWasm = @($files | Where-Object { $_.DirectoryName -eq (Resolve-Path $destination).Path -and $_.Name -match '^livephoto-ui\.[0-9a-f]+\.wasm$' })
 if ($applicationWasm.Count -eq 0) { throw 'Missing Kotlin/Wasm application binary (Skiko/FFmpeg alone are not sufficient).' }
 if ($files | Where-Object { $_.Extension -match '^\.(jpg|jpeg|mp4|mov|heic|heif|apk|klib)$' }) { throw 'Web UI package contains media/test inputs.' }
 [ordered]@{
