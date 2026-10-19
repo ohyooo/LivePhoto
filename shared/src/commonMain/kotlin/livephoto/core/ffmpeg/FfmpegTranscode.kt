@@ -64,20 +64,20 @@ internal object FfmpegTranscode {
         }
     }
     private fun verifyTrace(trace: String, track: VideoTrack) {
-        val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$").findAll(trace).map { it.value }.toList()
+        val frames = Regex("^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).map { it.value }.toList()
         if (frames.size != track.samples.size) fail("POSTCONDITION_FAILED", "Decoder did not return every source presentation frame", Stage.Transcode)
         for ((line, sample) in frames.zip(track.samples)) {
             if (Regex("\\bpts:\\s*(-?\\d+)").find(line)?.groupValues?.get(1)?.toLongOrNull() != sample.presentationTime ||
                 !line.contains("s:${track.width}x${track.height}") || !line.contains("sar:1/1") || !line.contains("i:P") || !line.contains("fmt:yuv420p"))
                 fail("HDR_PRESERVATION_UNAVAILABLE", "Decoded frame time/transform/depth is outside the authorized profile", Stage.Transcode)
         }
-        val colors = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*color_range:[^\\r\\n]*$").findAll(trace).map { it.value }.toList()
+        val colors = Regex("^.*Parsed_showinfo[^\\r\\n]*color_range:[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).map { it.value }.toList()
         if (colors.size != frames.size || colors.any { !it.contains("color_range:tv color_space:bt709 color_primaries:bt709 color_trc:bt709") })
             fail("HDR_PRESERVATION_UNAVAILABLE", "Every decoded frame must prove known preserved BT.709 limited SDR", Stage.Transcode)
         // x264's own version/options SEI is encoded-data annotation, rewritten by the explicit encoder.
-        val side = Regex("(?m)^.*Parsed_showinfo.*side data[^\\r\\n]*$").findAll(trace).map { it.value }.toList()
-        val uuids = Regex("(?m)^.*Parsed_showinfo.*UUID=[^\\r\\n]*$").findAll(trace).map { it.value.substringAfter("UUID=").trim().replace("-", "").lowercase() }.toList()
-        val data = Regex("(?m)^.*Parsed_showinfo.*User Data=[^\\r\\n]*$").findAll(trace).map { it.value.substringAfter("User Data=").trim() }.toList()
+        val side = Regex("^.*Parsed_showinfo.*side data[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).map { it.value }.toList()
+        val uuids = Regex("^.*Parsed_showinfo.*UUID=[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).map { it.value.substringAfter("UUID=").trim().replace("-", "").lowercase() }.toList()
+        val data = Regex("^.*Parsed_showinfo.*User Data=[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).map { it.value.substringAfter("User Data=").trim() }.toList()
         if (side.any { !it.contains("User Data Unregistered") } || uuids.size != side.size || data.size != side.size ||
             uuids.any { it != "dc45e9bde6d948b7962cd820d923eeef" } || data.any { !it.startsWith("7832363420", ignoreCase = true) })
             fail("UNSAFE_METADATA_REWRITE", "Unclassified decoded side data cannot be silently removed by encoding", Stage.Transcode)

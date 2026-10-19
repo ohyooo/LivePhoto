@@ -69,7 +69,7 @@ internal object FfmpegFrame {
                     "-abort_on", "empty_output+empty_output_stream", "-protocol_whitelist", "file", "-err_detect", "explode",
                     "-f", "mjpeg", "-threads", "1", "-noautorotate", "-i", output, "-map", "0:v",
                     "-vf", "showinfo=checksum=0", "-fps_mode", "passthrough", "-f", "null", "-"), "DECODE_FAILED", Stage.Verify)
-                val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$")
+                val frames = Regex("^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$", RegexOption.MULTILINE)
                     .findAll(decodedJpeg.output).map { it.value }.toList()
                 if (frames.size != 1 || !frames.single().contains("s:${track.width}x${track.height}"))
                     fail("POSTCONDITION_FAILED", "Encoded JPEG must decode to exactly one frame with the selected dimensions", Stage.Verify)
@@ -87,7 +87,7 @@ internal object FfmpegFrame {
     }
 
     private fun verifyTrace(trace: String, pts: Long, track: VideoTrack, encoded: Boolean) {
-        val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$").findAll(trace).map { it.value }.toList()
+        val frames = Regex("^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).map { it.value }.toList()
         if (frames.size != 1 || Regex("\\bpts:\\s*(-?\\d+)").find(frames.single())?.groupValues?.get(1)?.toLongOrNull() != pts ||
             !frames.single().contains("s:${track.width}x${track.height}") || !frames.single().contains("sar:1/1") || !frames.single().contains("i:P"))
             fail("POSTCONDITION_FAILED", "Decoder trace did not prove the exact progressive square-pixel frame", Stage.DecodeFrame)
@@ -95,7 +95,7 @@ internal object FfmpegFrame {
         val color = if (encoded) "color_range:pc color_space:bt470bg color_primaries:bt709 color_trc:iec61966-2-1" else "color_range:tv color_space:bt709 color_primaries:bt709 color_trc:bt709"
         if (!frames.single().contains(format)) fail("HDR_PRESERVATION_UNAVAILABLE", "Decoded pixel format is outside the authorized eight-bit profile", Stage.DecodeFrame)
         if (!trace.contains(color)) fail("HDR_PRESERVATION_UNAVAILABLE", "Decoded color properties do not match the authorized SDR profile", Stage.DecodeFrame)
-        if (Regex("(?m)^.*Parsed_showinfo.*side data[^\\r\\n]*$").findAll(trace).any { !it.value.contains("User Data Unregistered") })
+        if (Regex("^.*Parsed_showinfo.*side data[^\\r\\n]*$", RegexOption.MULTILINE).findAll(trace).any { !it.value.contains("User Data Unregistered") })
             fail("HDR_PRESERVATION_UNAVAILABLE", "Decoded frame has unclassified auxiliary side data", Stage.DecodeFrame)
     }
 }

@@ -51,7 +51,7 @@ public class FfmpegMediaBackend(public val executable: String, private val runti
                 (if (heic) listOf("-vf", "showinfo=checksum=0", "-fps_mode", "passthrough") else emptyList()) + listOf("-f", "null", "-"),
                 errorCode = "DECODE_FAILED")
             if (heic) {
-                val frames = Regex("(?m)^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$").findAll(result.output).map { it.value }.toList()
+                val frames = Regex("^.*Parsed_showinfo[^\\r\\n]*\\bn:\\s*\\d+[^\\r\\n]*$", RegexOption.MULTILINE).findAll(result.output).map { it.value }.toList()
                 val dimensions = frames.singleOrNull()?.let { Regex("\\bs:(\\d+)x(\\d+)\\b").find(it) }
                 if (dimensions == null || dimensions.groupValues[1].toUIntOrNull() != facts.width || dimensions.groupValues[2].toUIntOrNull() != facts.height)
                     fail("POSTCONDITION_FAILED", "HEIF decode must prove exactly one frame with the declared primary dimensions", Stage.Validate)
