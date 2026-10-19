@@ -442,6 +442,14 @@ try {
 
     const repairReport=()=>text(/(?:修复预览完成|无需修改（未写入）|修复被阻止|修复失败|已应用修复并发起下载)/);
     const readRepairReport=()=>repairReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+    // Compose canvas buttons do not expose reliable HTML disabled attributes.
+    // Verify the actual hit target cannot publish or change the review instead.
+    const repairCannotApply=async()=>{
+      const before=await repairReport().count()?await readRepairReport():null,prior=downloads;
+      await driver.click('应用修复并另存');await page.waitForTimeout(200);
+      const after=await repairReport().count()?await readRepairReport():null;
+      return downloads===prior&&before===after;
+    };
     const damageField=(output,target,key=false)=>{
       const damaged=Buffer.from(output),header=damaged.subarray(0,damaged.length-video.length).toString('latin1');
       const expression=key?/\b(?:[A-Za-z_][\w.-]*:)?MicroVideoPresentationTimestampUs=(["'])([1-9][0-9]*)\1/:
@@ -454,23 +462,23 @@ try {
     };
     const previewRepair=async input=>{
       await analysisPicker(input);
-      if(await button('应用修复并另存').isEnabled())throw Error('Repair must require a fresh preview');
+      if(!await repairCannotApply())throw Error('Repair must require a fresh preview');
       await driver.click('预览安全修复（只读）');
       await repairReport().waitFor({state:'attached'});
       return readRepairReport();
     };
     const beforeRepair=downloads;
-    let repairAnalysisPreserved=true;
+    let repairAnalysisPreserved=true,repairedV1Digest;
     for(const {target,output} of analysisInputs.filter(p=>p.target!=='oplus.olive')) {
       const prior=downloads;
       const noop=await previewRepair({name:'valid-'+target+'.jpg',mimeType:'image/jpeg',buffer:output});
-      check(label+':repair-'+target+'-valid-no-output',downloads===prior&&noop.includes('无需修改（未写入）')&&!await button('应用修复并另存').isEnabled());
+      check(label+':repair-'+target+'-valid-no-output',downloads===prior&&noop.includes('无需修改（未写入）')&&await repairCannotApply());
       const damaged=damageField(output,target);
       const inspection=await analyze({name:'damaged-'+target+'.jpg',mimeType:'image/jpeg',buffer:damaged},/只读检查完成/);
       await driver.click('预览安全修复（只读）');await repairReport().waitFor({state:'attached'});
       const preview=await readRepairReport();
       check(label+':repair-'+target+'-preview-no-output',downloads===prior&&preview.includes('修复预览完成（未写入）')&&
-        preview.includes(createHash('sha256').update(damaged).digest('hex'))&&preview.includes('已应用：0')&&await button('应用修复并另存').isEnabled());
+        preview.includes(createHash('sha256').update(damaged).digest('hex'))&&preview.includes('已应用：0'));
       const pending=page.waitForEvent('download');pending.catch(()=>{});
       await driver.click('应用修复并另存');
       const download=await pending;if(await download.failure())throw Error('Repaired photo download failed');
@@ -487,28 +495,29 @@ try {
       check(label+':repair-'+target+'-applied-preserving',audit.valid&&audit.digest===videoHash&&downloads===prior+1&&
         report.includes(createHash('sha256').update(repaired).digest('hex'))&&report.includes('ImageDataPreserving: Verified')&&
         report.includes('BitstreamPreserving: Verified')&&download.suggestedFilename()==='LivePhoto-repaired.jpg'&&
-        !await button('应用修复并另存').isEnabled());
+        await repairCannotApply());
       repairAnalysisPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
       if(target==='google.microvideo.v1') {
+        repairedV1Digest=createHash('sha256').update(repaired).digest('hex');
         await page.mouse.move((viewport.width-Math.min(viewport.width,840))/2+8,viewport.height/2);
         await page.mouse.wheel(0,180);await page.waitForTimeout(350);
         await page.screenshot({path:`ci-output/web-ui-repair-${label}.png`});
       }
       const again=await previewRepair({name:'repaired-'+target+'.jpg',mimeType:'image/jpeg',buffer:repaired});
-      check(label+':repair-'+target+'-idempotent-no-output',downloads===prior+1&&again.includes('无需修改（未写入）')&&!await button('应用修复并另存').isEnabled());
+      check(label+':repair-'+target+'-idempotent-no-output',downloads===prior+1&&again.includes('无需修改（未写入）')&&await repairCannotApply());
     }
     const oplus=analysisInputs.find(p=>p.target==='oplus.olive');
     let oplusRefused=true;
     for(const output of [oplus.output,damageField(oplus.output,oplus.target)]) {
       const prior=downloads;
       const report=await previewRepair({name:'oplus-repair.jpg',mimeType:'image/jpeg',buffer:output});
-      oplusRefused&&=downloads===prior&&report.includes('REPAIR_AMBIGUOUS')&&!await button('应用修复并另存').isEnabled();
+      oplusRefused&&=downloads===prior&&report.includes('REPAIR_AMBIGUOUS')&&await repairCannotApply();
     }
     check(label+':repair-oplus-refused-no-output',oplusRefused);
     const v1=analysisInputs.find(p=>p.target==='google.microvideo.v1');
     const invalidKey=damageField(v1.output,v1.target,true),priorBlocked=downloads;
     const blocked=await previewRepair({name:'blocked-key.jpg',mimeType:'image/jpeg',buffer:invalidKey});
-    check(label+':repair-blocked-key-no-output',downloads===priorBlocked&&blocked.includes('修复被阻止（未写入）')&&!await button('应用修复并另存').isEnabled());
+    check(label+':repair-blocked-key-no-output',downloads===priorBlocked&&blocked.includes('修复被阻止（未写入）')&&await repairCannotApply());
     const damagedV1=damageField(v1.output,v1.target);
     await previewRepair({name:'changed-after-preview.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     // Simulate a changing IO provider only, not an app/semantic handler. Real UI
@@ -525,7 +534,7 @@ try {
     const priorStale=downloads;
     try {
       await driver.click('应用修复并另存');await text(/修复失败/).waitFor({state:'attached'});
-      check(label+':repair-source-changed-no-output',downloads===priorStale&&(await readRepairReport()).includes('SOURCE_CHANGED')&&!await button('应用修复并另存').isEnabled());
+      check(label+':repair-source-changed-no-output',downloads===priorStale&&(await readRepairReport()).includes('SOURCE_CHANGED')&&await repairCannotApply());
     } finally {await page.evaluate(()=>globalThis.restoreRepairRead());}
     for(const [kind,input] of [
       ['ordinary',imagePath],['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
@@ -533,20 +542,28 @@ try {
     ]) {
       const prior=downloads,report=await previewRepair(input);
       check(label+':repair-'+kind+'-no-output',downloads===prior&&report.includes('修复失败')&&report.includes('错误码：')&&
-        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&!await button('应用修复并另存').isEnabled());
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&await repairCannotApply());
     }
     const selectionPreview=await previewRepair({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
-    const cancelKept=await readRepairReport()===selectionPreview&&await button('应用修复并另存').isEnabled();
+    const cancelKept=await readRepairReport()===selectionPreview;
+    const cancelDownload=page.waitForEvent('download');cancelDownload.catch(()=>{});
+    await driver.click('应用修复并另存');
+    const confirmedDownload=await cancelDownload;
+    if(await confirmedDownload.failure())throw Error('Repair download after cancelled selection failed');
+    const confirmedBytes=await readFile(await confirmedDownload.path());
+    await text(/已应用修复并发起下载/).waitFor({state:'attached'});
+    const cancelApplied=confirmedDownload.suggestedFilename()==='LivePhoto-repaired.jpg'&&
+      createHash('sha256').update(confirmedBytes).digest('hex')===repairedV1Digest;
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
-    check(label+':repair-selection-state-isolated',cancelKept&&await repairReport().count()===0&&!await button('应用修复并另存').isEnabled());
-    check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&
+    check(label+':repair-selection-state-isolated',cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
+    check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+3&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
   if(checks.length!==156||new Set(checks).size!==156) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 156 checks; shared Compose operations and reviewed safe repair under /livephoto/, two sizes, forty-eight audited downloads, no-op/blocked/stale inputs never published');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 156 checks; shared Compose operations and reviewed safe repair under /livephoto/, two sizes, fifty audited downloads, no-op/blocked/stale inputs never published');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {
