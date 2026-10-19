@@ -189,7 +189,7 @@ try {
       const originalVideo=coreBefore.streams.find(s=>s.codec_type==='video'),outputVideo=after.streams.find(s=>s.codec_type==='video');
       const originalHashes=new Set(coreBefore.packets.filter(p=>p.stream_index===originalVideo.index).map(p=>p.data_hash));
       check('core-transcode-explicit-audio-copy',outputVideo.codec_name==='h264'&&after.packets.some(p=>p.stream_index===outputVideo.index&&!originalHashes.has(p.data_hash))&&
-        value.report.execution.some(e=>e.transcoded&&e.hardwareUsed===false&&e.inputFacts?.width===64&&e.outputFacts?.tracks.length===2));
+        value.report.execution.some(e=>e.transcoded&&e.hardwareUsed===false&&e.inputFacts?.tracks.some(t=>t.kind==='vide'&&t.width===64)&&e.outputFacts?.tracks.length===2));
     }
   }
   const frame=await page.evaluate(async data=>{
