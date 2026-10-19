@@ -664,7 +664,7 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 只有显式 `authorizeTranscode: true` 才允许视频编码，音频始终 copy。输出 `assets` 与 `report` 包含 Core 保真及执行记录；裁剪报告实际边界，probe 的解码成功仍是 Partial，而非完整兼容认证。返回 Blob 不会自行下载。独立 Core 抽帧不等同于播放器当前画面截图；现有播放器预处理尚未全部迁移，不宣称两个入口支持范围相同。实际验收见当前提交 CI。
 
-已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
+已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。部分 OPPO 文件修改时间字段长度会移动未经验证的 EXIF，因此保留 `UNSAFE_METADATA_REWRITE` 拒绝，不输出、不删除 EXIF 绕过；不是全部可创建文件都能修改关键时间。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
 
 ### 诊断日志
 

@@ -112,13 +112,14 @@ try {
   }
   const coreResults=await page.evaluate(async()=>{
     const {createMediaBackend}=await import('/api/livephoto.mjs');
-    const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs'});
+    const diagnostics=[];
+    const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',onDiagnostic:entry=>diagnostics.push(entry)});
     const file=await(await fetch('/core-fixture')).blob();
     const hash=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');
     const before=await hash(file),results={};
     for(const [action,options] of [['probe',undefined],['remux',undefined],['trim',{start:.4,end:1.6}],['extractFrame',{start:.4}],['transcode',{authorizeTranscode:true}]]) {
       const value=await backend[action](file,options);
-      if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message);
+      if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message+' '+JSON.stringify(diagnostics.slice(-3)));
       results[action]={...value,assets:undefined,blob:undefined,bytes:value.blob?Array.from(new Uint8Array(await value.blob.arrayBuffer())):null};
     }
     const forbidden=await backend.transcode(file);

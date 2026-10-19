@@ -21,23 +21,24 @@ class AndroidIntegrationTest {
     private val context = Context(Limits(32_000_000u, 48_000_000u))
     private fun fixture(name: String): ByteArray = InstrumentationRegistry.getInstrumentation().context.assets.open("reference/$name").use { it.readBytes() }
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
-    @Test fun controllerSetsOnlyKeyMetadataAndPublishesVerifiedJpegForThreeProfiles() = runBlocking {
+    @Test fun controllerSetsOnlyKeyMetadataAndPublishesVerifiedJpegForGoogleProfiles() = runBlocking {
         val file = app.getFileStreamPath("key-${UUID.randomUUID()}.jpg")
         try {
-            for (target in livephoto.ui.ConversionTarget.entries) {
+            for (target in listOf(livephoto.ui.ConversionTarget.GoogleV1, livephoto.ui.ConversionTarget.GoogleV2)) {
                 val original = syntheticRepairCarrier(target)
                 file.writeBytes(original)
-                val result = success(AndroidCreateController(app, app.core).setPhotoKey(Uri.fromFile(file), Time.Zero))
+                val requested = Time(667, 1000u)
+                val result = success(AndroidCreateController(app, app.core).setPhotoKey(Uri.fromFile(file), requested))
                 try {
                     val bytes = app.contentResolver.openInputStream(result.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
                     assertEquals(sha(bytes), result.report.digest.value)
-                    assertEquals(0, result.report.actual.compareTo(Time.Zero))
+                    assertTrue(result.report.actual >= Time(567, 1000u) && result.report.actual <= Time(767, 1000u))
                     assertTrue(result.report.preservation.records.filter { it.guarantee in setOf(Guarantee.ImageDataPreserving, Guarantee.BitstreamPreserving) }.all { it.outcome == GuaranteeOutcome.Verified && it.sourceDigest == it.outputDigest })
                     val source = MemoryBinarySource(Bytes(bytes), SourceId("key-output"))
                     val transaction = MemoryOutputTransaction(context, "key-extract")
                     var extracted: OperationResult? = null
                     try {
-                        assertEquals(0, success(app.core.getKeyPhotoPosition(ReadRequest(SourceSet.Single(source), context))).position!!.compareTo(Time.Zero))
+                        assertEquals(0, success(app.core.getKeyPhotoPosition(ReadRequest(SourceSet.Single(source), context))).position!!.compareTo(result.report.actual))
                         extracted = success(app.core.extract(ExtractRequest(SourceSet.Single(source), emptyList(), output = transaction, context = context)))
                         assertContentEquals(fractionalAudioVideo(), transaction.committedAssets().getValue(extracted.output.assets.single().id).toByteArray())
                     } finally { extracted?.output?.assets?.forEach { it.readableSource?.close() }; source.close() }
@@ -55,6 +56,11 @@ class AndroidIntegrationTest {
             "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-key-%"), null)!!.use { it.count } }
         val before = count()
         try {
+            val oplus = syntheticRepairCarrier(livephoto.ui.ConversionTarget.Oplus)
+            file.writeBytes(oplus)
+            val refused = assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).setPhotoKey(Uri.fromFile(file), Time(667, 1000u)))
+            assertEquals("UNSAFE_METADATA_REWRITE", refused.error.code.value)
+            assertContentEquals(oplus, file.readBytes()); assertEquals(before, count())
             for (bytes in listOf(syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1), conversionImage(), byteArrayOf(0, 1, 2, 3))) {
                 file.writeBytes(bytes)
                 assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).setPhotoKey(Uri.fromFile(file), Time(999, 1u)))

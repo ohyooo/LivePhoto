@@ -23,8 +23,12 @@ export async function executeCoreFfmpeg(argsJson,input,previousOutput,outputName
     await engine.load({coreURL:new URL('vendor/core/ffmpeg-core.js',base).href,wasmURL:new URL('vendor/core/ffmpeg-core.wasm',base).href});
     await engine.writeFile('input.bin',new Uint8Array(input.buffer,input.byteOffset,input.byteLength));
     if(previousOutput)await engine.writeFile(outputName,new Uint8Array(previousOutput.buffer,previousOutput.byteOffset,previousOutput.byteLength));
-    // ffmpeg.wasm prepends -y; the Core's -n still prevents accidental overwrite.
-    result.code=await engine.exec(args,timeoutMillis);
+    // The wrapper prepends -y, which conflicts with Core's external-process -n.
+    // Emulate -n against this fresh, private MEMFS instead; never permit input
+    // overwrite or replacement of a previous verified output.
+    if(!['-',outputName].includes(args.at(-1))||
+      (args.includes('-n')&&previousOutput&&args.at(-1)===outputName))throw Error('Refusing private output overwrite');
+    result.code=await engine.exec(args.filter(arg=>arg!=='-n'),timeoutMillis);
     if(result.code===0&&args.at(-1)===outputName){
       const bytes=await engine.readFile(outputName);
       if(bytes.byteLength>limit){result.outputLimited=true;return;}

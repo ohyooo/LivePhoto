@@ -62,4 +62,7 @@ export interface BrowserMediaBackend {
   transcode(input: Blob, options?: { authorizeTranscode?: boolean }): Promise<WebResult>;
 }
 /** Optional same-origin runtime + vendor assets must be hosted separately. Finite Experimental profiles. */
-export function createMediaBackend(options?: { runtimeUrl?: string | URL; signal?: AbortSignal }): BrowserMediaBackend;
+export function createMediaBackend(options?: { runtimeUrl?: string | URL; signal?: AbortSignal;
+  /** Opt-in bounded diagnostics may contain private metadata; do not upload automatically. */
+  onDiagnostic?: (value: {code: number | null; output: string; cancelled: boolean; timedOut: boolean; ioFailed: boolean}) => void;
+}): BrowserMediaBackend;

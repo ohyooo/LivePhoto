@@ -572,6 +572,12 @@ try {
     for(const {target,output} of analysisInputs) {
       const inspection=await analyze({name:'key-'+target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       await enterKey('0.47');
+      if(target==='oplus.olive') {
+        const prior=downloads;await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
+        check(label+':key-'+target+'-refused',downloads===prior&&(await readKeyReport()).includes('UNSAFE_METADATA_REWRITE'));
+        keyAnalysisPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+        continue;
+      }
       const pending=page.waitForEvent('download');pending.catch(()=>{});
       await driver.click('修改关键照片时间并另存');
       const download=await pending;if(await download.failure())throw Error('Key photo download failed');
@@ -610,13 +616,13 @@ try {
     }
     await analysisPicker({name:'key-reselect.jpg',mimeType:'image/jpeg',buffer:v1.output});
     check(label+':key-selection-state-isolated',await keyReport().count()===0);
-    check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+3&&
+    check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+2&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
   if(checks.length!==178||new Set(checks).size!==178) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 178 checks; shared Compose key editing and reviewed safe repair under /livephoto/, two sizes, fifty-six audited downloads, no-op/blocked/stale inputs never published');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 178 checks; shared Compose key editing and reviewed safe repair under /livephoto/, two sizes, fifty-four audited downloads, no-op/blocked/stale/unsafe inputs never published');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {
