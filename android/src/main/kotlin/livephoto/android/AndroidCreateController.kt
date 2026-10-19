@@ -17,6 +17,28 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     data class Created(val uri: Uri, val operation: OperationResult)
     data class Extracted(val uri: Uri, val report: livephoto.ui.ExtractedVideo)
 
+    /** Preparation is memory-only. Each later export is an explicit single-file action. */
+    suspend fun cleanSplit(input: Uri): CoreResult<livephoto.ui.PreparedCleanSplit> = withContext(Dispatchers.IO) {
+        val job = currentCoroutineContext()[Job]
+        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        catch (limit: InputBudgetExceededException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
+                limit.message ?: "Clean split input exceeds 32 MiB"))
+        }
+        livephoto.ui.prepareCleanSplit(core, bytes, Cancellation { job?.isActive == false })
+    }
+
+    suspend fun saveSplitFile(file: livephoto.ui.SplitFile): Uri = withContext(Dispatchers.IO) {
+        currentCoroutineContext().ensureActive()
+        val exporter = AndroidPhotoExporter(android.contentResolver)
+        val name = "LivePhoto-clean-${UUID.randomUUID()}.${file.extension}"
+        when (file.mime) {
+            "image/jpeg" -> { require(file.extension == "jpg"); exporter.publish(file.bytes.toByteArray(), name) }
+            "video/mp4", "video/quicktime" -> exporter.publishVideo(file.bytes.toByteArray(), name, file.mime)
+            else -> error("Only prepared JPEG/MP4/MOV outputs may be saved")
+        }
+    }
+
     suspend fun extractVideo(input: Uri): CoreResult<Extracted> = withContext(Dispatchers.IO) {
         val job = currentCoroutineContext()[Job]
         val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }

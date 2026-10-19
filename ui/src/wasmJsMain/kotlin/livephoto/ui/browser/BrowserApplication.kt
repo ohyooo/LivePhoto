@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlinx.coroutines.await
+import kotlinx.coroutines.ensureActive
 import org.w3c.dom.HTMLAnchorElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLElement
@@ -103,6 +104,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val supportsVideoEditing = true
     override val supportsAnalysis = true
     override val supportsVideoExtraction = true
+    override val supportsCleanSplit = true
     override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
     override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
@@ -176,6 +178,20 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 CoreResult.Success(prepared.report)
             }
         }
+    }
+
+    override suspend fun cleanSplit(reference: String): CoreResult<PreparedCleanSplit> {
+        val file = files[reference] ?: error("请重新选择待检查照片")
+        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        return prepareCleanSplit(DefaultLivePhotoCore(), browserBytes(file), Cancellation { job?.isActive == false })
+    }
+
+    override suspend fun saveSplitFile(file: SplitFile): String {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        downloadBlob(outputBlob(file.bytes.toByteArray(), file.mime), "LivePhoto-clean.${file.extension}")
+        return "${file.mime}：已发起下载，请检查下载记录；另一文件需单独保存。"
     }
 
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {

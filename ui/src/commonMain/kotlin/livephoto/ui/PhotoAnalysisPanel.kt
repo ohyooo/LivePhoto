@@ -16,17 +16,19 @@ import livephoto.core.CoreResult
 internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean, onBusy: (Boolean) -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     var reference by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectionRevision by rememberSaveable { mutableStateOf(0) }
     var report by rememberSaveable { mutableStateOf<String?>(null) }
     var failed by rememberSaveable { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
     var extracting by remember { mutableStateOf(false) }
+    var splitting by remember { mutableStateOf(false) }
     var exportReport by rememberSaveable { mutableStateOf<String?>(null) }
     var exportFailed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val picker = platform.rememberPicker(MediaKind.LivePhoto) { selected ->
-        if (selected != null) { reference = selected; report = null; failed = false; exportReport = null; exportFailed = false }
+        if (selected != null) { selectionRevision++; reference = selected; report = null; failed = false; exportReport = null; exportFailed = false }
     }
-    val info by produceState<SelectedMediaInfo?>(null, reference, platform) {
+    val info by produceState<SelectedMediaInfo?>(null, reference, selectionRevision, platform) {
         value = null
         try { value = reference?.let { platform.describe(it) } }
         catch (cancelled: CancellationException) { throw cancelled }
@@ -65,7 +67,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     }
                 }, enabled = enabled && !working && reference != null,
                     modifier = Modifier.fillMaxWidth().testTag("analyze")) {
-                    Text(if (working && !extracting) "正在检查…" else "开始检查（只读）")
+                    Text(if (working && !extracting && !splitting) "正在检查…" else "开始检查（只读）")
                 }
                 if (platform.supportsVideoExtraction) {
                     Text("原始视频提取是单独操作：另存 MP4/MOV，不修改照片、不转码，不等于 Clean Split。")
@@ -91,6 +93,13 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     exportReport?.let { text ->
                         Surface(color = if (exportFailed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
                             SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("extraction-report")) }
+                        }
+                    }
+                }
+                if (platform.supportsCleanSplit) {
+                    key(reference, selectionRevision) {
+                        CleanSplitControls(platform, reference, enabled && !working) { busy ->
+                            splitting = busy; working = busy; onBusy(busy)
                         }
                     }
                 }

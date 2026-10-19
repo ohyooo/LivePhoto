@@ -29,9 +29,9 @@ function Test-Reports([string]$Directory, [int]$Expected) {
     if ($count -ne $Expected) { throw "Incomplete Android test execution: $count / $Expected" }
     return $count
 }
-$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 26
-$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 26
-$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 27
+$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 30
+$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 30
+$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 30
 $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
 if ($compile -notmatch 'BUILD SUCCESSFUL' -or $device -notmatch 'BUILD SUCCESSFUL' -or

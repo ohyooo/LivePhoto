@@ -28,6 +28,75 @@ class AndroidIntegrationTest {
         assertTrue(app.core.getMediaCapabilities().backendIds.isEmpty())
     }
 
+    @Test fun cleanSplitPreparesWithoutPublicationAndSavesEachVerifiedAsset() = runBlocking {
+        val imageBytes = fixture("video.jpg")
+        val videoBytes = fixture("video.mp4")
+        val carrier = app.getFileStreamPath("split-${UUID.randomUUID()}.jpg")
+        val controller = AndroidCreateController(app, app.core)
+        try {
+            for ((protocol, profile) in listOf(ProtocolIds.Oplus to "jpeg-no-tail", ProtocolIds.GoogleV2 to "jpeg", ProtocolIds.GoogleV1 to "jpeg")) {
+                val image = MemoryBinarySource(Bytes(imageBytes), SourceId("split-image"))
+                val video = MemoryBinarySource(Bytes(videoBytes), SourceId("split-video"))
+                val output = MemoryOutputTransaction(context, "split-setup")
+                var created: OperationResult? = null
+                val saved = mutableListOf<Uri>()
+                try {
+                    created = success(app.core.create(CreateRequest(image, video, ProtocolSelector(protocol, ProfileId(profile)), output = output, context = context)))
+                    val original = output.committedAssets().getValue(created.output.assets.single().id).toByteArray()
+                    carrier.writeBytes(original)
+                    val imageCount = countSplitRows(false); val videoCount = countSplitRows(true)
+                    val split = success(controller.cleanSplit(Uri.fromFile(carrier)))
+                    assertEquals(imageCount, countSplitRows(false)); assertEquals(videoCount, countSplitRows(true))
+                    assertContentEquals(original, carrier.readBytes())
+                    assertContentEquals(videoBytes, split.video.bytes.toByteArray())
+                    assertEquals(sha(videoBytes), split.video.digest.value)
+                    val source = MemoryBinarySource(split.image.bytes, SourceId("clean-image"))
+                    try {
+                        val analysis = success(app.core.analyze(AnalyzeRequest(SourceSet.Single(source), context = context)))
+                        assertEquals(Disposition.NonLive, analysis.inspection.detection.disposition)
+                        assertTrue(analysis.inspection.layout.resources.none { it.kind == ResourceKind.Video })
+                        val again = MemoryOutputTransaction(context, "clean-idempotence")
+                        val operation = success(app.core.split(SplitRequest(SourceSet.Single(source), output = again, context = context)))
+                        try { assertEquals(split.image.bytes, again.committedAssets().getValue(operation.output.assets.single().id)) }
+                        finally { operation.output.assets.forEach { it.readableSource?.close() } }
+                    } finally { source.close() }
+                    for ((file, folder) in listOf(split.image to "Pictures/LivePhoto/", split.video to "Movies/LivePhoto/")) {
+                        val uri = controller.saveSplitFile(file); saved += uri
+                        val readback = app.contentResolver.openInputStream(uri)!!.use { readBounded(it, file.bytes.size) {} }
+                        assertContentEquals(file.bytes.toByteArray(), readback)
+                        assertEquals(file.digest.value, sha(readback))
+                        app.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING, MediaStore.MediaColumns.RELATIVE_PATH,
+                            MediaStore.MediaColumns.MIME_TYPE), null, null, null)!!.use {
+                            assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals(folder, it.getString(1)); assertEquals(file.mime, it.getString(2))
+                        }
+                    }
+                } finally {
+                    saved.forEach { app.contentResolver.delete(it, null, null) }
+                    created?.output?.assets?.forEach { it.readableSource?.close() }
+                    image.close(); video.close()
+                }
+            }
+        } finally { carrier.delete() }
+    }
+
+    private fun countSplitRows(video: Boolean): Int = app.contentResolver.query(
+        if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+        arrayOf(MediaStore.MediaColumns._ID), "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-clean-%"), null)!!.use { it.count }
+
+    @Test fun cleanSplitRejectsOrdinaryAndMalformedInputsWithoutPublishing() = runBlocking {
+        val file = app.getFileStreamPath("split-rejected-${UUID.randomUUID()}.jpg")
+        try {
+            for (bytes in listOf(fixture("video.jpg"), byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0))) {
+                file.writeBytes(bytes)
+                val images = countSplitRows(false); val videos = countSplitRows(true)
+                assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).cleanSplit(Uri.fromFile(file)))
+                assertContentEquals(bytes, file.readBytes())
+                assertEquals(images, countSplitRows(false)); assertEquals(videos, countSplitRows(true))
+            }
+        } finally { file.delete() }
+    }
+
     @Test fun controllerExportsExactVideoToMediaStoreForAllThreeProfiles() = runBlocking {
         val imageBytes = fixture("video.jpg")
         val videoBytes = fixture("video.mp4")

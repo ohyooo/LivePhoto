@@ -17,6 +17,10 @@ class MainActivity : ComponentActivity() {
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).analyze(input)
                 }, extractVideo = { input ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).extractVideo(input)
+                }, cleanSplit = { input ->
+                    AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).cleanSplit(input)
+                }, saveSplitFile = { file ->
+                    AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).saveSplitFile(file)
                 }) { image, video, target ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core)
                         .create(image, video, target)

@@ -23,7 +23,8 @@
 - [x] 当前十个公开 API 的 Worker 专项：42 项检查覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；在 `5009915` 的 [Web CI 协议 job](https://github.com/ohyooo/LivePhoto/actions/runs/39141307170/job/117716540201) 由真实 Chromium 全部执行成功。此处仅指该组验收，不冒充整轮 UI/播放器或发布成功；未来新接口仍须补充专项。
 - [x] 共享 Compose UI 接入只读 Analyze：单独选择待检查照片，不依赖或覆盖生成用的图片、视频；展示多重匹配、分层验证/覆盖、关键照片、媒体信息与问题代码，Unknown/NonLive、未知/零时间和 Partial/NotRun 分开。Android/Wasm 复用同一控件，输入只读、无输出事务，不增加网页协议实现。当前提交的实际编译、两端 UI/IO 验收以 CI 为准，不用此前 Wasm 迁移结果代替。
 - [x] 共享 UI 原始视频提取入口：与只读检查分开触发，复用 Core Raw Extract，确认唯一视频及 ExactExtraction/SHA-256 后才发起下载或 Android MediaStore 保存；单张输入 32 MiB，仅已识别 MP4/MOV，不清理、不转码、不修改原片。新提交实际验收以 CI 为准，不用上轮只读检查结果代替。
-- [ ] 按需继续接入 Clean Split、转换和有限 Repair 共享 UI；不能把 Raw Extract 视为 Clean Split。
+- [x] 共享 Compose Clean Split 入口：有界内存中准备普通 JPEG + MP4/MOV，Core 验证图片编码保留与视频字节一致性，按资产呈现 metadata 结果，再显式分别保存；不承诺外部成对原子提交。重选文件清除待保存结果，失败不输出、不转码；当前提交实际验收以 CI 为准，不能用上轮 Raw Extract 验收代替。
+- [ ] 按需继续接入转换和有限 Repair 共享 UI；不能把 Raw Extract 视为 Clean Split。
 
 ## 后续、尚未实现
 

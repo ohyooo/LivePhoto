@@ -32,6 +32,46 @@ import livephoto.ui.MediaKind
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun cleanSplitUsesExplicitIndependentSavesAndClearsOnReselection() {
+        var saves = 0
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "unused"
+            override val supportsAnalysis = true
+            override val supportsCleanSplit = true
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = { onResult("same-uri") }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("motion.jpg", 128)
+            override suspend fun cleanSplit(reference: String): CoreResult<livephoto.ui.PreparedCleanSplit> {
+                val image = livephoto.ui.SplitFile(livephoto.core.Bytes(byteArrayOf(1)), "image/jpeg", "jpg", livephoto.core.Digest("0".repeat(64)))
+                val video = livephoto.ui.SplitFile(livephoto.core.Bytes(byteArrayOf(2)), "video/mp4", "mp4", livephoto.core.Digest("1".repeat(64)))
+                return CoreResult.Success(livephoto.ui.PreparedCleanSplit(image, video, livephoto.core.PreservationReport(), emptyList()))
+            }
+            override suspend fun saveSplitFile(file: livephoto.ui.SplitFile): String {
+                saves++
+                if (file.mime == "video/mp4") error("TEST_VIDEO_SAVE_FAILURE")
+                return "TEST_IMAGE_SAVED"
+            }
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> = error("Must not create")
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
+        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("prepare-clean-split").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("prepare-clean-split").performScrollTo().performClick()
+        compose.onNodeWithTag("clean-split-report").assertTextContains("尚未保存", substring = true)
+        assertTrue(saves == 0)
+        compose.onNodeWithTag("save-split-image").performScrollTo().performClick()
+        compose.onNodeWithTag("split-image-status").assertTextEquals("TEST_IMAGE_SAVED")
+        compose.onNodeWithTag("save-split-video").performScrollTo().performClick()
+        compose.onNodeWithTag("split-video-status").assertTextContains("TEST_VIDEO_SAVE_FAILURE", substring = true)
+        compose.onNodeWithTag("split-image-status").assertTextEquals("TEST_IMAGE_SAVED")
+        assertTrue(saves == 2)
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("save-split-image").assertDoesNotExist()
+        compose.onNodeWithTag("clean-split-report").assertDoesNotExist()
+        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+    }
+
     @Test fun sharedExtractionUsesItsOwnInputAndReportsExactExport() {
         var extracted = false
         val platform = object : LivePhotoUiPlatform {

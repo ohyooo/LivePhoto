@@ -313,11 +313,69 @@ try {
     check(label+':extract-clears-stale-report',staleExportCleared);
     check(label+':extract-preserves-analysis-and-create-state',inspectionPreserved&&downloads===beforeExtraction+3&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+
+    const beforeSplit=downloads;
+    let splitInspectionPreserved=true,splitStaleCleared=true;
+    for(const {target,output} of analysisInputs) {
+      const inspection=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
+      const prior=downloads;
+      await driver.click('准备清理拆分');
+      await text(/清理拆分已准备/).waitFor({state:'attached'});
+      const report=await text(/清理拆分已准备/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      const preparedOnly=downloads===prior&&report.includes('尚未保存')&&report.includes('不是外部原子成对保存')&&
+        report.includes('ImageDataPreserving：Verified')&&report.includes(videoHash);
+      const outputs=[];
+      for(const [name,extension] of [['保存拆分图片','jpg'],['保存拆分视频','mp4']]) {
+        const pending=page.waitForEvent('download');pending.catch(()=>{});
+        await driver.click(name);
+        const download=await pending;
+        if(await download.failure())throw Error('Clean split download failed');
+        if(download.suggestedFilename()!==`LivePhoto-clean.${extension}`)throw Error('Wrong clean split filename');
+        outputs.push(await readFile(await download.path()));
+        await text(extension==='jpg'?/image\/jpeg：已发起下载/:/video\/mp4：已发起下载/).waitFor({state:'attached'});
+      }
+      const audit=await page.evaluate(async data=>{
+        const api=await import('/api/livephoto.mjs'),blob=new Blob([new Uint8Array(data)],{type:'image/jpeg'});
+        const detection=await api.detectLivePhoto(blob), again=await api.splitLivePhoto(blob);
+        const digest=async b=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await b.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
+        const bitmap=await createImageBitmap(blob);
+        const decoded=bitmap.width===64&&bitmap.height===64;bitmap.close();
+        return {nonLive:detection.verdict==='NonLive',idempotent:again.success&&again.assets.length===1&&
+          await digest(again.blob)===await digest(blob),decoded};
+      },Array.from(outputs[0]));
+      check(label+':split-'+target+'-clean-independent-files',preparedOnly&&audit.nonLive&&audit.idempotent&&audit.decoded&&
+        createHash('sha256').update(outputs[1]).digest('hex')===videoHash&&
+        report.includes(createHash('sha256').update(outputs[0]).digest('hex'))&&downloads===prior+2);
+      splitInspectionPreserved&&=await text(/只读检查完成/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'')===inspection;
+      if(target==='oplus.olive') {
+        await page.mouse.move(viewport.width/2,viewport.height*.6);
+        await page.mouse.wheel(0,300);await page.waitForTimeout(250);
+        await page.screenshot({path:`ci-output/web-ui-split-${label}.png`});
+      }
+    }
+    for(const [kind,input] of [
+      ['ordinary',imagePath],
+      ['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
+      ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],
+      ['budget',oversized],
+    ]) {
+      await analysisPicker(input);
+      splitStaleCleared&&=await text(/清理拆分已准备/).count()===0&&await button('保存拆分图片').count()===0&&await button('保存拆分视频').count()===0;
+      const prior=downloads;
+      await driver.click('准备清理拆分');
+      await text(/清理拆分失败/).waitFor({state:'attached'});
+      const report=await text(/清理拆分失败/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      check(label+':split-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&report.includes('阶段：')&&
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&await button('保存拆分图片').count()===0);
+    }
+    check(label+':split-clears-stale-preparation',splitStaleCleared);
+    check(label+':split-preserves-analysis-and-create-state',splitInspectionPreserved&&downloads===beforeSplit+6&&
+      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==74||new Set(checks).size!==74) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==92||new Set(checks).size!==92) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 74 checks; shared Compose editor, read-only analysis and exact video extraction under /livephoto/, two sizes, eighteen audited downloads, no analysis downloads');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 92 checks; shared Compose editor, read-only analysis, exact video extraction and clean split under /livephoto/, two sizes, thirty audited downloads, no preparation downloads');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {
