@@ -42,7 +42,7 @@ Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入
 
 普通播放器整体半屏高度、宽布局 96dp 音量条及竖屏单行控件已在 `23f69d5` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39179034248) 验证并部署；全屏不受半屏限制。竖屏播放、静音、音量、倍速、全屏保持同一行，按钮保留自身空间，音量条使用剩余宽度，而不是单独换行。Worker 的 42 项检查单独记入协议报告 `worker` 字段，不把主线程 70 项改称 Worker 验收，也未将网页耗时工作自动迁到 Worker。
 
-共用测试新增独立 `Test Kotlin common protocol` job，与四个外围浏览器测试 job 并行，仍复用编译缓存；测试结果本身不从缓存恢复。每轮对照 `commonTest` 源声明核验全部用例、零跳过/失败，并保存逐套 XML 哈希，全部 job 通过才发布。Web 目前使用 Kotlin/JS browser target，业务 Core/UI 不是 `wasmJs`。
+共用测试使用独立 `Test Kotlin common protocol` job，与四个外围浏览器测试 job 并行，复用编译缓存但不缓存测试结果。每轮对照 `commonTest` 源声明核验全部用例、零跳过/失败，保存逐套 XML 哈希，全部 job 通过才发布。上述历史结果为 Kotlin/JS；本轮增加同一份测试的 `wasmJs` 执行及共享 Compose 应用 Wasm 入口，实际结果以对应 CI 为准，不用旧结果代替新代码验证。
 
 CI 已拆分为一次生产构建、四个并行测试 job（协议、媒体、播放器、完整 UI）和汇总发布。[Web CI 39131691095](https://github.com/ohyooo/LivePhoto/actions/runs/39131691095) 在代码 `6b7e960` 的六个 job 全部成功：70 项协议、11 项媒体、91 项播放器、38 项完整 UI，共 210 项。各测试下载同次构建产物，核对提交号与逐文件哈希，不重复编译；某组失败不会取消其它组。全部通过才发布正式库和网站，成功汇总后清除临时传递产物，失败保留独立报告。
 

@@ -134,7 +134,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
 
     override suspend fun describe(reference: String): SelectedMediaInfo {
         val file = files[reference] ?: error("Selected browser file is no longer available; select it again")
-        return SelectedMediaInfo(file.name, file.size.toLong())
+        return SelectedMediaInfo(file.name, browserFileSize(file).toLong())
     }
 
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {
@@ -147,7 +147,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 "视频范围或编码已改变，请在当前视频上重新选择封面；不会猜测旧封面的时间。"))
         val key = frame?.let { CoverPosition.Timestamp(Time(((it.sourceTime - timeline!!.origin) * 1_000_000).roundToLong(), 1_000_000u),
             Selection.Nearest, Time(1, 1u)) }
-        if (photo.size.toLong() + movie.size.toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
+        if (browserFileSize(photo).toLong() + browserFileSize(movie).toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
         val ctx = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u))
         val imageSource = MemoryBinarySource(Bytes(browserBytes(photo)), SourceId("browser-image"))
@@ -173,7 +173,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                         }
                         document.body!!.appendChild(link)
                         try { link.click() } finally { link.remove() }
-                    } finally { window.setTimeout({ browserRevokeUrl(url) }, 60_000) }
+                    } finally { window.setTimeout({ browserRevokeUrl(url); null }, 60_000) }
                     val operation = result.value.copy(output = MediaOutput(
                         listOf(asset.copy(readableSource = null, accessReference = "browser-download:${asset.id.value}")), result.value.output.receipt))
                     CoreResult.Success(CreatedPhoto(operation))
