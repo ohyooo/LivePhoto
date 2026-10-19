@@ -11,6 +11,16 @@ private suspend fun awaitMedia(value: Promise<dynamic>): dynamic = suspendCorout
     value.then<Unit>({ result -> continuation.resume(result) }, { error -> continuation.resumeWithException(error) })
 }
 
+/** Capability declaration is synchronous and does not fetch or start the optional engine. */
+@JsExport
+public fun browserMediaCapabilities(): String {
+    val caps = BrowserFfmpegBackend { _, _, _, _, _, _ -> error("Capability reads must not execute media") }.capabilities()
+    return reportJson(record("backendIds" to caps.backendIds.toTypedArray(), "operations" to caps.operations.map { entry ->
+        record("operation" to entry.operation.name, "implementation" to entry.implementation.name,
+            "conditions" to entry.conditions.map(::condition).toTypedArray())
+    }.toTypedArray()))
+}
+
 /** Private JS execution adapter; Core verifies every output before exposure. */
 @JsExport
 public fun processMedia(input: ByteArray, action: String, executor: dynamic, startUs: Double = 0.0,

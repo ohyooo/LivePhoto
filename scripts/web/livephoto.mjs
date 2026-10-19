@@ -56,7 +56,7 @@ export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs
     };
     return result(await core.processMedia(data,action,executor,Math.round(start*1e6),Math.round(end*1e6),authorizeTranscode,()=>signal?.aborted===true));
   };
-  return Object.freeze({probe:input=>run(input,'probe'),remux:input=>run(input,'remux'),
+  return Object.freeze({capabilities:()=>JSON.parse(core.browserMediaCapabilities()),probe:input=>run(input,'probe'),remux:input=>run(input,'remux'),
     trim:(input,options)=>run(input,'trim',options),extractFrame:(input,options)=>run(input,'frame',options),
     transcode:(input,options)=>run(input,'transcode',options)});
 }

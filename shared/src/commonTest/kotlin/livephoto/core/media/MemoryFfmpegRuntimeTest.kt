@@ -2,6 +2,7 @@ package livephoto.core.media
 
 import livephoto.core.*
 import livephoto.core.ffmpeg.*
+import livephoto.core.google.GoogleFixtures
 import livephoto.core.memory.MemoryBinarySource
 import kotlin.test.*
 
@@ -45,10 +46,22 @@ class MemoryFfmpegRuntimeTest {
         assertTrue(runtime.execute(listOf("ffmpeg"), 1000, context).outputLimited)
         assertIs<CoreResult.Failure>(files.openOutput()); value(files.close())
     }
-    @Test fun browserCapabilitiesNameActualWasmExecution() {
+    @Test fun browserCapabilitiesNameActualWasmExecution(): Unit = runImmediate {
         val backend = BrowserFfmpegBackend { _, _, _, _, _, _ -> error("No media work") }
         assertEquals(listOf("ffmpeg-wasm"), backend.capabilities().backendIds)
         assertEquals(setOf(Operation.Probe, Operation.Trim, Operation.Remux, Operation.Transcode, Operation.ExtractFrame), backend.capabilities().operations.map { it.operation }.toSet())
         assertTrue(backend.capabilities().operations.all { it.implementation == Implementation.Experimental })
+        assertTrue(backend.capabilities().operations.filter { it.operation in setOf(Operation.Trim, Operation.Remux, Operation.Transcode) }
+            .all { it.conditions.any { condition -> condition.key == "wasmAudioProfile" } })
+        val source = MemoryBinarySource(Bytes(GoogleFixtures.video(aac = true, audioConfig = byteArrayOf(0x11, 0x88.toByte())).bytes), SourceId("mono"))
+        val staging = object : StagingArea {
+            override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> = error("Unsupported mono must not stage")
+            override suspend fun openForRead(id: AssetId): CoreResult<BinarySource> = error("Unsupported mono must not stage")
+        }
+        try {
+            val result = backend.remux(BackendJob(Operation.Remux, listOf(ResourceRef(SourceSet.Single(source))), remuxContainer = VideoContainer.Mp4,
+                context = Context(Limits(4_000_000u, 4_000_000u)), destination = staging))
+            assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(result).error.code.value)
+        } finally { source.close() }
     }
 }

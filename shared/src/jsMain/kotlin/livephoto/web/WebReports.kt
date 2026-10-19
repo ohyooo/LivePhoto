@@ -73,7 +73,7 @@ internal fun validation(v: ValidationReport): dynamic = record("verdict" to v.ve
     "checks" to v.checks.map { record("id" to it.id, "layer" to it.layer.name, "verdict" to it.verdict.name,
         "coverage" to it.coverage.name, "issues" to it.issues.map { i -> issue(i) }.toTypedArray()) }.toTypedArray(),
     "issues" to v.issues.map { issue(it) }.toTypedArray())
-private fun condition(v: Condition): dynamic = record("operator" to v.operator.name, "key" to v.key, "value" to value(v.value),
+internal fun condition(v: Condition): dynamic = record("operator" to v.operator.name, "key" to v.key, "value" to value(v.value),
     "operands" to v.operands.map { condition(it) }.toTypedArray())
 internal fun analysis(v: AnalysisResult, media: MediaCapabilities): dynamic = record("kind" to "Analysis", "inspection" to inspection(v.inspection),
     "validation" to validation(v.validation), "capabilities" to record("availability" to v.capabilities.availability.name,

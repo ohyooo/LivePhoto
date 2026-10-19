@@ -2,6 +2,7 @@ package livephoto.core.ffmpeg
 
 import livephoto.core.*
 import livephoto.core.binary.*
+import livephoto.core.bmff.BmffVideoProbe
 import livephoto.core.memory.MemoryBinarySource
 
 /** Worker adapter only. Commands and all media verification remain in the existing backend. */
@@ -69,12 +70,34 @@ public class MemoryFfmpegRuntime(private val executor: MemoryFfmpegExecutor) : F
 /** Reuses finite Core/FFmpeg profiles, but identifies actual Worker/Wasm execution honestly. */
 public class BrowserFfmpegBackend(executor: MemoryFfmpegExecutor) : MediaBackend {
     private val delegate = FfmpegMediaBackend("ffmpeg", MemoryFfmpegRuntime(executor))
-    override fun capabilities(): MediaCapabilities = delegate.capabilities().copy(backendIds = listOf("ffmpeg-wasm"))
+    override fun capabilities(): MediaCapabilities = delegate.capabilities().let { it.copy(backendIds = listOf("ffmpeg-wasm"),
+        operations = it.operations.map { entry -> entry.copy(conditions = entry.conditions + listOf(Condition(ConditionOperator.Equals,
+            "runtimeProfile", Value.Text("private-worker-input32MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
+            if (entry.operation in setOf(Operation.Trim, Operation.Remux, Operation.Transcode)) listOf(Condition(ConditionOperator.Equals,
+                "wasmAudioProfile", Value.Text("absent-or-AAC-LC-stereo-with-original-channelcount2-no-mono-header-normalization"))) else emptyList()) }) }
     override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = delegate.probe(request)
-    override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = identify(delegate.trim(job))
-    override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = identify(delegate.remux(job))
-    override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = identify(delegate.transcode(job))
+    override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = copyAudio(Operation.Trim, job) { delegate.trim(job) }
+    override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = copyAudio(Operation.Remux, job) { delegate.remux(job) }
+    override suspend fun transcode(job: BackendJob): CoreResult<BackendResult> = copyAudio(Operation.Transcode, job) { delegate.transcode(job) }
     override suspend fun extractFrame(job: BackendJob): CoreResult<BackendResult> = identify(delegate.extractFrame(job))
+    private suspend fun copyAudio(operation: Operation, job: BackendJob, run: suspend () -> CoreResult<BackendResult>): CoreResult<BackendResult> {
+        val gate = attempt {
+            if (job.operation != operation) fail("INVALID_ARGUMENT", "Backend method and operation differ", Stage.Plan)
+            job.validate().orThrow()
+            val ref = job.inputs.single()
+            val source = (ref.input as? SourceSet.Single)?.source
+                ?: fail("INVALID_ARGUMENT", "Browser media requires one resolved resource", Stage.Plan)
+            if (ref.resourceId != null || ref.snapshot != null) fail("INVALID_ARGUMENT", "Core must resolve browser media references", Stage.Plan)
+            val reader = BinaryReader(source, job.context)
+            val video = BmffVideoProbe(reader).probe(ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
+            // The pinned Wasm muxer normalizes MP4 channelcount to 2. Do not
+            // silently rewrite a mono source header, weaken verification, or encode audio.
+            if (video.tracks.any { it.handler == "soun" && (it.audioChannels != 2u || it.audioActualChannelCount != 2u) })
+                fail("CAPABILITY_UNSUPPORTED", "This Wasm muxer cannot preserve mono/multichannel AAC sample-entry metadata; only absent audio or stereo AAC is enabled", Stage.Plan)
+            reader.validateIdentity().orThrow()
+        }
+        return when (gate) { is CoreResult.Failure -> gate; is CoreResult.Success -> identify(run()) }
+    }
     private fun identify(result: CoreResult<BackendResult>): CoreResult<BackendResult> = when (result) {
         is CoreResult.Failure -> result
         is CoreResult.Success -> CoreResult.Success(result.value.copy(execution = result.value.execution.map { it.copy(backendId = "ffmpeg-wasm") }))

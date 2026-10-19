@@ -54,6 +54,8 @@ export interface RepairOptions {
 export function repairLivePhoto(input: Blob, options?: RepairOptions): Promise<WebResult>;
 
 export interface BrowserMediaBackend {
+  /** Does not load the engine; Experimental + conditions is not unconditional support. */
+  capabilities(): { backendIds: readonly string[]; operations: readonly {operation: string; implementation: string; conditions: readonly JsonValue[]}[] };
   probe(input: Blob): Promise<WebResult>;
   remux(input: Blob): Promise<WebResult>;
   trim(input: Blob, options: { start: number; end: number }): Promise<WebResult>;

@@ -14,11 +14,13 @@ execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','la
   '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libx264','-threads','1','-pix_fmt','yuv420p',
   '-bf','0','-g','25','-c:a','aac','-movflags','+faststart',source],{timeout:60000});
 const coreSource=join(directory,'core-input.mp4');
-execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=64x64:rate=25',
+const monoSource=join(directory,'core-mono.mp4');
+for(const [destination,channels] of [[coreSource,'2'],[monoSource,'1']])execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=64x64:rate=25',
   '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','25',
-  '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-c:a','aac','-use_editlist','0',
-  '-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0','-movflags','+faststart',coreSource],{timeout:60000});
+  '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-c:a','aac','-ac',channels,'-use_editlist','0',
+  '-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0','-movflags','+faststart',destination],{timeout:60000});
 const coreInput=await readFile(coreSource);
+const monoInput=await readFile(monoSource);
 const input=await readFile(source), root=resolve('ci-output/web-ui'),apiRoot=resolve('ci-output/browser-api/web-library');
 const server=createServer(async(req,res)=>{
   try {
@@ -26,6 +28,7 @@ const server=createServer(async(req,res)=>{
     if(path==='/livephoto/test') {res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Media adapter validation</title>');return;}
     if(path==='/fixture') {res.setHeader('Content-Type','video/mp4');res.end(input);return;}
     if(path==='/core-fixture') {res.setHeader('Content-Type','video/mp4');res.end(coreInput);return;}
+    if(path==='/core-mono-fixture') {res.setHeader('Content-Type','video/mp4');res.end(monoInput);return;}
     if(path.startsWith('/api/')) {
       const file=resolve(apiRoot,'.'+path.slice(4));
       if(!file.startsWith(apiRoot+sep)){res.writeHead(403).end();return;}
@@ -114,6 +117,7 @@ try {
     const {createMediaBackend}=await import('/api/livephoto.mjs');
     const diagnostics=[];
     const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',onDiagnostic:entry=>diagnostics.push(entry)});
+    const capabilities=backend.capabilities();
     const file=await(await fetch('/core-fixture')).blob();
     const hash=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');
     const before=await hash(file),results={};
@@ -124,6 +128,7 @@ try {
     }
     const forbidden=await backend.transcode(file);
     const malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
+    const mono=await backend.remux(await(await fetch('/core-mono-fixture')).blob());
     const controller=new AbortController();controller.abort();
     const cancelled=await createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).probe(file);
     const running=new AbortController();
@@ -131,10 +136,12 @@ try {
     const stop=setTimeout(()=>running.abort(),100);
     let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
     let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
-    return {results,forbidden,malformed,cancelled,stopped,budget,immutable:before===await hash(file)};
+    return {results,capabilities,forbidden,malformed,mono,cancelled,stopped,budget,immutable:before===await hash(file)};
   });
   const r=coreResults.results;
-  check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes);
+  check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes&&
+    coreResults.capabilities.backendIds.join(',')==='ffmpeg-wasm'&&coreResults.capabilities.operations.length===5&&
+    coreResults.capabilities.operations.every(entry=>entry.implementation==='Experimental'&&entry.conditions.some(c=>c.key==='runtimeProfile')));
   const coreBefore=probe(coreSource);
   for(const action of ['remux','trim','transcode']) {
     const value=r[action],path=join(directory,'core-'+action+'.mp4');await writeFile(path,new Uint8Array(value.bytes));
@@ -156,7 +163,8 @@ try {
     const valid=bitmap.width===64&&bitmap.height===64;bitmap.close();return valid;
   },r.extractFrame.bytes);
   check('core-extract-frame-decodes',frame&&r.extractFrame.report.actual.actualTime&&r.extractFrame.report.execution.some(e=>e.backendId==='ffmpeg-wasm'));
-  check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob);
+  check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob&&
+    !coreResults.mono.success&&coreResults.mono.code==='CAPABILITY_UNSUPPORTED'&&!coreResults.mono.blob);
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable);

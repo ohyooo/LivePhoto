@@ -35,6 +35,7 @@
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。
+- [ ] 随包 Wasm muxer 的单声道/多声道 AAC 字段保留：新 Core 写媒体入口当前只开放无音频或 sample-entry 与 ASC 均为立体声的 AAC。单声道规范化会被保真检查拒绝，现提前返回 Unsupported；不靠音频转码、手改字段或放宽检查解决。现有播放器预处理及桌面后端范围独立。
 - [ ] 将现有播放器的宽松预处理操作逐项迁移到上述严格 Core 媒体 profile。目前保留原有 Video/Canvas 当前画面截图及 ffmpeg.wasm 预处理，避免缩小已可用输入范围；不能把新有限 API 当作全部播放器流程已统一或全部媒体格式支持。
 - [x] Kotlin/Wasm Compose 应用：`6837e1a` 的 [Web CI 39190852421](https://github.com/ohyooo/LivePhoto/actions/runs/39190852421) 全部 7 个 job 通过。复用现有 `ui/commonMain`，浏览器入口采用类型化互操作；公共 Kotlin 测试在 JS/Wasm 下各 804 项、零失败零跳过，原有 222 项外围检查及 Worker 内部 42 项也通过。真实界面生成和下载由 Wasm 应用执行，独立 JS 库用于审计输出，不重写界面或协议。后续产物命名和缓存调整须再次通过相同 CI，在线状态以实际部署为准；不能仅凭 Skiko/FFmpeg 的 Wasm 文件宣称完成。
 - [ ] 搁置的观察项：播放器画面外透明孔洞/残影。用户未观察到，暂不投入处理、不阻塞后续任务，也不标记为已修复。

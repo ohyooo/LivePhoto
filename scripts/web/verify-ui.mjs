@@ -563,9 +563,22 @@ try {
     const beforeKey=downloads,keyReport=()=>text(/^(?:已修改关键照片时间并发起下载|关键照片修改失败)/);
     const readKeyReport=()=>keyReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
     const enterKey=async value=>{
-      const field=page.locator('#key-seconds'),bounds=await driver.reveal(field);
-      await page.mouse.click(bounds.x+Math.min(70,bounds.width/2),bounds.y+bounds.height*.65);
-      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText(value);await page.keyboard.press('Tab');
+      const field=page.locator('#key-seconds');
+      // Activating the canvas can bring its previous focus target into view.
+      // Remeasure after that first real click before typing into the field.
+      for(let focus=0;focus<2;focus++){
+        const bounds=await driver.reveal(field,56);
+        await page.mouse.click(bounds.x+Math.min(70,bounds.width/2),bounds.y+bounds.height*.65);
+        await page.waitForTimeout(200);
+      }
+      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('Backspace');
+      await page.keyboard.type(value,{delay:60});
+      for(let attempt=0;attempt<40;attempt++){
+        if(await field.textContent()===value)break;
+        await page.waitForTimeout(50);
+      }
+      if(await field.textContent()!==value)throw Error('Real key input did not reach Compose: '+JSON.stringify({expected:value,actual:await field.textContent()}));
+      await page.keyboard.press('Tab');
       await page.waitForTimeout(200);
     };
     let keyAnalysisPreserved=true;
