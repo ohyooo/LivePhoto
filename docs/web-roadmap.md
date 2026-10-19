@@ -18,7 +18,7 @@
 - [x] 有限 JPEG Convert 接口实现：与 Create 分开，不隐式修复或转码；下述 EXIF 限制仍保留。
 - [x] 有限 Repair：默认 dry-run，显式应用安全修改；结构化报告保留阻止/无操作/修复前后问题。Google V1/V2 长度修复通过浏览器验证；默认新建 OPPO 布局保留安全拒绝，见下方限制。
 - [ ] 关键照片 metadata 写入；与视频抽帧、替换封面分开。
-- [ ] 接通共享 Kotlin `commonTest` 的浏览器运行：已将 47 项桌面素材/真实 FFmpeg 测试与宿主适配移入 `desktopTest`，纯内存测试仍为同一份 Kotlin，共声明 804 项；新增独立 Chrome 测试 job 和无跳过/逐套 XML 门禁，待实际 CI 验证。不是重写 JavaScript 测试，也不是 Kotlin/Wasm 迁移。
+- [x] 共享 Kotlin `commonTest` 的浏览器运行：804 项原有纯内存测试在 `f742538` 的 [真实 Chrome 测试 job](https://github.com/ohyooo/LivePhoto/actions/runs/39184904432/job/117845433218) 全部通过，零失败、零跳过，逐类 JUnit XML 与源声明核对。47 项桌面素材/真实 FFmpeg 测试与宿主适配移入 `desktopTest`，测试内容及素材字节不改；`7190817` 的[三平台 Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/39180470040) 各 925 项 shared＋44 项 CLI 测试通过并独立核验。不是重写 JavaScript 测试，也不是 Kotlin/Wasm 迁移；Android 尚未执行这 804 项共用测试。
 - [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
 - [x] 当前十个公开 API 的 Worker 专项：42 项检查覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；在 `5009915` 的 [Web CI 协议 job](https://github.com/ohyooo/LivePhoto/actions/runs/39141307170/job/117716540201) 由真实 Chromium 全部执行成功。此处仅指该组验收，不冒充整轮 UI/播放器或发布成功；未来新接口仍须补充专项。
 - [ ] 后续按需将已验证能力接入共享 UI，不另写网页业务逻辑。
@@ -32,7 +32,7 @@
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [ ] 将浏览器媒体能力正式接入统一 Core MediaBackend，补齐独立 probe/remux 等接口及相应能力与保真报告。当前网页预处理可用，不表示协议功能库已公开媒体后端或完整媒体 API。
 - [ ] Kotlin/Wasm target 与独立验收；Compose 图形运行时的 Wasm 文件不代表 Core 已实现 Kotlin/Wasm。
-- [ ] 修复共享播放器画面外的透明孔洞/残影并完成视觉回归。按用户最新要求，每轮构建和功能检查通过后仍更新试用网页，明确保留此已知显示问题；功能通过不等于视觉问题已修复。
+- [ ] 搁置的观察项：播放器画面外透明孔洞/残影。用户未观察到，暂不投入处理、不阻塞后续任务，也不标记为已修复。
 
 Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入不上传服务器；仓库和 CI 不增加手机/reference 原片或其衍生成品。测试用独立合成素材，报告不附带媒体。
 
@@ -40,7 +40,9 @@ Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入
 
 深浅色跟随浏览器及右上角太阳/月亮切换已在 [Web CI 39135176016](https://github.com/ohyooo/LivePhoto/actions/runs/39135176016) 的 `26c8790` 验证并部署：70 项协议、38 项 UI、11 项媒体、91 项播放器、12 项主题，共 222 项。真实指针切换、浏览器偏好变更、手动覆盖、媒体保留和刷新恢复跟随均有独立证据；透明孔洞仍是已知 TODO。
 
-普通播放器整体半屏高度和宽布局 96dp 音量条已通过回归并部署；全屏不受半屏限制。后续按用户要求调整竖屏控件：播放、静音、音量、倍速、全屏保持同一行，按钮保留自身空间，音量条使用剩余宽度，而不是单独换行；该调整须由对应提交 CI 验证后部署。Worker 的 42 项检查单独记入协议报告 `worker` 字段，不把主线程 70 项改称 Worker 验收，也未将网页耗时工作自动迁到 Worker。
+普通播放器整体半屏高度、宽布局 96dp 音量条及竖屏单行控件已在 `23f69d5` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39179034248) 验证并部署；全屏不受半屏限制。竖屏播放、静音、音量、倍速、全屏保持同一行，按钮保留自身空间，音量条使用剩余宽度，而不是单独换行。Worker 的 42 项检查单独记入协议报告 `worker` 字段，不把主线程 70 项改称 Worker 验收，也未将网页耗时工作自动迁到 Worker。
+
+共用测试新增独立 `Test Kotlin common protocol` job，与四个外围浏览器测试 job 并行，仍复用编译缓存；测试结果本身不从缓存恢复。每轮对照 `commonTest` 源声明核验全部用例、零跳过/失败，并保存逐套 XML 哈希，全部 job 通过才发布。Web 目前使用 Kotlin/JS browser target，业务 Core/UI 不是 `wasmJs`。
 
 CI 已拆分为一次生产构建、四个并行测试 job（协议、媒体、播放器、完整 UI）和汇总发布。[Web CI 39131691095](https://github.com/ohyooo/LivePhoto/actions/runs/39131691095) 在代码 `6b7e960` 的六个 job 全部成功：70 项协议、11 项媒体、91 项播放器、38 项完整 UI，共 210 项。各测试下载同次构建产物，核对提交号与逐文件哈希，不重复编译；某组失败不会取消其它组。全部通过才发布正式库和网站，成功汇总后清除临时传递产物，失败保留独立报告。
 
@@ -56,4 +58,4 @@ CI 已拆分为一次生产构建、四个并行测试 job（协议、媒体、�
 
 只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现；当前全部公开接口已另有 42 项 Worker 专项。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮或自动后台执行。
 
-上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作均保留在后续检查中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** 公共协议 commonTest 的 JS 迁移、未来新接口的 Worker 增量验收、已有载体的独立关键照片写入、更多共享 UI 功能及正式浏览器 Core MediaBackend 仍未完成。
+上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作均保留在后续检查中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** 未来新接口的 Worker 增量验收、已有载体的独立关键照片写入、更多共享 UI 功能及正式浏览器 Core MediaBackend 仍未完成。
