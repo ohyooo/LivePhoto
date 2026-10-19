@@ -119,7 +119,7 @@ try {
     const before=await hash(file),results={};
     for(const [action,options] of [['probe',undefined],['remux',undefined],['trim',{start:.4,end:1.6}],['extractFrame',{start:.4}],['transcode',{authorizeTranscode:true}]]) {
       const value=await backend[action](file,options);
-      if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message+' '+JSON.stringify(diagnostics.slice(-3)));
+      if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message+' '+JSON.stringify(value.report)+' '+JSON.stringify(diagnostics.slice(-3)));
       results[action]={...value,assets:undefined,blob:undefined,bytes:value.blob?Array.from(new Uint8Array(await value.blob.arrayBuffer())):null};
     }
     const forbidden=await backend.transcode(file);
