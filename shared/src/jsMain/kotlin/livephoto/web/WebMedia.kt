@@ -8,7 +8,7 @@ import livephoto.core.ffmpeg.*
 import livephoto.core.memory.*
 
 private suspend fun awaitMedia(value: Promise<dynamic>): dynamic = suspendCoroutine { continuation ->
-    value.then({ result -> continuation.resume(result); null }, { error -> continuation.resumeWithException(error); null })
+    value.then<Unit>({ result -> continuation.resume(result) }, { error -> continuation.resumeWithException(error) })
 }
 
 /** Private JS execution adapter; Core verifies every output before exposure. */
