@@ -535,9 +535,9 @@ try {
       check(label+':repair-'+kind+'-no-output',downloads===prior&&report.includes('修复失败')&&report.includes('错误码：')&&
         (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&!await button('应用修复并另存').isEnabled());
     }
-    const preview=await previewRepair({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
+    const selectionPreview=await previewRepair({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
-    const cancelKept=await readRepairReport()===preview&&await button('应用修复并另存').isEnabled();
+    const cancelKept=await readRepairReport()===selectionPreview&&await button('应用修复并另存').isEnabled();
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-selection-state-isolated',cancelKept&&await repairReport().count()===0&&!await button('应用修复并另存').isEnabled());
     check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&

@@ -31,6 +31,10 @@ jobs:
             throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
           }
           Get-Command node -ErrorAction Stop | Out-Null
+          Get-ChildItem -Path 'scripts/web/*.mjs', 'scripts/web/media/*.mjs' -File | ForEach-Object {
+            & node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Browser script syntax check failed: $($_.Name)" }
+          }
           New-Item -ItemType Directory -Path ci-output -Force | Out-Null
 
       - uses: actions/setup-java@v6
