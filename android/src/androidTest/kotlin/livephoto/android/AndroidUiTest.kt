@@ -32,6 +32,39 @@ import livephoto.ui.MediaKind
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun conversionHasIndependentTargetAndClearsReportOnChanges() {
+        var selected: livephoto.core.ProtocolSelector? = null
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "unused"
+            override val supportsAnalysis = true
+            override val supportsConversion = true
+            override val conversionSuccessMessage = "TEST_CONVERTED_SAVED"
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = { onResult("same-conversion-uri") }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("live.jpg", 100)
+            override suspend fun convertPhoto(reference: String, target: livephoto.core.ProtocolSelector): CoreResult<livephoto.ui.ConvertedPhoto> {
+                check(reference == "same-conversion-uri"); selected = target
+                return CoreResult.Success(livephoto.ui.ConvertedPhoto(target, 100u, livephoto.core.Digest("0".repeat(64)), false,
+                    livephoto.core.PreservationReport(), emptyList()))
+            }
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> = error("Must not create")
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
+        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("convert-photo").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("conversion-target-GoogleV2").performScrollTo().performClick()
+        compose.onNodeWithTag("convert-photo").performScrollTo().performClick()
+        compose.onNodeWithTag("conversion-report").assertTextContains("TEST_CONVERTED_SAVED", substring = true)
+        assertTrue(selected == livephoto.ui.ConversionTarget.GoogleV2.selector)
+        compose.onNodeWithTag("conversion-target-GoogleV1").performScrollTo().performClick()
+        compose.onNodeWithTag("conversion-report").assertDoesNotExist()
+        compose.onNodeWithTag("convert-photo").performScrollTo().performClick()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("conversion-report").assertDoesNotExist()
+        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+    }
+
     @Test fun cleanSplitUsesExplicitIndependentSavesAndClearsOnReselection() {
         var saves = 0
         val platform = object : LivePhotoUiPlatform {

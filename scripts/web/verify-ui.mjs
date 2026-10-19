@@ -373,11 +373,77 @@ try {
     check(label+':split-clears-stale-preparation',splitStaleCleared);
     check(label+':split-preserves-analysis-and-create-state',splitInspectionPreserved&&downloads===beforeSplit+6&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+
+    const conversionNames={'oplus.olive':'OPPO / OnePlus','google.motionphoto.v2':'Google V2','google.microvideo.v1':'Google V1'};
+    const conversionReport=()=>text(/(?:已转换并发起下载|转换失败)/);
+    const beforeConversion=downloads;
+    let conversionInspectionPreserved=true,conversionStaleCleared=true;
+    for(const {target:sourceTarget,output} of analysisInputs) {
+      const inspection=await analyze({name:sourceTarget+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
+      conversionStaleCleared&&=await conversionReport().count()===0;
+      for(const target of Object.keys(conversionNames)) {
+        await driver.click(new RegExp('^(?:✓ )?转换为 '+conversionNames[target]+'$'));
+        conversionStaleCleared&&=await conversionReport().count()===0;
+        const blocked=sourceTarget==='oplus.olive'&&target!==sourceTarget;
+        const prior=downloads;
+        const pending=blocked?null:page.waitForEvent('download');pending?.catch(()=>{});
+        await driver.click('转换并另存');
+        if(blocked) {
+          await text(/转换失败/).waitFor({state:'attached'});
+          const report=await conversionReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+          check(label+':convert-'+sourceTarget+'-to-'+target,downloads===prior&&report.includes('UNSAFE_METADATA_REWRITE')&&report.includes('阶段：'));
+        } else {
+          const download=await pending;
+          if(await download.failure())throw Error('Converted photo download failed');
+          const bytes=await readFile(await download.path());
+          await text(/已转换并发起下载/).waitFor({state:'attached'});
+          const report=await conversionReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+          const audit=await page.evaluate(async ({data,original,target})=>{
+            const api=await import('/api/livephoto.mjs');
+            const blob=new Blob([new Uint8Array(data)]),source=new Blob([new Uint8Array(original)]);
+            const detection=await api.detectLivePhoto(blob),validation=await api.validateLivePhoto(blob),video=await api.extractVideo(blob);
+            const before=await api.getKeyPhotoPosition(source),after=await api.getKeyPhotoPosition(blob);
+            if(!video.success)throw Error(video.message);
+            const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await video.blob.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
+            return {valid:detection.protocol===target&&validation.success&&validation.verdict!=='Invalid',digest,
+              key:before.success&&after.success&&JSON.stringify(before.report.position)===JSON.stringify(after.report.position)};
+          },{data:Array.from(bytes),original:Array.from(output),target});
+          check(label+':convert-'+sourceTarget+'-to-'+target,audit.valid&&audit.key&&audit.digest===videoHash&&
+            report.includes(createHash('sha256').update(bytes).digest('hex'))&&report.includes('目标：'+target)&&
+            download.suggestedFilename()===`LivePhoto-converted-${target}.jpg`&&downloads===prior+1&&
+            (sourceTarget===target?bytes.equals(output)&&report.includes('整个载体字节一致'):report.includes('不宣称整个文件字节一致')));
+          if(sourceTarget==='google.motionphoto.v2'&&target==='oplus.olive') {
+            await page.mouse.move((viewport.width-Math.min(viewport.width,840))/2+8,viewport.height/2);
+            await page.mouse.wheel(0,220);await page.waitForTimeout(350);
+            await page.screenshot({path:`ci-output/web-ui-conversion-${label}.png`});
+          }
+        }
+        conversionInspectionPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+      }
+    }
+    for(const [kind,input] of [
+      ['ordinary',imagePath],
+      ['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
+      ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],
+      ['budget',oversized],
+    ]) {
+      await analysisPicker(input);
+      conversionStaleCleared&&=await conversionReport().count()===0;
+      const prior=downloads;
+      await driver.click('转换并另存');
+      await text(/转换失败/).waitFor({state:'attached'});
+      const report=await conversionReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+      check(label+':convert-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&report.includes('阶段：')&&
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')));
+    }
+    check(label+':convert-clears-stale-report',conversionStaleCleared);
+    check(label+':convert-preserves-analysis-and-create-state',conversionInspectionPreserved&&downloads===beforeConversion+7&&
+      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==92||new Set(checks).size!==92) throw Error('Incomplete shared UI checks: '+checks.length);
+  if(checks.length!==122||new Set(checks).size!==122) throw Error('Incomplete shared UI checks: '+checks.length);
   await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 92 checks; shared Compose editor, read-only analysis, exact video extraction and clean split under /livephoto/, two sizes, thirty audited downloads, no preparation downloads');
+  console.log('WEB_UI_EVIDENCE=SUCCESS 122 checks; shared Compose editor, analysis, extraction, clean split and finite conversion under /livephoto/, two sizes, forty-four audited downloads, safe EXIF refusals retained');
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

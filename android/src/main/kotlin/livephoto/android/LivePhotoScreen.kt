@@ -19,15 +19,18 @@ internal fun LivePhotoScreen(
     extractVideo: (suspend (Uri) -> CoreResult<AndroidCreateController.Extracted>)? = null,
     cleanSplit: (suspend (Uri) -> CoreResult<livephoto.ui.PreparedCleanSplit>)? = null,
     saveSplitFile: (suspend (livephoto.ui.SplitFile) -> Uri)? = null,
+    convertPhoto: (suspend (Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Converted>)? = null,
     create: suspend (Uri, Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Created>,
 ) {
     val context = LocalContext.current.applicationContext
-    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, create) {
+    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, create) {
         object : LivePhotoUiPlatform {
             override val outputDescription = "Pictures/LivePhoto"
             override val supportsAnalysis = analyze != null
             override val supportsVideoExtraction = extractVideo != null
             override val supportsCleanSplit = cleanSplit != null && saveSplitFile != null
+            override val supportsConversion = convertPhoto != null
+            override val conversionSuccessMessage = "已转换并另存到 Pictures/LivePhoto。"
             override val videoExportSuccessMessage = "已提取并保存到 Movies/LivePhoto。"
             @Composable
             override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit {
@@ -51,6 +54,12 @@ internal fun LivePhotoScreen(
                 val folder = if (file.mime == "image/jpeg") "Pictures/LivePhoto" else "Movies/LivePhoto"
                 return "${file.mime}：已保存到 $folder；另一文件需单独保存。"
             }
+            override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<livephoto.ui.ConvertedPhoto> =
+                when (val result = convertPhoto?.invoke(Uri.parse(reference), target)) {
+                    null -> super.convertPhoto(reference, target)
+                    is CoreResult.Failure -> result
+                    is CoreResult.Success -> CoreResult.Success(result.value.report)
+                }
             override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> =
                 when (val result = create(Uri.parse(image), Uri.parse(video), target)) {
                     is CoreResult.Failure -> result

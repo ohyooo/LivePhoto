@@ -28,6 +28,84 @@ class AndroidIntegrationTest {
         assertTrue(app.core.getMediaCapabilities().backendIds.isEmpty())
     }
 
+    /** Independently encoded synthetic JPEG; not a private phone/reference derivative. */
+    private fun conversionImage(): ByteArray {
+        val bitmap = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888)
+        try {
+            bitmap.eraseColor(android.graphics.Color.BLUE)
+            return java.io.ByteArrayOutputStream().use {
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it)); it.toByteArray()
+            }
+        } finally { bitmap.recycle() }
+    }
+
+    private fun countConvertedPhotos(): Int = app.contentResolver.query(
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), arrayOf(MediaStore.MediaColumns._ID),
+        "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-converted-%"), null)!!.use { it.count }
+
+    @Test fun controllerConvertsLimitedMatrixWithExactCopiesAndSafeRefusals() = runBlocking {
+        val imageBytes = conversionImage()
+        val videoBytes = fractionalAudioVideo() // Synthetic protocol/timing, not a decoder/playability claim.
+        val file = app.getFileStreamPath("convert-${UUID.randomUUID()}.jpg")
+        val controller = AndroidCreateController(app, app.core)
+        try {
+            for (sourceTarget in livephoto.ui.ConversionTarget.entries) {
+                val image = MemoryBinarySource(Bytes(imageBytes), SourceId("convert-image"))
+                val video = MemoryBinarySource(Bytes(videoBytes), SourceId("convert-video"))
+                val setup = MemoryOutputTransaction(context, "convert-setup")
+                var created: OperationResult? = null
+                try {
+                    created = success(app.core.create(CreateRequest(image, video, sourceTarget.selector, output = setup, context = context)))
+                    val original = setup.committedAssets().getValue(created.output.assets.single().id).toByteArray()
+                    file.writeBytes(original)
+                    for (target in livephoto.ui.ConversionTarget.entries) {
+                        val before = countConvertedPhotos()
+                        val converted = controller.convertPhoto(Uri.fromFile(file), target.selector)
+                        assertContentEquals(original, file.readBytes())
+                        if (sourceTarget == livephoto.ui.ConversionTarget.Oplus && target != sourceTarget) {
+                            assertEquals("UNSAFE_METADATA_REWRITE", assertIs<CoreResult.Failure>(converted).error.code.value)
+                            assertEquals(before, countConvertedPhotos())
+                            continue
+                        }
+                        val saved = success(converted)
+                        try {
+                            val bytes = app.contentResolver.openInputStream(saved.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
+                            assertEquals(sha(bytes), saved.report.digest.value)
+                            assertEquals(target.selector, saved.report.target)
+                            assertEquals(target == sourceTarget, saved.report.carrierExact)
+                            if (target == sourceTarget) assertContentEquals(original, bytes)
+                            val source = MemoryBinarySource(Bytes(bytes), SourceId("converted-readback"))
+                            var extraction: OperationResult? = null
+                            try {
+                                val detection = success(app.core.detect(ReadRequest(SourceSet.Single(source), context)))
+                                assertEquals(target.selector, detection.primaryProtocol)
+                                val output = MemoryOutputTransaction(context, "converted-video")
+                                extraction = success(app.core.extract(ExtractRequest(SourceSet.Single(source), emptyList(), output = output, context = context)))
+                                assertContentEquals(videoBytes, output.committedAssets().getValue(extraction.output.assets.single().id).toByteArray())
+                            } finally { extraction?.output?.assets?.forEach { it.readableSource?.close() }; source.close() }
+                            app.contentResolver.query(saved.uri, arrayOf(MediaStore.MediaColumns.IS_PENDING, MediaStore.MediaColumns.RELATIVE_PATH,
+                                MediaStore.MediaColumns.MIME_TYPE), null, null, null)!!.use {
+                                assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Pictures/LivePhoto/", it.getString(1)); assertEquals("image/jpeg", it.getString(2))
+                            }
+                        } finally { app.contentResolver.delete(saved.uri, null, null) }
+                    }
+                } finally { created?.output?.assets?.forEach { it.readableSource?.close() }; image.close(); video.close() }
+            }
+        } finally { file.delete() }
+    }
+
+    @Test fun controllerConversionRejectsNonLiveAndMalformedWithoutPublication() = runBlocking {
+        val file = app.getFileStreamPath("convert-rejected-${UUID.randomUUID()}.jpg")
+        try {
+            for (bytes in listOf(conversionImage(), byteArrayOf(0, 1, 2, 3), byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0))) {
+                file.writeBytes(bytes)
+                val before = countConvertedPhotos()
+                assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).convertPhoto(Uri.fromFile(file), livephoto.ui.ConversionTarget.GoogleV2.selector))
+                assertEquals(before, countConvertedPhotos()); assertContentEquals(bytes, file.readBytes())
+            }
+        } finally { file.delete() }
+    }
+
     @Test fun cleanSplitPreparesWithoutPublicationAndSavesEachVerifiedAsset() = runBlocking {
         val imageBytes = fixture("video.jpg")
         val videoBytes = fixture("video.mp4")

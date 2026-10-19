@@ -105,6 +105,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val supportsAnalysis = true
     override val supportsVideoExtraction = true
     override val supportsCleanSplit = true
+    override val supportsConversion = true
+    override val conversionSuccessMessage = "已转换并发起下载，请检查下载记录。"
     override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
     override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
@@ -192,6 +194,21 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         downloadBlob(outputBlob(file.bytes.toByteArray(), file.mime), "LivePhoto-clean.${file.extension}")
         return "${file.mime}：已发起下载，请检查下载记录；另一文件需单独保存。"
+    }
+
+    override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<ConvertedPhoto> {
+        val file = files[reference] ?: error("请重新选择待检查照片")
+        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Conversion input exceeds 32 MiB"))
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        return when (val result = prepareConvertedPhoto(DefaultLivePhotoCore(), browserBytes(file), target, Cancellation { job?.isActive == false })) {
+            is CoreResult.Failure -> result
+            is CoreResult.Success -> {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                downloadBlob(outputBlob(result.value.bytes.toByteArray(), "image/jpeg"), "LivePhoto-converted-${target.protocol.value}.jpg")
+                CoreResult.Success(result.value.report)
+            }
+        }
     }
 
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {

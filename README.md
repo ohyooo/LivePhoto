@@ -116,6 +116,8 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 “准备清理拆分”调用 Core Clean Split，先在内存中移除动态照片绑定并验证输出，不立即下载或保存。当前共享界面只接受一张普通 JPEG 加一个 MP4/MOV 的结果，不丢弃额外资产、不转码，输入上限 32 MiB。报告分别显示图片编码数据保留、视频原字节一致性和普通 metadata 的实际保留结果；`Unknown` 不代表已保证保留。准备成功后使用“保存拆分图片”“保存拆分视频”分别导出，Android 分别保存到 `Pictures/LivePhoto` 和 `Movies/LivePhoto`。两次外部保存不是原子成对提交，一项失败不撤销另一项；请核对每项下载或相册记录。重新选择输入会清除待保存结果（包括重选同一个文件）。不修改原片、不开放 Apple 新写入；实际验收见对应 CI。
 
+“协议转换”同样使用独立待检查照片，不需要生成用的图片、视频。选择“转换为 OPPO / OnePlus”“转换为 Google V2”或“转换为 Google V1”，再点“转换并另存”；当前只导出单一 JPEG 载体，输入上限 32 MiB。同目标默认原样保留，不规范化；跨协议由 Core 清理已确认的源绑定、重新装配并验证，分别报告图片/视频及 metadata 保留结果，不宣称整个载体字节不变。不会自动修复、转码、授权 metadata 丢失或覆盖原片。普通照片不当作 Create；部分 OPPO→Google 因 EXIF 布局安全限制返回 `UNSAFE_METADATA_REWRITE`，不输出、不删 EXIF 绕过。更换目标或重新选择输入会清除旧报告；浏览器显示下载已发起，Android 另存到 `Pictures/LivePhoto`。实际两端验收以对应 CI 为准。
+
 在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
 
 ```sh

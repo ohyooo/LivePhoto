@@ -16,6 +16,25 @@ import java.util.UUID
 class AndroidCreateController(private val android: AndroidContext, private val core: LivePhotoCore) {
     data class Created(val uri: Uri, val operation: OperationResult)
     data class Extracted(val uri: Uri, val report: livephoto.ui.ExtractedVideo)
+    data class Converted(val uri: Uri, val report: livephoto.ui.ConvertedPhoto)
+
+    suspend fun convertPhoto(input: Uri, target: ProtocolSelector): CoreResult<Converted> = withContext(Dispatchers.IO) {
+        val job = currentCoroutineContext()[Job]
+        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        catch (limit: InputBudgetExceededException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
+                limit.message ?: "Conversion input exceeds 32 MiB"))
+        }
+        when (val result = livephoto.ui.prepareConvertedPhoto(core, bytes, target, Cancellation { job?.isActive == false })) {
+            is CoreResult.Failure -> result
+            is CoreResult.Success -> {
+                currentCoroutineContext().ensureActive()
+                val prepared = result.value
+                val uri = AndroidPhotoExporter(android.contentResolver).publish(prepared.bytes.toByteArray(), "LivePhoto-converted-${UUID.randomUUID()}.jpg")
+                CoreResult.Success(Converted(uri, prepared.report))
+            }
+        }
+    }
 
     /** Preparation is memory-only. Each later export is an explicit single-file action. */
     suspend fun cleanSplit(input: Uri): CoreResult<livephoto.ui.PreparedCleanSplit> = withContext(Dispatchers.IO) {
