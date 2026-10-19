@@ -26,9 +26,8 @@ import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLElement
 import org.w3c.files.File
 import org.w3c.files.Blob
-import org.w3c.files.BlobPropertyBag
-import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Int8Array
+import kotlin.js.JsAny
 import kotlin.js.Promise
 import kotlin.math.roundToLong
 import livephoto.core.*
@@ -36,18 +35,28 @@ import livephoto.core.memory.*
 import livephoto.ui.*
 
 /** Normalize native JS Promise errors before they cross shared Kotlin UI handlers. */
-private suspend fun <T> browserAwait(promise: Promise<T>): T = promise.catch<T> { error ->
-    throw IllegalStateException(js("String(error && error.message || error)").unsafeCast<String>().take(2000))
-}.await()
+private suspend fun <T : JsAny> browserAwait(promise: Promise<T>): T = promise.await()
+
+private suspend fun browserBytes(file: Blob): ByteArray {
+    val values = Int8Array(browserFileBytes(file).await())
+    return ByteArray(values.length) { browserByte(values, it) }
+}
+
+private fun outputBlob(bytes: ByteArray, mime: String): Blob {
+    val values = Int8Array(bytes.size)
+    bytes.forEachIndexed { index, byte -> browserSetByte(values, index, byte) }
+    return browserBlob(values, mime)
+}
 
 public fun main() {
+    browserRuntimeReady()
     ComposeViewport(document.getElementById("app")!!, configure = { isA11YEnabled = true }) {
         val browserDark = isSystemInDarkTheme()
         var selectedDark by remember { mutableStateOf<Boolean?>(null) }
         val dark = selectedDark ?: browserDark
         SideEffect {
-            document.documentElement?.unsafeCast<HTMLElement>()?.style?.setProperty("color-scheme", if (dark) "dark" else "light")
-            document.documentElement?.unsafeCast<HTMLElement>()?.style?.setProperty("--livephoto-media-background", if (dark) "#151b26" else "#f5f7fb")
+            (document.documentElement as? HTMLElement)?.style?.setProperty("color-scheme", if (dark) "dark" else "light")
+            (document.documentElement as? HTMLElement)?.style?.setProperty("--livephoto-media-background", if (dark) "#151b26" else "#f5f7fb")
         }
         val platform = remember { BrowserPlatform() }
         val resolver = LocalFontFamilyResolver.current
@@ -55,12 +64,10 @@ public fun main() {
         var fontError by remember { mutableStateOf(false) }
         LaunchedEffect(resolver) {
             try {
-                val response = window.fetch("fonts/NotoSansSC-Regular.otf", js("({})")).await()
-                check(response.ok) { "Bundled font unavailable" }
-                val values = Int8Array(response.arrayBuffer().await())
-                val bytes = ByteArray(values.length) { values.asDynamic()[it].unsafeCast<Byte>() }
+                val values = Int8Array(browserFont().await())
+                val bytes = ByteArray(values.length) { browserByte(values, it) }
                 resolver.preload(FontFamily(Font("NotoSansSC", bytes)))
-                platform.media = window.asDynamic().livePhotoMediaReady.unsafeCast<Promise<dynamic>>().await()
+                platform.media = browserMediaReady().await()
                 fontsReady = true
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { fontError = true }
@@ -76,7 +83,7 @@ public fun main() {
 
 private class BrowserPlatform : LivePhotoUiPlatform {
     private val files = mutableMapOf<String, File>()
-    var media: dynamic = null
+    lateinit var media: BrowserMedia
     private data class Timeline(val root: String, val origin: Double)
     private data class Frame(val image: String, val root: String, val sourceTime: Double)
     private val timelines = mutableMapOf<String, Timeline>()
@@ -117,7 +124,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     currentResult(reference)
                 } else currentResult(null)
                 input.value = ""
-                Unit
+                null
             }
             document.body!!.appendChild(input)
             onDispose { input.onchange = null; input.remove() }
@@ -142,14 +149,9 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             Selection.Nearest, Time(1, 1u)) }
         if (photo.size.toLong() + movie.size.toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
-        suspend fun bytes(file: File): ByteArray {
-            val buffer = file.asDynamic().arrayBuffer().unsafeCast<Promise<ArrayBuffer>>().await()
-            val values = Int8Array(buffer)
-            return ByteArray(values.length) { values.asDynamic()[it].unsafeCast<Byte>() }
-        }
         val ctx = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u))
-        val imageSource = MemoryBinarySource(Bytes(bytes(photo)), SourceId("browser-image"))
-        val videoSource = MemoryBinarySource(Bytes(bytes(movie)), SourceId("browser-video"))
+        val imageSource = MemoryBinarySource(Bytes(browserBytes(photo)), SourceId("browser-image"))
+        val videoSource = MemoryBinarySource(Bytes(browserBytes(movie)), SourceId("browser-video"))
         val output = MemoryOutputTransaction(ctx, "browser-create")
         var created: OperationResult? = null
         try {
@@ -161,9 +163,9 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 is CoreResult.Success -> {
                     created = result.value
                     val asset = result.value.output.assets.single()
-                    val blob = Blob(arrayOf(output.committedAssets().getValue(asset.id).toByteArray()), BlobPropertyBag(type = asset.mime))
+                    val blob = outputBlob(output.committedAssets().getValue(asset.id).toByteArray(), asset.mime)
                     lastResult = blob to movie
-                    val url = window.asDynamic().URL.createObjectURL(blob).unsafeCast<String>()
+                    val url = browserObjectUrl(blob)
                     try {
                         val link = (document.createElement("a") as HTMLAnchorElement).apply {
                             href = url
@@ -171,7 +173,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                         }
                         document.body!!.appendChild(link)
                         try { link.click() } finally { link.remove() }
-                    } finally { window.setTimeout({ window.asDynamic().URL.revokeObjectURL(url) }, 60_000) }
+                    } finally { window.setTimeout({ browserRevokeUrl(url) }, 60_000) }
                     val operation = result.value.copy(output = MediaOutput(
                         listOf(asset.copy(readableSource = null, accessReference = "browser-download:${asset.id.value}")), result.value.output.receipt))
                     CoreResult.Success(CreatedPhoto(operation))
@@ -188,11 +190,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         val file = files[reference] ?: return
         key(reference) {
             HtmlElementView(factory = {
-                val preview = media[0].imagePreview(file, onScroll)
-                val element = preview.element.unsafeCast<HTMLElement>()
-                element.asDynamic().releasePreview = preview.dispose
-                element
-            }, modifier = modifier.height(160.dp), onRelease = { it.asDynamic().releasePreview() })
+                browserPreviewElement(media.player.imagePreview(file, onScroll))
+            }, modifier = modifier.height(160.dp), onRelease = { browserReleasePreview(it) })
         }
     }
 
@@ -201,11 +200,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         val result = lastResult ?: return
         key(result) {
             HtmlElementView(factory = {
-                val preview = media[0].resultPreview(result.first, result.second, onScroll)
-                val element = preview.element.unsafeCast<HTMLElement>()
-                element.asDynamic().releasePreview = preview.dispose
-                element
-            }, modifier = modifier, onRelease = { it.asDynamic().releasePreview() })
+                browserPreviewElement(media.player.resultPreview(result.first, result.second, onScroll))
+            }, modifier = modifier, onRelease = { browserReleasePreview(it) })
         }
     }
 
@@ -224,27 +220,25 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         override val playback: State<VideoPlayback> = state
         override val coverTime: Double? get() = selectedFrame?.takeIf { it.root == timeline.root }
             ?.let { (it.sourceTime - timeline.origin).takeIf { time -> time >= 0 && time < state.value.duration } }
-        private var surface: dynamic = null
-        private var job: dynamic = null
+        private var surface: BrowserPlayer? = null
+        private var job: BrowserEditJob? = null
         private var disposed = false
         @Composable
         override fun Player(modifier: Modifier, onScroll: (Float) -> Unit) {
             key(this) {
             HtmlElementView(factory = {
-                val callback: (dynamic) -> Unit = { value ->
-                    if (!disposed) state.value = VideoPlayback(value.duration.unsafeCast<Double>(), value.current.unsafeCast<Double>(),
-                        value.seeking.unsafeCast<Boolean>(), value.ready.unsafeCast<Boolean>(), value.error.unsafeCast<String?>(),
-                        value.width.unsafeCast<Double>(), value.height.unsafeCast<Double>(),
-                        value.paused.unsafeCast<Boolean>(), value.volume.unsafeCast<Double>(), value.muted.unsafeCast<Boolean>(),
-                        value.rate.unsafeCast<Double>(), value.fullscreen.unsafeCast<Boolean>())
+                val callback: (BrowserPlayback) -> Unit = { value ->
+                    if (!disposed) state.value = VideoPlayback(value.duration, value.current,
+                        value.seeking, value.ready, value.error, value.width, value.height,
+                        value.paused, value.volume, value.muted, value.rate, value.fullscreen)
                 }
-                if (surface == null) surface = media[0].createPlayer(file, callback, onScroll)
-                surface.element.unsafeCast<HTMLElement>()
+                if (surface == null) surface = media.player.createPlayer(file, callback, onScroll)
+                surface!!.element
             }, modifier = modifier)
             }
         }
         override fun seek(seconds: Double) { surface?.seek(seconds) }
-        override val canFullscreen: Boolean get() = document.asDynamic().fullscreenEnabled.unsafeCast<Boolean>()
+        override val canFullscreen: Boolean get() = browserFullscreenEnabled()
         override fun togglePlayback() { surface?.togglePlayback() }
         override fun setVolume(volume: Double) { surface?.setVolume(volume) }
         override fun setMuted(muted: Boolean) { surface?.setMuted(muted) }
@@ -252,29 +246,26 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         override fun setFullscreen(fullscreen: Boolean) { surface?.setFullscreen(fullscreen) }
         override suspend fun capture(): String {
             check(surface != null && !disposed) { "播放器不可用" }
-            val result = browserAwait(surface.capture().unsafeCast<Promise<dynamic>>())
+            val result = browserAwait(surface!!.capture())
             check(!disposed) { "输入已改变" }
-            val blob = result.blob.unsafeCast<Blob>()
-            val file = js("new File([blob], 'video-cover.jpg', {type:'image/jpeg'})").unsafeCast<File>()
+            val file = browserFile(result.blob, "video-cover.jpg", "image/jpeg")
             val reference = register(MediaKind.Image, file)
-            selectedFrame = Frame(reference, timeline.root, timeline.origin + result.time.unsafeCast<Double>())
+            selectedFrame = Frame(reference, timeline.root, timeline.origin + result.time)
             return reference
         }
         override suspend fun process(start: Double, end: Double, transcodeVideo: Boolean): EditedVideo {
             check(!disposed && job == null) { "已有媒体任务或输入已改变" }
-            val options = js("({})")
-            options.start = start; options.end = end; options.transcodeVideo = transcodeVideo
-            job = media[1].startVideoEdit(file, options)
+            val pending = media.editor.startVideoEdit(file, browserEditOptions(start, end, transcodeVideo))
+            job = pending
             try {
-                val result = browserAwait(job.promise.unsafeCast<Promise<dynamic>>())
+                val result = browserAwait(pending.promise)
                 check(!disposed) { "输入已改变" }
-                val blob = result.blob.unsafeCast<Blob>()
                 val name = if (transcodeVideo) "transcoded-H264.mp4" else "trimmed-video.mp4"
-                val editedFile = js("new File([blob], name, {type:'video/mp4'})").unsafeCast<File>()
-                val known = result.timelineKnown.unsafeCast<Boolean>()
-                val mapped = if (known) Timeline(timeline.root, timeline.origin + result.origin.unsafeCast<Double>()) else null
+                val editedFile = browserFile(result.blob, name, "video/mp4")
+                val known = result.timelineKnown
+                val mapped = if (known) Timeline(timeline.root, timeline.origin + result.origin) else null
                 val reference = register(MediaKind.Video, editedFile, mapped)
-                val summary = if (known) "copy 裁剪完成；请求 ${mediaSeconds(start)}～${mediaSeconds(end)}，实际保留的视频帧 ${mediaSeconds(result.actualStart.unsafeCast<Double>())}～${mediaSeconds(result.actualEnd.unsafeCast<Double>())}。音视频编码数据包已核对。" else
+                val summary = if (known) "copy 裁剪完成；请求 ${mediaSeconds(start)}～${mediaSeconds(end)}，实际保留的视频帧 ${mediaSeconds(checkNotNull(result.actualStart))}～${mediaSeconds(checkNotNull(result.actualEnd))}。音视频编码数据包已核对。" else
                     "显式 H.264 转码完成，音频数据包 copy 已核对；未证明原始时间映射，请在新视频上重新选择封面。"
                 return EditedVideo(reference, summary + " 普通 metadata 保留不作完整保证。")
             } finally { job = null }

@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$source = 'ui/build/dist/js/productionExecutable'
+$source = 'ui/build/dist/wasmJs/productionExecutable'
 if (-not (Test-Path $source)) { throw 'Missing production Compose browser distribution.' }
 $destination = 'ci-output/web-ui'
 if (Test-Path $destination) { throw 'Use a fresh Web UI output directory.' }
@@ -37,11 +37,15 @@ foreach ($name in @('index.html', 'livephoto-ui.js')) {
     if (-not (Test-Path (Join-Path $destination $name))) { throw "Missing browser entry: $name" }
 }
 $files = @(Get-ChildItem $destination -Recurse -File)
+$applicationWasm = @($files | Where-Object { $_.DirectoryName -eq (Resolve-Path $destination).Path -and $_.Extension -eq '.wasm' -and $_.Name -notmatch 'skiko' })
+if ($applicationWasm.Count -eq 0) { throw 'Missing Kotlin/Wasm application binary (Skiko/FFmpeg alone are not sufficient).' }
 if ($files | Where-Object { $_.Extension -match '^\.(jpg|jpeg|mp4|mov|heic|heif|apk|klib)$' }) { throw 'Web UI package contains media/test inputs.' }
 [ordered]@{
     commit = $env:GITHUB_SHA
     run = $env:GITHUB_RUN_ID
     scope = 'shared-compose-screen-browser-picker-local-core-download-no-server-processing'
+    kotlinRuntime = 'wasmJs'
+    applicationWasm = @($applicationWasm.Name)
     files = @($files | ForEach-Object {
         [ordered]@{
             path = [IO.Path]::GetRelativePath((Resolve-Path $destination).Path, $_.FullName).Replace('\', '/')

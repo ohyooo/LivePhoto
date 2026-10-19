@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew :verifyWebBuild :shared:jsBrowserProductionLibraryDistribution :ui:jsBrowserDistribution --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-build.log ci-output/web-ui-build.log
+          ./gradlew :verifyWebBuild :shared:jsBrowserProductionLibraryDistribution :ui:wasmJsBrowserDistribution --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-build.log ci-output/web-ui-build.log
 
       - name: Cache packaging dependencies
         uses: actions/cache@v6
@@ -163,6 +163,16 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-web-common-evidence.ps1
 
+      - name: Execute the same common Kotlin tests as Wasm in Chrome
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew :verifyWebBuild :shared:wasmJsBrowserTest --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-wasm-common.log
+
+      - name: Verify every Wasm test executed without skipping
+        shell: pwsh
+        run: ./scripts/verify-web-common-evidence.ps1 -Target wasmJs
+
       - name: Collect raw common test diagnostics
         if: always()
         shell: pwsh
@@ -170,6 +180,9 @@ jobs:
           New-Item -ItemType Directory -Path ci-output/web-common-results -Force | Out-Null
           Get-ChildItem shared/build/test-results/jsBrowserTest -File -Filter '*.xml' -ErrorAction SilentlyContinue |
             Copy-Item -Destination ci-output/web-common-results -Force
+          New-Item -ItemType Directory -Path ci-output/web-wasm-common-results -Force | Out-Null
+          Get-ChildItem shared/build/test-results/wasmJsBrowserTest -File -Filter '*.xml' -ErrorAction SilentlyContinue |
+            Copy-Item -Destination ci-output/web-wasm-common-results -Force
 
       - name: Preserve Kotlin common test evidence without media
         if: always()
@@ -181,6 +194,9 @@ jobs:
             ci-output/web-common.log
             ci-output/web-common-evidence.json
             ci-output/web-common-results/*.xml
+            ci-output/web-wasm-common.log
+            ci-output/web-wasm-common-evidence.json
+            ci-output/web-wasm-common-results/*.xml
           if-no-files-found: warn
           retention-days: 1
 
@@ -317,6 +333,9 @@ jobs:
             ci-output/web-common.log
             ci-output/web-common-evidence.json
             ci-output/web-common-results/*.xml
+            ci-output/web-wasm-common.log
+            ci-output/web-wasm-common-evidence.json
+            ci-output/web-wasm-common-results/*.xml
           if-no-files-found: warn
           retention-days: 14
 

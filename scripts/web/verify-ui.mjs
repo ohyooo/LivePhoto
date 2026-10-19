@@ -9,6 +9,7 @@ import {composeDriver} from './ui-interaction.mjs';
 
 const root = resolve('ci-output/web-ui');
 const apiRoot = resolve('ci-output/browser-api/web-library');
+const uiManifest = JSON.parse((await readFile('ci-output/web-ui-package-evidence.json','utf8')).replace(/^\uFEFF/,''));
 const fixtures = await mkdtemp(join(tmpdir(), 'livephoto-ui-'));
 const ffmpeg = process.env.LIVEPHOTO_FFMPEG;
 if (!ffmpeg) throw Error('Synthetic media generator required');
@@ -95,6 +96,9 @@ try {
     };
     await button('生成并保存 Live Photo').waitFor({state:'attached'});
     check(label+':subpath-assets-loaded',
+      await page.evaluate(()=>document.documentElement.dataset.livephotoRuntime)==='kotlin-wasm-compose' &&
+      uiManifest.kotlinRuntime==='wasmJs' && uiManifest.applicationWasm?.length>0 &&
+      uiManifest.applicationWasm.every(name=>loaded.some(r=>r.url===origin+'/livephoto/'+name&&r.status===200)) &&
       loaded.some(r=>r.url.startsWith(origin+'/livephoto/')&&r.url.endsWith('.wasm')&&r.status===200) &&
       loaded.some(r=>r.url===origin+'/livephoto/fonts/NotoSansSC-Regular.otf'&&r.status===200) &&
       loaded.every(r=>r.status===200&&r.url.startsWith(origin+'/livephoto/')));

@@ -19,7 +19,7 @@ gradle.projectsEvaluated {
         group = "verification"
         doLast {
             check(paths == listOf(":", ":shared", ":ui")) { "Unexpected Web UI projects: $paths" }
-            check(targets.count { it.endsWith(":js") } == 2 &&
+            check(targets.count { it.endsWith(":js") } == 1 && targets.count { it.endsWith(":wasm") } == 2 &&
                 targets.none { it.endsWith(":native") || it.endsWith(":jvm") || it.endsWith(":androidJvm") }) {
                 "Unexpected Web UI targets: $targets"
             }

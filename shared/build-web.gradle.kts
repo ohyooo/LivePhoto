@@ -2,6 +2,15 @@ plugins { alias(libs.plugins.kotlin.multiplatform) }
 
 kotlin {
     explicitApi()
+    wasmJs {
+        browser {
+            testTask {
+                useKarma { useChromeHeadless() }
+                outputs.upToDateWhen { false }
+                outputs.doNotCacheIf("Always execute common protocol regressions") { true }
+            }
+        }
+    }
     js {
         outputModuleName = "livephoto-core"
         useEsModules()

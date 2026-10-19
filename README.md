@@ -56,7 +56,7 @@ Linux，在解压位置运行：
 
 ## 浏览器功能库（无 UI）
 
-Web 入口直接复用 `shared/commonMain`，不依赖 Compose、桌面进程、JVM 或 FFmpeg。当前只实现 Kotlin/JS，不是 Wasm；编译、真实浏览器验收结果请查看 [Web Library CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml)。
+独立 JS 功能库直接复用 `shared/commonMain`，不依赖 Compose、桌面进程、JVM 或 FFmpeg。共享 Compose 网页应用改用 Kotlin/Wasm，仍复用同一个 Core；独立 JS 功能库保留供其它网页调用。各提交的实际编译、浏览器验收结果请查看 [Web Library CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml)。
 
 成功运行上传 `LivePhoto-web-js-<run>-<attempt>`：`web-library/` 是功能库，包含 `livephoto.mjs` 浏览器入口、Kotlin 编译模块及 TypeScript 声明。保留目录中全部模块，通过 HTTP(S) 静态服务使用，不要只复制单个文件或用 `file://` 打开。不需要服务端上传、处理照片，也不提供网页界面。
 
@@ -102,7 +102,7 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 与 Android/Native 分开构建，不同时传入 `livephoto.android` 或 `livephoto.nativeTarget`。原始编译产物位于 `shared/build/dist/js/productionLibrary/`；`scripts/package-web.ps1` 添加 File/Blob 入口及哈希清单。Web CI 使用独立合成媒体，在真正的 Chromium 和 module Worker 中验证生产库，不把桌面测试数算成浏览器测试，也不上传媒体输入或生成结果。
 
-协议单元测试优先使用 Kotlin `shared/src/commonTest`，由不同 target 编译同一份测试，不用 JS 重写协议断言。桌面真实 FFmpeg/文件素材测试位于 `desktopTest`，Native 主机适配位于 `nativeTest`，不会为浏览器伪造这些后端。Web 是 Kotlin/JS browser target，不是 `wasmJs`；可运行 `./gradlew -Plivephoto.web=true :shared:jsBrowserTest`，需要已有 Node.js、Chrome（必要时设置 `CHROME_BIN`）和 JDK 25。该新增测试链的实际验收状态见 Web 路线文档；外围文件选择、下载、Worker 和 UI 验收仍使用浏览器集成测试。
+协议单元测试使用 Kotlin `shared/src/commonTest`，由不同 target 编译同一份测试，不用 JS 重写协议断言。桌面真实 FFmpeg/文件素材测试位于 `desktopTest`，Native 主机适配位于 `nativeTest`，不会为浏览器伪造这些后端。浏览器分别运行 `./gradlew -Plivephoto.web=true :shared:jsBrowserTest :shared:wasmJsBrowserTest`，需要已有 Node.js、Chrome（必要时设置 `CHROME_BIN`）和 JDK 25。实际验收状态见 Web 路线文档；外围文件选择、下载、Worker 和 UI 验收仍使用浏览器集成测试。
 
 ## 浏览器共享界面
 
@@ -113,10 +113,10 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
 
 ```sh
-./gradlew -Plivephoto.web=true -Plivephoto.webUi=true :verifyWebBuild :ui:jsBrowserDistribution
+./gradlew -Plivephoto.web=true -Plivephoto.webUi=true :verifyWebBuild :ui:wasmJsBrowserDistribution
 ```
 
-原始静态网页产物位于 `ui/build/dist/js/productionExecutable/`。Core 与界面代码使用 Kotlin/JS；Compose 图形运行时与可选 FFmpeg 都可能包含 Wasm 文件，不表示 Core 已迁移至 Kotlin/Wasm。界面复用窗口尺寸自适应布局；选择 JPEG 和 MP4 后生成下载，协议和输入限制与现有应用一致。浏览器只能确认已发起下载，不能保证用户最终保存，因此成功提示不冒充磁盘持久化。刷新页面后需要重新选择输入。
+原始静态网页产物位于 `ui/build/dist/wasmJs/productionExecutable/`。应用的公共 Core 和 Compose UI 编译为 Kotlin/Wasm；JS 仅用于入口加载和浏览器媒体、文件适配。需要支持 WasmGC 的现代浏览器。打包清单单独标识 Kotlin 应用 Wasm，CI 不会把 Skiko 或 FFmpeg 的 Wasm 当成应用迁移证据。界面保持自适应布局；选择 JPEG 和 MP4 后生成下载，协议和输入限制不变。浏览器只能确认已发起下载，不保证用户最终保存；刷新后需要重新选择输入。当前迁移的实际验证状态见 Web 路线文档。
 
 网页视频编辑入口及新版交互的验收状态见 [Web 路线](docs/web-roadmap.md)：
 

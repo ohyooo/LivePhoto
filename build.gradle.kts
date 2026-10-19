@@ -40,7 +40,7 @@ gradle.projectsEvaluated {
         description = "Verify the headless JS library graph has no UI or Native adapter."
         doLast {
             check(projectPaths == listOf(":", ":shared")) { "Unexpected Web projects: $projectPaths" }
-            check(platformTargets.count { it.endsWith(":js") } == 1 &&
+            check(platformTargets.count { it.endsWith(":js") } == 1 && platformTargets.count { it.endsWith(":wasm") } == 1 &&
                 platformTargets.none { it.endsWith(":native") || it.endsWith(":jvm") || it.endsWith(":androidJvm") }) {
                 "Unexpected Web targets: $platformTargets"
             }

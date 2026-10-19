@@ -5,12 +5,13 @@ plugins {
 }
 
 kotlin {
-    js {
+    wasmJs {
         outputModuleName = "livephoto-ui"
         browser { commonWebpackConfig { outputFileName = "livephoto-ui.js" } }
         binaries.executable()
     }
     sourceSets {
+        wasmJsMain.dependencies { implementation(libs.kotlinx.browser) }
         commonMain.dependencies {
             implementation(project(":shared"))
             implementation(libs.compose.shared.runtime)

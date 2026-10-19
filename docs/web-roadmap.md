@@ -1,6 +1,6 @@
 # Web 功能路线与进度
 
-浏览器复用 `shared/commonMain` 的协议 Core；不得在 JS、UI 中重写协议、猜测厂商变体，或用网页测试冒充真机兼容。先完善 Kotlin/JS，Kotlin/Wasm 是后续可选项，不是当前发布前提。
+浏览器复用 `shared/commonMain` 的协议 Core；不得在 JS、UI 中重写协议、猜测厂商变体，或用网页测试冒充真机兼容。按最新决定，共享 Kotlin Compose UI 与 Core 迁移为 `wasmJs` 浏览器应用，不另写 HTML/JS 界面；独立 Kotlin/JS 功能库保留。
 
 ## 已完成的基础
 
@@ -31,7 +31,7 @@
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [ ] 将浏览器媒体能力正式接入统一 Core MediaBackend，补齐独立 probe/remux 等接口及相应能力与保真报告。当前网页预处理可用，不表示协议功能库已公开媒体后端或完整媒体 API。
-- [ ] Kotlin/Wasm target 与独立验收；Compose 图形运行时的 Wasm 文件不代表 Core 已实现 Kotlin/Wasm。
+- [ ] Kotlin/Wasm Compose 应用迁移与独立验收（进行中）：复用现有 `ui/commonMain`，浏览器入口改用类型化互操作；同一份公共协议测试分别在 JS/Wasm 运行，生产应用须通过真实 Chrome 的原有 UI、生成下载、播放器和主题检查，成功后再更新在线版本。不能仅凭 Skiko/FFmpeg 的 Wasm 文件宣称完成。
 - [ ] 搁置的观察项：播放器画面外透明孔洞/残影。用户未观察到，暂不投入处理、不阻塞后续任务，也不标记为已修复。
 
 Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入不上传服务器；仓库和 CI 不增加手机/reference 原片或其衍生成品。测试用独立合成素材，报告不附带媒体。
