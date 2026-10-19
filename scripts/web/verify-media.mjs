@@ -15,12 +15,28 @@ execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','la
   '-bf','0','-g','25','-c:a','aac','-movflags','+faststart',source],{timeout:60000});
 const coreSource=join(directory,'core-input.mp4');
 const monoSource=join(directory,'core-mono.mp4');
-for(const [destination,channels] of [[coreSource,'2'],[monoSource,'1']])execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=64x64:rate=25',
+const shiftedSource=join(directory,'core-fractional-start.mp4');
+execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=64x64:rate=25',
   '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','25',
-  '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-c:a','aac','-ac',channels,'-use_editlist','0',
-  '-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0','-movflags','+faststart',destination],{timeout:60000});
+  '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-c:a','aac','-ac','2','-use_editlist','0',
+  '-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0','-movflags','+faststart',shiftedSource],{timeout:60000});
+const generateCore=args=>execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error',...args],{timeout:60000});
+const videoOnly=join(directory,'core-video-only.mp4');
+generateCore(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-frames:v','50','-c:v','libx264','-threads','1','-bf','0','-g','25','-sc_threshold','0','-pix_fmt','yuv420p',
+  '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-use_editlist','0',
+  '-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoOnly]);
+// Match the independently validated desktop profile: encode fixture audio and
+// video separately, then copy-mux. Do not hide combined-encoder clock shifts.
+for(const [destination,channels] of [[coreSource,'2'],[monoSource,'1']]) {
+  const audio=join(directory,'core-audio-'+channels+'.m4a');
+  generateCore(['-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=2','-c:a','aac','-ac',channels,
+    '-flags:a','+bitexact','-use_editlist','0','-fflags','+bitexact','-write_btrt','0',audio]);
+  generateCore(['-i',videoOnly,'-i',audio,'-map','0:v','-map','1:a','-c','copy','-use_editlist','0','-map_metadata','-1',
+    '-metadata:s:v','encoder=','-fflags','+bitexact','-write_btrt','0',destination]);
+}
 const coreInput=await readFile(coreSource);
 const monoInput=await readFile(monoSource);
+const shiftedInput=await readFile(shiftedSource);
 const input=await readFile(source), root=resolve('ci-output/web-ui'),apiRoot=resolve('ci-output/browser-api/web-library');
 const server=createServer(async(req,res)=>{
   try {
@@ -29,6 +45,7 @@ const server=createServer(async(req,res)=>{
     if(path==='/fixture') {res.setHeader('Content-Type','video/mp4');res.end(input);return;}
     if(path==='/core-fixture') {res.setHeader('Content-Type','video/mp4');res.end(coreInput);return;}
     if(path==='/core-mono-fixture') {res.setHeader('Content-Type','video/mp4');res.end(monoInput);return;}
+    if(path==='/core-fractional-fixture') {res.setHeader('Content-Type','video/mp4');res.end(shiftedInput);return;}
     if(path.startsWith('/api/')) {
       const file=resolve(apiRoot,'.'+path.slice(4));
       if(!file.startsWith(apiRoot+sep)){res.writeHead(403).end();return;}
@@ -129,6 +146,7 @@ try {
     const forbidden=await backend.transcode(file);
     const malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
     const mono=await backend.remux(await(await fetch('/core-mono-fixture')).blob());
+    const fractional=await backend.trim(await(await fetch('/core-fractional-fixture')).blob(),{start:.4,end:1.6});
     const controller=new AbortController();controller.abort();
     const cancelled=await createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).probe(file);
     const running=new AbortController();
@@ -136,7 +154,7 @@ try {
     const stop=setTimeout(()=>running.abort(),100);
     let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
     let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
-    return {results,capabilities,forbidden,malformed,mono,cancelled,stopped,budget,immutable:before===await hash(file)};
+    return {results,capabilities,forbidden,malformed,mono,fractional,cancelled,stopped,budget,immutable:before===await hash(file)};
   });
   const r=coreResults.results;
   check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes&&
@@ -164,7 +182,8 @@ try {
   },r.extractFrame.bytes);
   check('core-extract-frame-decodes',frame&&r.extractFrame.report.actual.actualTime&&r.extractFrame.report.execution.some(e=>e.backendId==='ffmpeg-wasm'));
   check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob&&
-    !coreResults.mono.success&&coreResults.mono.code==='CAPABILITY_UNSUPPORTED'&&!coreResults.mono.blob);
+    !coreResults.mono.success&&coreResults.mono.code==='CAPABILITY_UNSUPPORTED'&&!coreResults.mono.blob&&
+    !coreResults.fractional.success&&coreResults.fractional.code==='VALUE_NOT_REPRESENTABLE'&&!coreResults.fractional.blob);
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable);
