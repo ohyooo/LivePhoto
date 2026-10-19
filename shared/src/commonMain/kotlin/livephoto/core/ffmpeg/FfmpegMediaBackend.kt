@@ -4,7 +4,8 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.jpeg.JpegParser
 
-/** Optional user-installed executable. No FFmpeg binaries or libraries are bundled. */
+/** Finite FFmpeg orchestration; injected runtime supplies an external executable or private Worker IO.
+ * This class does not install, download or bundle an engine. */
 public class FfmpegMediaBackend(public val executable: String, private val runtime: FfmpegRuntime) : MediaBackend {
     public override fun capabilities(): MediaCapabilities = MediaCapabilities(listOf("ffmpeg-external"),
         listOf(CapabilityEntry(Operation.Probe, Implementation.Experimental, conditions = listOf(

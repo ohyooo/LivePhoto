@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 const root=resolve('ci-output');
 const json=async name=>JSON.parse((await readFile(resolve(root,name),'utf8')).replace(/^\uFEFF/,''));
 for(const [directory,document,scope] of [
-  ['web-library','web-package-evidence.json','kotlin-js-library-browser-file-blob-no-ui-no-media-backend'],
+  ['web-library','web-package-evidence.json','kotlin-js-library-browser-file-blob-optional-media-backend'],
   ['web-ui','web-ui-package-evidence.json','shared-compose-screen-browser-picker-local-core-download-no-server-processing'],
 ]) {
   const manifest=await json(document),base=resolve(root,directory);

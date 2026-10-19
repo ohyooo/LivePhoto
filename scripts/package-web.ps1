@@ -20,7 +20,7 @@ if ($files | Where-Object { $_.Extension -notin @('.mjs', '.js', '.mts', '.ts', 
 [ordered]@{
     commit = $env:GITHUB_SHA
     run = $env:GITHUB_RUN_ID
-    scope = 'kotlin-js-library-browser-file-blob-no-ui-no-media-backend'
+    scope = 'kotlin-js-library-browser-file-blob-optional-media-backend'
     files = @($files | ForEach-Object {
         [ordered]@{
             path = [IO.Path]::GetRelativePath((Resolve-Path $destination).Path, $_.FullName).Replace('\', '/')

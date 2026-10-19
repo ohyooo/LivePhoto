@@ -125,8 +125,12 @@ try {
     const malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
     const controller=new AbortController();controller.abort();
     const cancelled=await createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).probe(file);
+    const running=new AbortController();
+    const interrupted=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:running.signal}).probe(file);
+    const stop=setTimeout(()=>running.abort(),100);
+    let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
     let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
-    return {results,forbidden,malformed,cancelled,budget,immutable:before===await hash(file)};
+    return {results,forbidden,malformed,cancelled,stopped,budget,immutable:before===await hash(file)};
   });
   const r=coreResults.results;
   check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes);
@@ -152,7 +156,8 @@ try {
   },r.extractFrame.bytes);
   check('core-extract-frame-decodes',frame&&r.extractFrame.report.actual.actualTime&&r.extractFrame.report.execution.some(e=>e.backendId==='ffmpeg-wasm'));
   check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob);
-  check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&coreResults.budget);
+  check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
+    !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable);
   if(checks.length!==19||new Set(checks).size!==19)throw Error('Incomplete media evidence');
   await writeFile('ci-output/web-media-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
