@@ -11,6 +11,17 @@ dependencyResolutionManagement {
     repositories {
         if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true") google()
         mavenCentral()
+        if (providers.gradleProperty("livephoto.web").orNull == "true") {
+            // Kotlin's pinned Binaryen optimizer, resolved centrally without
+            // allowing plugins to inject transient project repositories.
+            ivy {
+                name = "KotlinWasmBinaryen"
+                url = uri("https://github.com/WebAssembly/binaryen/releases/download")
+                patternLayout { artifact("version_[revision]/binaryen-version_[revision]-[classifier].[ext]") }
+                metadataSources { artifact() }
+                content { includeModule("com.github.webassembly", "binaryen") }
+            }
+        }
     }
 }
 
