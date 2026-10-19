@@ -26,7 +26,7 @@ generateCore(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-frames:v','50',
   '-vf','setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
   '-c:v','libx264','-threads','1','-bf','0','-g','25','-sc_threshold','0','-pix_fmt','yuv420p',
   '-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-use_editlist','0',
-  '-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoOnly]);
+  '-metadata:s:v','encoder=Lavc libx264','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoOnly]);
 // Match the independently validated desktop profile: encode fixture audio and
 // video separately, then copy-mux. Do not hide combined-encoder clock shifts.
 for(const [destination,channels] of [[coreSource,'2'],[monoSource,'1']]) {
@@ -34,11 +34,15 @@ for(const [destination,channels] of [[coreSource,'2'],[monoSource,'1']]) {
   generateCore(['-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=2','-c:a','aac','-ac',channels,
     '-flags:a','+bitexact','-use_editlist','0','-fflags','+bitexact','-write_btrt','0',audio]);
   generateCore(['-i',videoOnly,'-i',audio,'-map','0:v','-map','1:a','-c','copy','-use_editlist','0','-map_metadata','-1',
-    '-metadata:s:v','encoder=','-fflags','+bitexact','-write_btrt','0',destination]);
+    '-metadata:s:v','encoder=Lavc libx264','-fflags','+bitexact','-write_btrt','0',destination]);
 }
+const emptyEncoderSource=join(directory,'core-empty-encoder.mp4');
+generateCore(['-i',coreSource,'-map','0','-c','copy','-use_editlist','0','-map_metadata','0',
+  '-metadata:s:v','encoder=','-fflags','+bitexact','-write_btrt','0',emptyEncoderSource]);
 const coreInput=await readFile(coreSource);
 const monoInput=await readFile(monoSource);
 const shiftedInput=await readFile(shiftedSource);
+const emptyEncoderInput=await readFile(emptyEncoderSource);
 const input=await readFile(source), root=resolve('ci-output/web-ui'),apiRoot=resolve('ci-output/browser-api/web-library');
 const server=createServer(async(req,res)=>{
   try {
@@ -48,6 +52,7 @@ const server=createServer(async(req,res)=>{
     if(path==='/core-fixture') {res.setHeader('Content-Type','video/mp4');res.end(coreInput);return;}
     if(path==='/core-mono-fixture') {res.setHeader('Content-Type','video/mp4');res.end(monoInput);return;}
     if(path==='/core-fractional-fixture') {res.setHeader('Content-Type','video/mp4');res.end(shiftedInput);return;}
+    if(path==='/core-empty-encoder-fixture') {res.setHeader('Content-Type','video/mp4');res.end(emptyEncoderInput);return;}
     if(path.startsWith('/api/')) {
       const file=resolve(apiRoot,'.'+path.slice(4));
       if(!file.startsWith(apiRoot+sep)){res.writeHead(403).end();return;}
@@ -150,6 +155,7 @@ try {
     const mono=await backend.remux(await(await fetch('/core-mono-fixture')).blob());
     const fractional=await backend.trim(await(await fetch('/core-fractional-fixture')).blob(),{start:.4,end:1.6});
     const unknownColor=await backend.extractFrame(await(await fetch('/core-fractional-fixture')).blob(),{start:.4});
+    const encoderChange=await backend.transcode(await(await fetch('/core-empty-encoder-fixture')).blob(),{authorizeTranscode:true});
     const controller=new AbortController();controller.abort();
     const cancelled=await createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).probe(file);
     const running=new AbortController();
@@ -157,7 +163,7 @@ try {
     const stop=setTimeout(()=>running.abort(),100);
     let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
     let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
-    return {results,capabilities,forbidden,malformed,mono,fractional,unknownColor,cancelled,stopped,budget,immutable:before===await hash(file)};
+    return {results,capabilities,forbidden,malformed,mono,fractional,unknownColor,encoderChange,cancelled,stopped,budget,immutable:before===await hash(file)};
   });
   const r=coreResults.results;
   check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes&&
@@ -187,7 +193,8 @@ try {
   check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob&&
     !coreResults.mono.success&&coreResults.mono.code==='CAPABILITY_UNSUPPORTED'&&!coreResults.mono.blob&&
     !coreResults.fractional.success&&coreResults.fractional.code==='VALUE_NOT_REPRESENTABLE'&&!coreResults.fractional.blob&&
-    !coreResults.unknownColor.success&&coreResults.unknownColor.code==='HDR_PRESERVATION_UNAVAILABLE'&&!coreResults.unknownColor.blob);
+    !coreResults.unknownColor.success&&coreResults.unknownColor.code==='HDR_PRESERVATION_UNAVAILABLE'&&!coreResults.unknownColor.blob&&
+    !coreResults.encoderChange.success&&coreResults.encoderChange.code==='POSTCONDITION_FAILED'&&!coreResults.encoderChange.blob);
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable);

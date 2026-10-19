@@ -74,7 +74,10 @@ public class BrowserFfmpegBackend(executor: MemoryFfmpegExecutor) : MediaBackend
         operations = it.operations.map { entry -> entry.copy(conditions = entry.conditions + listOf(Condition(ConditionOperator.Equals,
             "runtimeProfile", Value.Text("private-worker-input32MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
             if (entry.operation in setOf(Operation.Trim, Operation.Remux, Operation.Transcode)) listOf(Condition(ConditionOperator.Equals,
-                "wasmAudioProfile", Value.Text("absent-or-AAC-LC-stereo-with-original-channelcount2-no-mono-header-normalization"))) else emptyList()) }) }
+                "wasmAudioProfile", Value.Text("absent-or-AAC-LC-stereo-with-original-channelcount2-no-mono-header-normalization"))) else emptyList()) }) }.let { caps ->
+        caps.copy(operations = caps.operations.map { entry -> if (entry.operation == Operation.Transcode) entry.copy(conditions = entry.conditions +
+            Condition(ConditionOperator.Equals, "encoderAnnotation", Value.Text("original-AVC-sample-entry-encoder-annotation-must-match-pinned-muxer-output-otherwise-no-publication"))) else entry })
+    }
     override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = delegate.probe(request)
     override suspend fun trim(job: BackendJob): CoreResult<BackendResult> = copyAudio(Operation.Trim, job) { delegate.trim(job) }
     override suspend fun remux(job: BackendJob): CoreResult<BackendResult> = copyAudio(Operation.Remux, job) { delegate.remux(job) }
