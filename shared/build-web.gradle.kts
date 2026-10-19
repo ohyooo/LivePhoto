@@ -5,11 +5,17 @@ kotlin {
     js {
         outputModuleName = "livephoto-core"
         useEsModules()
-        browser()
+        browser {
+            testTask {
+                useKarma { useChromeHeadless() }
+                outputs.upToDateWhen { false }
+                outputs.doNotCacheIf("Always execute common protocol regressions") { true }
+            }
+        }
         binaries.library()
         generateTypeScriptDefinitions()
     }
-    // Desktop test hosts require FFmpeg and filesystem fixtures. This first Web
-    // target tests the production export in a real browser instead of inventing
-    // fake actual implementations or skipping those backend-dependent tests.
+    sourceSets { commonTest.dependencies { implementation(libs.kotlin.test) } }
+    // Pure Kotlin protocol tests are shared with Native. Desktop FFmpeg/fixture
+    // tests live in desktopTest; Web does not invent their platform actuals.
 }

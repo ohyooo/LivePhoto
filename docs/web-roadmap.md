@@ -18,7 +18,7 @@
 - [x] 有限 JPEG Convert 接口实现：与 Create 分开，不隐式修复或转码；下述 EXIF 限制仍保留。
 - [x] 有限 Repair：默认 dry-run，显式应用安全修改；结构化报告保留阻止/无操作/修复前后问题。Google V1/V2 长度修复通过浏览器验证；默认新建 OPPO 布局保留安全拒绝，见下方限制。
 - [ ] 关键照片 metadata 写入；与视频抽帧、替换封面分开。
-- [ ] 将不依赖文件系统、真实编码素材或 FFmpeg 的公共协议回归接入 JS；不伪造平台 actual、不静默跳过后端测试。
+- [ ] 接通共享 Kotlin `commonTest` 的浏览器运行：已将 47 项桌面素材/真实 FFmpeg 测试与宿主适配移入 `desktopTest`，纯内存测试仍为同一份 Kotlin，共声明 804 项；新增独立 Chrome 测试 job 和无跳过/逐套 XML 门禁，待实际 CI 验证。不是重写 JavaScript 测试，也不是 Kotlin/Wasm 迁移。
 - [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
 - [x] 当前十个公开 API 的 Worker 专项：42 项检查覆盖三个创建目标、只读接口、Clean Split、Convert、Repair 预览/应用或安全拒绝、错误与预算，以及跨线程 Blob 哈希；在 `5009915` 的 [Web CI 协议 job](https://github.com/ohyooo/LivePhoto/actions/runs/39141307170/job/117716540201) 由真实 Chromium 全部执行成功。此处仅指该组验收，不冒充整轮 UI/播放器或发布成功；未来新接口仍须补充专项。
 - [ ] 后续按需将已验证能力接入共享 UI，不另写网页业务逻辑。

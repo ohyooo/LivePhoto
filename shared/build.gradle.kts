@@ -8,6 +8,7 @@ kotlin {
         "windows-x64" -> mingwX64()
         else -> error("Unsupported livephoto.nativeTarget: $target")
     }
+    applyDefaultHierarchyTemplate()
     if (host.name != "mingwX64") {
         sourceSets.getByName("${host.name}Main").kotlin.srcDir("src/posixMain/kotlin")
         host.compilations.getByName("main").cinterops.create("posix") {
@@ -22,10 +23,14 @@ kotlin {
     }
     sourceSets {
         commonTest.dependencies { implementation(libs.kotlin.test) }
+        val desktopTest by creating { dependsOn(commonTest.get()) }
         nativeMain.dependencies {
             api(libs.okio)
             implementation(libs.kotlinx.coroutines)
         }
-        nativeTest.dependencies { implementation(libs.kotlinx.coroutines) }
+        nativeTest {
+            dependsOn(desktopTest)
+            dependencies { implementation(libs.kotlinx.coroutines) }
+        }
     }
 }

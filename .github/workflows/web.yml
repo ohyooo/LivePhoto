@@ -110,6 +110,80 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  common:
+    name: Test Kotlin common protocol
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GRADLE_OPTS: -Dorg.gradle.project.livephoto.web=true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate existing test tools
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) {
+            throw 'Remove gradle-daemon-jvm.properties before running Gradle.'
+          }
+          Get-Command node -ErrorAction Stop | Out-Null
+          $chrome = (Get-Command google-chrome -ErrorAction Stop).Source
+          "CHROME_BIN=$chrome" >> $env:GITHUB_ENV
+          & $chrome --version
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          cache-jdk: true
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: true
+          validate-wrappers: true
+
+      - name: Restore compiled Kotlin task outputs
+        uses: actions/cache@v6
+        with:
+          path: ~/.gradle/caches/build-cache-1
+          key: web-gradle-tasks-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}-${{ github.sha }}
+          restore-keys: |
+            web-gradle-tasks-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}-
+
+      - name: Execute unchanged common Kotlin protocol tests in Chrome
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew :verifyWebBuild :shared:jsBrowserTest --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-common.log
+
+      - name: Verify all declared cases executed without skipping
+        shell: pwsh
+        run: ./scripts/verify-web-common-evidence.ps1
+
+      - name: Collect raw common test diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ci-output/web-common-results -Force | Out-Null
+          Get-ChildItem shared/build/test-results/jsBrowserTest -File -Filter '*.xml' -ErrorAction SilentlyContinue |
+            Copy-Item -Destination ci-output/web-common-results -Force
+
+      - name: Preserve Kotlin common test evidence without media
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-test-report-common-${{ github.run_id }}
+          overwrite: true
+          path: |
+            ci-output/web-common.log
+            ci-output/web-common-evidence.json
+            ci-output/web-common-results/*.xml
+          if-no-files-found: warn
+          retention-days: 1
+
   test:
     name: Test Web ${{ matrix.kind }}
     needs: build
@@ -183,7 +257,7 @@ jobs:
   publish:
     name: Collect reports and publish tested outputs
     if: ${{ always() && needs.build.result == 'success' && !cancelled() }}
-    needs: [build, test]
+    needs: [build, test, common]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -204,11 +278,11 @@ jobs:
           path: ci-output
 
       - name: Verify source identity and complete independent evidence
-        if: ${{ needs.test.result == 'success' }}
+        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' }}
         run: node scripts/web/verify-build.mjs --tests
 
       - name: Publish verified browser library
-        if: ${{ success() && needs.test.result == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-web-js-${{ github.run_id }}-${{ github.run_attempt }}
@@ -219,7 +293,7 @@ jobs:
           retention-days: 14
 
       - name: Publish verified shared website
-        if: ${{ success() && needs.test.result == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-web-ui-${{ github.run_id }}-${{ github.run_attempt }}
@@ -240,6 +314,9 @@ jobs:
             ci-output/web-browser.log
             ci-output/web-package-evidence.json
             ci-output/web-browser-evidence.json
+            ci-output/web-common.log
+            ci-output/web-common-evidence.json
+            ci-output/web-common-results/*.xml
           if-no-files-found: warn
           retention-days: 14
 
@@ -268,7 +345,7 @@ jobs:
           retention-days: 14
 
       - name: Remove temporary handoff artifacts after successful collection
-        if: ${{ success() && needs.test.result == 'success' && github.event_name != 'pull_request' && steps.protocol_reports.outcome == 'success' && steps.ui_reports.outcome == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && github.event_name != 'pull_request' && steps.protocol_reports.outcome == 'success' && steps.ui_reports.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -281,5 +358,5 @@ jobs:
           done
 
       - name: Keep failed test suites visible in the aggregate result
-        if: ${{ always() && needs.test.result != 'success' }}
+        if: ${{ always() && (needs.test.result != 'success' || needs.common.result != 'success') }}
         run: exit 1

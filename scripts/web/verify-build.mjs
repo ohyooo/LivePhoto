@@ -33,5 +33,19 @@ if(process.argv.includes('--tests')) {
   if(!worker?.success||worker.tests!==42||worker.failures!==0||worker.checks?.length!==42||new Set(worker.checks).size!==42||
     JSON.stringify([...worker.checks].sort())!==JSON.stringify(workerChecks.sort())||
     worker.imageSha256!==browser.imageSha256||worker.videoSha256!==browser.videoSha256)throw Error('Incomplete/wrong-input module Worker evidence');
+  const common=await json('web-common-evidence.json');
+  if(common.commit!==process.env.GITHUB_SHA||String(common.run)!==process.env.GITHUB_RUN_ID||
+    common.scope!=='kotlin-commonTest-pure-protocol-real-chrome-no-host-backend'||common.tests<804||common.tests!==common.expectedTests||
+    common.failures!==0||common.skipped!==0||!Array.isArray(common.suites)||!common.suites.length||
+    new Set(common.suites.map(s=>s.name)).size!==common.suites.length||common.suites.reduce((sum,s)=>sum+s.tests,0)!==common.tests||
+    common.reports?.length!==common.suites.length)throw Error('Incomplete/wrong-source common Kotlin test evidence');
+  const reports=new Set();
+  for(const file of common.reports) {
+    const path=resolve(root,file.path);
+    if(!path.startsWith(resolve(root,'web-common-results')+sep)||!file.path.endsWith('.xml')||reports.has(file.path))throw Error('Unsafe/duplicate common report');
+    reports.add(file.path);
+    const bytes=await readFile(path);
+    if(bytes.length!==file.bytes||createHash('sha256').update(bytes).digest('hex')!==file.sha256)throw Error('Common Kotlin report digest mismatch');
+  }
 }
 console.log('WEB_BUILD_INPUTS=VERIFIED; same-commit library and UI hashes'+(process.argv.includes('--tests')?'; independent test suites and theme checks complete':''));

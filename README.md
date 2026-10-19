@@ -102,6 +102,8 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 与 Android/Native 分开构建，不同时传入 `livephoto.android` 或 `livephoto.nativeTarget`。原始编译产物位于 `shared/build/dist/js/productionLibrary/`；`scripts/package-web.ps1` 添加 File/Blob 入口及哈希清单。Web CI 使用独立合成媒体，在真正的 Chromium 和 module Worker 中验证生产库，不把桌面测试数算成浏览器测试，也不上传媒体输入或生成结果。
 
+协议单元测试优先使用 Kotlin `shared/src/commonTest`，由不同 target 编译同一份测试，不用 JS 重写协议断言。桌面真实 FFmpeg/文件素材测试位于 `desktopTest`，Native 主机适配位于 `nativeTest`，不会为浏览器伪造这些后端。Web 是 Kotlin/JS browser target，不是 `wasmJs`；可运行 `./gradlew -Plivephoto.web=true :shared:jsBrowserTest`，需要已有 Node.js、Chrome（必要时设置 `CHROME_BIN`）和 JDK 25。该新增测试链的实际验收状态见 Web 路线文档；外围文件选择、下载、Worker 和 UI 验收仍使用浏览器集成测试。
+
 ## 浏览器共享界面
 
 页面默认跟随浏览器深浅色，右上角太阳／月亮按钮可在当前页面手动切换；刷新后重新跟随。普通播放器整体不超过浏览器可视高度的一半，保持视频比例，全屏不受半屏限制。宽布局加长音量条；竖屏的播放、静音、音量条、倍速和全屏保持同一行，按钮保留点击范围与间距，音量条填满剩余宽度。只有空间不足的横屏布局将音量单独换行。
@@ -586,7 +588,7 @@ Windows 示例（已准备上述前提）：
 
 Linux 将 Wrapper 改为 `./gradlew`、平台改为 `linux-x64`、任务 target 改为 `linuxX64`；macOS 分别使用 `macos-arm64` 与 `macosArm64`。HTML/XML 报告在各模块的 `build/reports/tests/<target>Test/`、`build/test-results/<target>Test/`。
 
-协议兼容素材位于 `shared/src/commonTest/resources/`，包含 19 个固定资产的 SHA-256 清单。20 项固定素材回归与协议、保留、恶意输入、真实媒体测试由三平台运行相同断言。原有素材字节保留；测试展开素材不改变产品依赖，也不代替手机相册认证。
+协议兼容素材位于 `shared/src/desktopTest/resources/`，包含 19 个固定资产的 SHA-256 清单。20 项固定素材回归与协议、保留、恶意输入、真实媒体测试由三平台运行相同断言。原有素材字节保留；测试展开素材不改变产品依赖，也不代替手机相册认证。
 
 ### 库、IO 与打包边界
 

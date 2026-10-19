@@ -79,7 +79,7 @@ if (-not (Test-Path $fixtureEvidence) -or @(Get-Content $fixtureEvidence | Where
 }
 # All existing shared tests must execute, not a tiny Native-only smoke subset.
 $expected = 0
-Get-ChildItem shared/src/commonTest,shared/src/nativeTest -Recurse -File -Filter '*.kt' | ForEach-Object {
+Get-ChildItem shared/src/commonTest,shared/src/desktopTest,shared/src/nativeTest -Recurse -File -Filter '*.kt' | ForEach-Object {
     $expected += [regex]::Matches((Get-Content $_.FullName -Raw), '@Test\b').Count
 }
 if ($expected -le 0 -or $tests -ne $expected) {
@@ -101,7 +101,7 @@ foreach ($group in $groups.Keys) {
         if ($xml.testsuite.name.StartsWith("${Target}Test.$prefix")) { $actual += [int]$xml.testsuite.tests }
     }
     $declared = 0
-    Get-ChildItem shared/src/commonTest,shared/src/nativeTest -Recurse -File -Filter '*.kt' | ForEach-Object {
+    Get-ChildItem shared/src/commonTest,shared/src/desktopTest,shared/src/nativeTest -Recurse -File -Filter '*.kt' | ForEach-Object {
         $source = Get-Content $_.FullName -Raw
         if ($source -match ('(?m)^package\s+' + [regex]::Escape($prefix.TrimEnd('.')) + '(?:\.|\s|$)')) {
             $declared += [regex]::Matches($source, '@Test\b').Count
