@@ -11,6 +11,11 @@ private suspend fun awaitMedia(value: Promise<dynamic>): dynamic = suspendCorout
     value.then<Unit>({ result -> continuation.resume(result) }, { error -> continuation.resumeWithException(error) })
 }
 
+private fun timeRange(value: TimeRange): dynamic = record("start" to time(value.start), "end" to time(value.end))
+private fun timeline(values: List<TimelineSegment>): dynamic = values.map {
+    record("input" to timeRange(it.input), "output" to timeRange(it.output))
+}.toTypedArray()
+
 /** Capability declaration is synchronous and does not fetch or start the optional engine. */
 @JsExport
 public fun browserMediaCapabilities(): String {
@@ -59,14 +64,22 @@ public fun processMedia(input: ByteArray, action: String, executor: dynamic, sta
                 is CoreResult.Success -> {
                     val v = trimmed.value
                     extra = record("requestedStart" to time(v.requestedStart), "requestedEnd" to time(v.requestedEnd),
-                        "actualStart" to time(v.actualStart), "actualEnd" to time(v.actualEnd), "wasTranscoded" to v.wasTranscoded, "retainedHiddenContent" to v.retainedHiddenContent)
+                        "actualStart" to time(v.actualStart), "actualEnd" to time(v.actualEnd), "wasTranscoded" to v.wasTranscoded,
+                        "wasRemuxed" to v.wasRemuxed, "wasBitstreamPreserved" to v.wasBitstreamPreserved, "retainedHiddenContent" to v.retainedHiddenContent,
+                        "timelineMap" to timeline(v.timelineMap), "tracks" to v.tracks.map { track -> record("trackId" to track.trackId.value,
+                            "presented" to timeRange(track.presented), "encoded" to timeRange(track.encoded), "timelineMap" to timeline(track.timelineMap),
+                            "transcoded" to track.transcoded, "samplesPreserved" to track.samplesPreserved) }.toTypedArray())
                     CoreResult.Success(v.operation)
                 }
             }
             else -> when (val frame = core.extractFrame(ExtractFrameRequest(ref,
                 CoverPosition.Timestamp(Time(startUs.toLong(), 1_000_000u), Selection.Nearest, Time(100, 1000u)), ImageEncoding(ImageFormat.Jpeg), output, ctx))) {
                 is CoreResult.Failure -> frame
-                is CoreResult.Success -> { extra = record("actualTime" to time(frame.value.actualTime), "actualFrameIndex" to frame.value.actualFrameIndex?.toString()); CoreResult.Success(frame.value.operation) }
+                is CoreResult.Success -> {
+                    extra = record("requestedTime" to time(Time(startUs.toLong(), 1_000_000u)), "selection" to "Nearest", "tolerance" to time(Time(100, 1000u)),
+                        "actualTime" to time(frame.value.actualTime), "actualFrameIndex" to frame.value.actualFrameIndex?.toString(), "trackId" to frame.value.trackId.value)
+                    CoreResult.Success(frame.value.operation)
+                }
             }
         }
         when (result) {

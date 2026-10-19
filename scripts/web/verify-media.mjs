@@ -182,14 +182,23 @@ try {
       if(action!=='trim'&&original.length!==retained.length)throw Error('Whole-stream packet count changed');
     }
     if(action==='remux')check('core-remux-independent-video-audio',value.report.execution.some(e=>e.remuxed&&!e.transcoded));
-    if(action==='trim')check('core-trim-actual-timeline',!value.report.actual.wasTranscoded&&value.report.actual.actualStart&&value.report.actual.actualEnd);
-    if(action==='transcode')check('core-transcode-explicit-audio-copy',value.report.execution.some(e=>e.transcoded&&e.hardwareUsed===false));
+    if(action==='trim')check('core-trim-actual-timeline',!value.report.actual.wasTranscoded&&value.report.actual.wasBitstreamPreserved&&
+      value.report.actual.actualStart&&value.report.actual.actualEnd&&value.report.actual.timelineMap.length>0&&value.report.actual.tracks.length===2&&
+      value.report.actual.tracks.every(t=>t.samplesPreserved&&!t.transcoded&&t.timelineMap.length>0&&t.presented.start&&t.encoded.end));
+    if(action==='transcode') {
+      const originalVideo=coreBefore.streams.find(s=>s.codec_type==='video'),outputVideo=after.streams.find(s=>s.codec_type==='video');
+      const originalHashes=new Set(coreBefore.packets.filter(p=>p.stream_index===originalVideo.index).map(p=>p.data_hash));
+      check('core-transcode-explicit-audio-copy',outputVideo.codec_name==='h264'&&after.packets.some(p=>p.stream_index===outputVideo.index&&!originalHashes.has(p.data_hash))&&
+        value.report.execution.some(e=>e.transcoded&&e.hardwareUsed===false&&e.inputFacts?.width===64&&e.outputFacts?.tracks.length===2));
+    }
   }
   const frame=await page.evaluate(async data=>{
     const bitmap=await createImageBitmap(new Blob([new Uint8Array(data)],{type:'image/jpeg'}));
     const valid=bitmap.width===64&&bitmap.height===64;bitmap.close();return valid;
   },r.extractFrame.bytes);
-  check('core-extract-frame-decodes',frame&&r.extractFrame.report.actual.actualTime&&r.extractFrame.report.execution.some(e=>e.backendId==='ffmpeg-wasm'));
+  check('core-extract-frame-decodes',frame&&r.extractFrame.report.actual.actualTime&&r.extractFrame.report.actual.actualFrameIndex==='10'&&
+    r.extractFrame.report.actual.trackId==='1'&&r.extractFrame.report.actual.selection==='Nearest'&&
+    r.extractFrame.report.execution.some(e=>e.backendId==='ffmpeg-wasm'&&e.outputFacts?.imageFormat==='Jpeg'&&e.outputFacts.width===64));
   check('core-policy-and-malformed-no-output',!coreResults.forbidden.success&&coreResults.forbidden.code==='TRANSCODE_NOT_AUTHORIZED'&&!coreResults.forbidden.blob&&!coreResults.malformed.success&&!coreResults.malformed.blob&&
     !coreResults.mono.success&&coreResults.mono.code==='CAPABILITY_UNSUPPORTED'&&!coreResults.mono.blob&&
     !coreResults.fractional.success&&coreResults.fractional.code==='VALUE_NOT_REPRESENTABLE'&&!coreResults.fractional.blob&&

@@ -93,7 +93,8 @@ internal fun operationReport(v: OperationResult): dynamic = record("kind" to "Op
         "issues" to v.preservation.issues.map { issue(it) }.toTypedArray()),
     "keyPhoto" to v.keyPhoto?.let { key(it) }, "issues" to v.issues.map { issue(it) }.toTypedArray(),
     "execution" to v.execution.map { record("stage" to it.stage.name, "backendId" to it.backendId, "reason" to it.reason,
-        "transcoded" to it.transcoded, "remuxed" to it.remuxed, "hardwareUsed" to it.hardwareUsed) }.toTypedArray(),
+        "transcoded" to it.transcoded, "remuxed" to it.remuxed, "hardwareUsed" to it.hardwareUsed,
+        "inputFacts" to it.inputFacts?.let(::media), "outputFacts" to it.outputFacts?.let(::media)) }.toTypedArray(),
     "durability" to "volatile-process-memory")
 
 private fun change(v: Change): dynamic = record("selector" to v.selector, "before" to value(v.before),
