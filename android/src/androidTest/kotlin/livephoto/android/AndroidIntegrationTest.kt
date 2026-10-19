@@ -28,6 +28,108 @@ class AndroidIntegrationTest {
         assertTrue(app.core.getMediaCapabilities().backendIds.isEmpty())
     }
 
+    /** Only a generated fixture's owned XMP length/key digits are changed, never a private photo. */
+    private fun corruptRepairField(bytes: ByteArray, protocol: ProtocolId, key: Boolean = false): ByteArray {
+        val field = if (key) "MicroVideoPresentationTimestampUs" else if (protocol == ProtocolIds.GoogleV1) "MicroVideoOffset" else "Length"
+        val expression = Regex("(?:[A-Za-z_][\\w.-]*:)?$field=[\"']([1-9][0-9]*)[\"']")
+        val match = checkNotNull(expression.find(bytes.toString(Charsets.ISO_8859_1))) { "Missing synthetic repair field" }
+        val range = match.groups[1]!!.range
+        return bytes.copyOf().also { result ->
+            for (index in range) result[index] = (if (key) '9' else '0').code.toByte()
+            if (key) result[range.first] = '-'.code.toByte() // Invalid negative key, not the reserved -1; no width/unit assumptions.
+        }
+    }
+
+    private suspend fun syntheticRepairCarrier(target: livephoto.ui.ConversionTarget): ByteArray {
+        val image = MemoryBinarySource(Bytes(conversionImage()), SourceId("repair-image"))
+        val video = MemoryBinarySource(Bytes(fractionalAudioVideo()), SourceId("repair-video"))
+        val output = MemoryOutputTransaction(context, "repair-setup")
+        var operation: OperationResult? = null
+        try {
+            operation = success(app.core.create(CreateRequest(image, video, target.selector, output = output, context = context)))
+            return output.committedAssets().getValue(operation.output.assets.single().id).toByteArray()
+        } finally { operation?.output?.assets?.forEach { it.readableSource?.close() }; image.close(); video.close() }
+    }
+
+    private fun countRepairedPhotos(): Int = app.contentResolver.query(
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), arrayOf(MediaStore.MediaColumns._ID),
+        "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-repaired-%"), null)!!.use { it.count }
+
+    @Test fun controllerRepairPreviewsWithoutPublishingAndAppliesOnlyReviewedGoogleRepairs() = runBlocking {
+        val file = app.getFileStreamPath("repair-${UUID.randomUUID()}.jpg")
+        val controller = AndroidCreateController(app, app.core)
+        try {
+            for (target in listOf(livephoto.ui.ConversionTarget.GoogleV1, livephoto.ui.ConversionTarget.GoogleV2)) {
+                val original = syntheticRepairCarrier(target)
+                file.writeBytes(original)
+                val before = countRepairedPhotos()
+                val noop = success(controller.repairPhoto(Uri.fromFile(file)))
+                assertNull(noop.uri); assertNull(noop.report.review); assertTrue(noop.report.proposedChanges.isEmpty())
+                assertEquals(before, countRepairedPhotos())
+                val damaged = corruptRepairField(original, target.selector.protocol)
+                file.writeBytes(damaged)
+                val preview = success(controller.repairPhoto(Uri.fromFile(file)))
+                assertNull(preview.uri); assertNull(preview.report.outputDigest)
+                val review = assertNotNull(preview.report.review)
+                assertTrue(preview.report.changesApplied.isEmpty()); assertEquals(sha(damaged), review.sourceDigest.value)
+                assertEquals(before, countRepairedPhotos()); assertContentEquals(damaged, file.readBytes())
+                val applied = success(controller.repairPhoto(Uri.fromFile(file), review))
+                val uri = assertNotNull(applied.uri)
+                try {
+                    val bytes = app.contentResolver.openInputStream(uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
+                    assertEquals(sha(bytes), applied.report.outputDigest?.value)
+                    assertEquals(review.changes, applied.report.changesApplied); assertNull(applied.report.review)
+                    assertContentEquals(damaged, file.readBytes())
+                    val source = MemoryBinarySource(Bytes(bytes), SourceId("repaired-readback"))
+                    var extracted: OperationResult? = null
+                    try {
+                        val validated = success(app.core.validate(ValidationRequest(SourceSet.Single(source), layers = listOf(Layer.Structure, Layer.Protocol), context = context)))
+                        assertTrue(validated.verdict != Verdict.Invalid); assertEquals(Coverage.Complete, validated.coverage)
+                        val output = MemoryOutputTransaction(context, "repair-video")
+                        extracted = success(app.core.extract(ExtractRequest(SourceSet.Single(source), emptyList(), output = output, context = context)))
+                        assertContentEquals(fractionalAudioVideo(), output.committedAssets().getValue(extracted.output.assets.single().id).toByteArray())
+                    } finally { extracted?.output?.assets?.forEach { it.readableSource?.close() }; source.close() }
+                    file.writeBytes(bytes)
+                    val again = success(controller.repairPhoto(Uri.fromFile(file)))
+                    assertNull(again.uri); assertNull(again.report.review); assertTrue(again.report.proposedChanges.isEmpty())
+                    assertEquals(before + 1, countRepairedPhotos())
+                    app.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING, MediaStore.MediaColumns.RELATIVE_PATH), null, null, null)!!.use {
+                        assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Pictures/LivePhoto/", it.getString(1))
+                    }
+                } finally { app.contentResolver.delete(uri, null, null) }
+            }
+        } finally { file.delete() }
+    }
+
+    @Test fun controllerRepairRejectsStaleReviewUnsafeLayoutsAndBlockedKeysWithoutPublication() = runBlocking {
+        val file = app.getFileStreamPath("repair-rejected-${UUID.randomUUID()}.jpg")
+        val controller = AndroidCreateController(app, app.core)
+        try {
+            val original = syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1)
+            val damaged = corruptRepairField(original, ProtocolIds.GoogleV1)
+            file.writeBytes(damaged)
+            val before = countRepairedPhotos()
+            val review = assertNotNull(success(controller.repairPhoto(Uri.fromFile(file))).report.review)
+            val wrongPlan = assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file), review.copy(changes = emptyList())))
+            assertEquals("REPAIR_AMBIGUOUS", wrongPlan.error.code.value)
+            file.writeBytes(original)
+            assertEquals("SOURCE_CHANGED", assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file), review)).error.code.value)
+            val invalidKey = corruptRepairField(original, ProtocolIds.GoogleV1, key = true)
+            file.writeBytes(invalidKey)
+            val blocked = success(controller.repairPhoto(Uri.fromFile(file)))
+            assertNull(blocked.uri); assertNull(blocked.report.review); assertTrue(blocked.report.blocked.isNotEmpty())
+            val oplus = syntheticRepairCarrier(livephoto.ui.ConversionTarget.Oplus)
+            file.writeBytes(oplus)
+            assertEquals("REPAIR_AMBIGUOUS", assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file))).error.code.value)
+            for (bytes in listOf(conversionImage(), byteArrayOf(0, 1, 2, 3), byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0))) {
+                file.writeBytes(bytes)
+                assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file)))
+                assertContentEquals(bytes, file.readBytes())
+            }
+            assertEquals(before, countRepairedPhotos())
+        } finally { file.delete() }
+    }
+
     /** Independently encoded synthetic JPEG; not a private phone/reference derivative. */
     private fun conversionImage(): ByteArray {
         val bitmap = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888)

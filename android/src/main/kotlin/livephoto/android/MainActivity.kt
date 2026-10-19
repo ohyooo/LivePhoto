@@ -23,6 +23,8 @@ class MainActivity : ComponentActivity() {
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).saveSplitFile(file)
                 }, convertPhoto = { input, target ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).convertPhoto(input, target)
+                }, repairPhoto = { input, review ->
+                    AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).repairPhoto(input, review)
                 }) { image, video, target ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core)
                         .create(image, video, target)

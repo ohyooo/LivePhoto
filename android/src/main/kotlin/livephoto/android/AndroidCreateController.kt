@@ -17,6 +17,27 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     data class Created(val uri: Uri, val operation: OperationResult)
     data class Extracted(val uri: Uri, val report: livephoto.ui.ExtractedVideo)
     data class Converted(val uri: Uri, val report: livephoto.ui.ConvertedPhoto)
+    data class Repaired(val uri: Uri?, val report: livephoto.ui.PhotoRepairReport)
+
+    /** Preview/no-op/blocked results never call the exporter. */
+    suspend fun repairPhoto(input: Uri, review: livephoto.ui.RepairReview? = null): CoreResult<Repaired> = withContext(Dispatchers.IO) {
+        val job = currentCoroutineContext()[Job]
+        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        catch (limit: InputBudgetExceededException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
+                limit.message ?: "Repair input exceeds 32 MiB"))
+        }
+        when (val result = livephoto.ui.preparePhotoRepair(core, bytes, review, Cancellation { job?.isActive == false })) {
+            is CoreResult.Failure -> result
+            is CoreResult.Success -> {
+                val uri = result.value.bytes?.let { repaired ->
+                    currentCoroutineContext().ensureActive()
+                    AndroidPhotoExporter(android.contentResolver).publish(repaired.toByteArray(), "LivePhoto-repaired-${UUID.randomUUID()}.jpg")
+                }
+                CoreResult.Success(Repaired(uri, result.value.report))
+            }
+        }
+    }
 
     suspend fun convertPhoto(input: Uri, target: ProtocolSelector): CoreResult<Converted> = withContext(Dispatchers.IO) {
         val job = currentCoroutineContext()[Job]

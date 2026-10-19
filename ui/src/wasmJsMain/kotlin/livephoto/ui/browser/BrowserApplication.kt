@@ -106,6 +106,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val supportsVideoExtraction = true
     override val supportsCleanSplit = true
     override val supportsConversion = true
+    override val supportsRepair = true
+    override val repairSuccessMessage = "已应用修复并发起下载，请检查下载记录。"
     override val conversionSuccessMessage = "已转换并发起下载，请检查下载记录。"
     override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
     override val hasResultPreview: Boolean get() = lastResult != null
@@ -206,6 +208,23 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             is CoreResult.Success -> {
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 downloadBlob(outputBlob(result.value.bytes.toByteArray(), "image/jpeg"), "LivePhoto-converted-${target.protocol.value}.jpg")
+                CoreResult.Success(result.value.report)
+            }
+        }
+    }
+
+    override suspend fun repairPhoto(reference: String, review: RepairReview?): CoreResult<PhotoRepairReport> {
+        val file = files[reference] ?: error("请重新选择待检查照片")
+        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Repair input exceeds 32 MiB"))
+        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        return when (val result = preparePhotoRepair(DefaultLivePhotoCore(), browserBytes(file), review, Cancellation { job?.isActive == false })) {
+            is CoreResult.Failure -> result
+            is CoreResult.Success -> {
+                result.value.bytes?.let { repaired ->
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    downloadBlob(outputBlob(repaired.toByteArray(), "image/jpeg"), "LivePhoto-repaired.jpg")
+                }
                 CoreResult.Success(result.value.report)
             }
         }

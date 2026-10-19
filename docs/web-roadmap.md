@@ -25,7 +25,7 @@
 - [x] 共享 UI 原始视频提取入口：与只读检查分开触发，复用 Core Raw Extract，确认唯一视频及 ExactExtraction/SHA-256 后才发起下载或 Android MediaStore 保存；单张输入 32 MiB，仅已识别 MP4/MOV，不清理、不转码、不修改原片。新提交实际验收以 CI 为准，不用上轮只读检查结果代替。
 - [x] 共享 Compose Clean Split 入口：有界内存中准备普通 JPEG + MP4/MOV，Core 验证图片编码保留与视频字节一致性，按资产呈现 metadata 结果，再显式分别保存；不承诺外部成对原子提交。重选文件清除待保存结果，失败不输出、不转码；当前提交实际验收以 CI 为准，不能用上轮 Raw Extract 验收代替。
 - [x] 共享 Compose 有限协议转换 UI：独立目标选择和另存入口，三个既有 JPEG 目标；复用 Core Convert，同目标 PreserveAsIs，不将普通照片变成 Create、不自动修复/转码、不授权 metadata 损失，保留 OPPO→Google 的 EXIF 安全拒绝。输入/目标变更清旧报告，具体两端验收以对应提交 CI 为准，不能拿上轮拆分结果代替。
-- [ ] 按需继续接入有限 Repair 共享 UI；不能把 Raw Extract 视为 Clean Split。
+- [x] 共享 Compose 有限 Repair UI：默认只读预览、存在安全方案才允许显式另存；应用前核对已审阅输入摘要与完整方案，保留 no-op/blocked/OPPO 模糊布局的无输出行为。仅 SafeMetadataOnly，不 remux/转码/编码音频、不改原片；单一 JPEG 导出，报告不展开私人 metadata 值。新提交实际两端验收以 CI 为准，不能拿上轮转换结果代替。
 
 ## 后续、尚未实现
 

@@ -23,6 +23,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
     var extracting by remember { mutableStateOf(false) }
     var splitting by remember { mutableStateOf(false) }
     var converting by remember { mutableStateOf(false) }
+    var repairing by remember { mutableStateOf(false) }
     var exportReport by rememberSaveable { mutableStateOf<String?>(null) }
     var exportFailed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -68,7 +69,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     }
                 }, enabled = enabled && !working && reference != null,
                     modifier = Modifier.fillMaxWidth().testTag("analyze")) {
-                    Text(if (working && !extracting && !splitting && !converting) "正在检查…" else "开始检查（只读）")
+                    Text(if (working && !extracting && !splitting && !converting && !repairing) "正在检查…" else "开始检查（只读）")
                 }
                 if (platform.supportsVideoExtraction) {
                     Text("原始视频提取是单独操作：另存 MP4/MOV，不修改照片、不转码，不等于 Clean Split。")
@@ -108,6 +109,13 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     key(reference, selectionRevision) {
                         ConversionControls(platform, reference, enabled && !working) { busy ->
                             converting = busy; working = busy; onBusy(busy)
+                        }
+                    }
+                }
+                if (platform.supportsRepair) {
+                    key(reference, selectionRevision) {
+                        RepairControls(platform, reference, enabled && !working) { busy ->
+                            repairing = busy; working = busy; onBusy(busy)
                         }
                     }
                 }

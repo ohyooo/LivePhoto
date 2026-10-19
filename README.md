@@ -118,6 +118,8 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 “协议转换”同样使用独立待检查照片，不需要生成用的图片、视频。选择“转换为 OPPO / OnePlus”“转换为 Google V2”或“转换为 Google V1”，再点“转换并另存”；当前只导出单一 JPEG 载体，输入上限 32 MiB。同目标默认原样保留，不规范化；跨协议由 Core 清理已确认的源绑定、重新装配并验证，分别报告图片/视频及 metadata 保留结果，不宣称整个载体字节不变。不会自动修复、转码、授权 metadata 丢失或覆盖原片。普通照片不当作 Create；部分 OPPO→Google 因 EXIF 布局安全限制返回 `UNSAFE_METADATA_REWRITE`，不输出、不删 EXIF 绕过。更换目标或重新选择输入会清除旧报告；浏览器显示下载已发起，Android 另存到 `Pictures/LivePhoto`。实际两端验收以对应 CI 为准。
 
+“预览安全修复（只读）”仅调用 Core 的 `SafeMetadataOnly`，展示修复前问题、拟修改字段、阻止项和方案，不创建输出；单文件上限 32 MiB。只有存在可证明的修改且没有阻止项时，“应用修复并另存”才启用。应用前重新核对预览时的输入 SHA-256 和完整修改方案；源文件变化或方案不一致须重新预览。Core 验证图片与视频保留证明后才另存单一 JPEG，不覆盖原片，不 remux、转码或编码音频。无需修改、修复被阻止和预览均不保存；部分 OPPO 布局会保留 `REPAIR_AMBIGUOUS` 拒绝。报告只显示字段名、代码和分项保留结果，不展开私人 metadata 值；成功不等于设备兼容。浏览器明确提示下载已发起，Android 保存到 `Pictures/LivePhoto`；具体两端验收见对应 CI。
+
 在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
 
 ```sh

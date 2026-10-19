@@ -32,6 +32,55 @@ import livephoto.ui.MediaKind
 class AndroidUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun repairRequiresPreviewAndClearsReviewAfterApplyOrSameUriReselection() {
+        var applied = 0
+        var blockNext = false
+        val digest = livephoto.core.Digest("0".repeat(64))
+        val changes = listOf(livephoto.core.Change("test:Length", reason = "test", requested = true))
+        val review = livephoto.ui.RepairReview(digest, changes)
+        val base = livephoto.ui.PhotoRepairReport(digest, review, emptyList(), changes, emptyList(), emptyList(), emptyList())
+        val platform = object : LivePhotoUiPlatform {
+            override val outputDescription = "unused"
+            override val supportsAnalysis = true
+            override val supportsRepair = true
+            override val repairSuccessMessage = "TEST_REPAIRED_SAVED"
+            @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = { onResult("same-repair-uri") }
+            override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("damaged.jpg", 100)
+            override suspend fun repairPhoto(reference: String, review: livephoto.ui.RepairReview?): CoreResult<livephoto.ui.PhotoRepairReport> {
+                check(reference == "same-repair-uri")
+                return CoreResult.Success(when {
+                    review != null -> { check(review == base.review); applied++; base.copy(review = null, changesApplied = changes, outputDigest = digest, byteLength = 100u) }
+                    blockNext -> base.copy(review = null, proposedChanges = emptyList(), blocked = listOf(livephoto.core.Issue(IssueCode("REPAIR_AMBIGUOUS"), livephoto.core.Severity.Error, livephoto.core.Layer.Protocol)))
+                    else -> base
+                })
+            }
+            override suspend fun create(image: String, video: String, target: livephoto.core.ProtocolSelector): CoreResult<CreatedPhoto> = error("Must not create")
+            override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
+        }
+        compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
+        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("preview-repair").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("apply-repair").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("apply-repair").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("preview-repair").performScrollTo().performClick()
+        compose.onNodeWithTag("repair-report").assertTextContains("修复预览完成（未写入）", substring = true)
+        assertTrue(applied == 0)
+        compose.onNodeWithTag("apply-repair").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("repair-report").assertTextContains("TEST_REPAIRED_SAVED", substring = true)
+        compose.onNodeWithTag("apply-repair").assertIsNotEnabled()
+        assertTrue(applied == 1)
+        compose.onNodeWithTag("preview-repair").performScrollTo().performClick()
+        compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+        compose.onNodeWithTag("repair-report").assertDoesNotExist()
+        compose.onNodeWithTag("apply-repair").performScrollTo().assertIsNotEnabled()
+        blockNext = true
+        compose.onNodeWithTag("preview-repair").performScrollTo().performClick()
+        compose.onNodeWithTag("repair-report").assertTextContains("修复被阻止（未写入）", substring = true)
+        compose.onNodeWithTag("apply-repair").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+    }
+
     @Test fun conversionHasIndependentTargetAndClearsReportOnChanges() {
         var selected: livephoto.core.ProtocolSelector? = null
         val platform = object : LivePhotoUiPlatform {

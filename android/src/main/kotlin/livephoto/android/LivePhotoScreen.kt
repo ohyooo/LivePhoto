@@ -20,16 +20,19 @@ internal fun LivePhotoScreen(
     cleanSplit: (suspend (Uri) -> CoreResult<livephoto.ui.PreparedCleanSplit>)? = null,
     saveSplitFile: (suspend (livephoto.ui.SplitFile) -> Uri)? = null,
     convertPhoto: (suspend (Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Converted>)? = null,
+    repairPhoto: (suspend (Uri, livephoto.ui.RepairReview?) -> CoreResult<AndroidCreateController.Repaired>)? = null,
     create: suspend (Uri, Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Created>,
 ) {
     val context = LocalContext.current.applicationContext
-    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, create) {
+    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, repairPhoto, create) {
         object : LivePhotoUiPlatform {
             override val outputDescription = "Pictures/LivePhoto"
             override val supportsAnalysis = analyze != null
             override val supportsVideoExtraction = extractVideo != null
             override val supportsCleanSplit = cleanSplit != null && saveSplitFile != null
             override val supportsConversion = convertPhoto != null
+            override val supportsRepair = repairPhoto != null
+            override val repairSuccessMessage = "已应用修复并另存到 Pictures/LivePhoto。"
             override val conversionSuccessMessage = "已转换并另存到 Pictures/LivePhoto。"
             override val videoExportSuccessMessage = "已提取并保存到 Movies/LivePhoto。"
             @Composable
@@ -57,6 +60,12 @@ internal fun LivePhotoScreen(
             override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<livephoto.ui.ConvertedPhoto> =
                 when (val result = convertPhoto?.invoke(Uri.parse(reference), target)) {
                     null -> super.convertPhoto(reference, target)
+                    is CoreResult.Failure -> result
+                    is CoreResult.Success -> CoreResult.Success(result.value.report)
+                }
+            override suspend fun repairPhoto(reference: String, review: livephoto.ui.RepairReview?): CoreResult<livephoto.ui.PhotoRepairReport> =
+                when (val result = repairPhoto?.invoke(Uri.parse(reference), review)) {
+                    null -> super.repairPhoto(reference, review)
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }

@@ -19,6 +19,8 @@ public interface LivePhotoUiPlatform {
     public val supportsVideoExtraction: Boolean get() = false
     public val supportsCleanSplit: Boolean get() = false
     public val supportsConversion: Boolean get() = false
+    public val supportsRepair: Boolean get() = false
+    public val repairSuccessMessage: String get() = "已应用修复并另存。"
     public val conversionSuccessMessage: String get() = "已转换并另存。"
     public val videoExportSuccessMessage: String get() = "已保存原始视频。"
     public val hasResultPreview: Boolean get() = false
@@ -36,6 +38,8 @@ public interface LivePhotoUiPlatform {
     public suspend fun saveSplitFile(file: SplitFile): String = error("Split file export is not available in this adapter")
     public suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<ConvertedPhoto> = CoreResult.Failure(
         CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "Conversion is not available in this adapter"))
+    public suspend fun repairPhoto(reference: String, review: RepairReview? = null): CoreResult<PhotoRepairReport> = CoreResult.Failure(
+        CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "Repair is not available in this adapter"))
     public fun formatFailure(error: Exception, imageName: String?, videoName: String?): String
     @Composable
     public fun rememberVideoEditor(reference: String?): VideoEditor? = null
