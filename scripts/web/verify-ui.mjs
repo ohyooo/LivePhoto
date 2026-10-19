@@ -252,6 +252,11 @@ try {
       check(label+':analysis-live-'+target,report.includes('识别结果：Live')&&report.includes('首选协议：'+target)&&
         report.includes('Structure /')&&report.includes('Protocol /')&&report.includes('Media /')&&
         report.includes('关键照片来源：')&&report.includes('不是完整播放或设备相册兼容证明'));
+      if(target==='oplus.olive') {
+        await page.mouse.move(viewport.width/2,viewport.height*.6);
+        await page.mouse.wheel(0,320);await page.waitForTimeout(250);
+        await page.screenshot({path:`ci-output/web-ui-analysis-${label}.png`});
+      }
     }
     const ordinary=await analyze(imagePath,/只读检查完成/);
     check(label+':analysis-ordinary-not-live',ordinary.includes('识别结果：NonLive')&&ordinary.includes('首选协议：无'));

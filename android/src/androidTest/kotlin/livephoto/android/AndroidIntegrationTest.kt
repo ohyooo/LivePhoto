@@ -28,16 +28,23 @@ class AndroidIntegrationTest {
         assertTrue(app.core.getMediaCapabilities().backendIds.isEmpty())
     }
 
-    @Test fun controllerAnalyzesLiveAndOrdinaryPhotosWithoutWritingOrChangingInputs() = runBlocking {
+    @Test fun controllerKeepsNonCanonicalCandidateAndOrdinaryPhotoInputsReadOnly() = runBlocking {
         val file = app.getFileStreamPath("analysis-${UUID.randomUUID()}.jpg")
         try {
-            for ((name, disposition) in listOf("livephoto.jpg" to Disposition.Live, "video.jpg" to Disposition.NonLive)) {
+            // The existing sample is intentionally noncanonical. Preserve its
+            // Candidate/Invalid diagnostics, as the protocol regression below does.
+            for ((name, disposition) in listOf("livephoto.jpg" to Disposition.Candidate, "video.jpg" to Disposition.NonLive)) {
                 val bytes = fixture(name)
                 file.writeBytes(bytes)
                 val filesBefore = app.filesDir.list()!!.toSet()
                 val modified = file.lastModified()
                 val result = success(AndroidCreateController(app, app.core).analyze(Uri.fromFile(file)))
                 assertEquals(disposition, result.inspection.detection.disposition)
+                if (name == "livephoto.jpg") {
+                    assertEquals(Verdict.Invalid, result.validation.verdict)
+                    assertEquals(ByteRange(294_932u, 8_121_451u),
+                        result.inspection.layout.resources.single { it.kind == ResourceKind.Video }.extents.single().range)
+                }
                 assertEquals(filesBefore, app.filesDir.list()!!.toSet())
                 assertEquals(modified, file.lastModified())
                 assertContentEquals(bytes, file.readBytes())
