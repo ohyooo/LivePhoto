@@ -14,9 +14,13 @@ export function composeDriver(page,viewport) {
         if(next&&['x','y','width','height'].every(key=>Math.abs(next[key]-b[key])<.5))return next;
         continue;
       }
-      await page.mouse.move(viewport.width/2,viewport.height/2);
+      // Scroll the shared column's padding, not a selectable report, slider or
+      // media surface. Wasm wheel animations must settle before the next delta;
+      // otherwise successive deltas can carry a newly visible button past us.
+      const scrollX=(viewport.width-Math.min(viewport.width,840))/2+8;
+      await page.mouse.move(scrollX,viewport.height/2);
       await page.mouse.wheel(0,b&&b.height>0?(b.y<64?-280:280):(attempt<25?280:-280));
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(350);
     }
     throw Error('Shared Compose control is not reachable: '+await locator.count()+'; locator='+locator+'; bounds='+JSON.stringify(history));
   };
