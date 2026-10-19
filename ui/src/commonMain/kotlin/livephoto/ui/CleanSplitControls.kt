@@ -41,12 +41,8 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
         modifier = Modifier.fillMaxWidth().testTag("prepare-clean-split")) {
         Text(if (saving == "prepare") "正在准备拆分…" else "准备清理拆分")
     }
-    report?.let { text ->
-        Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("clean-split-report")) }
-        }
-    }
     prepared?.let { split ->
+        Text("已准备并验证两个文件，请分别保存；详细保留报告在下方。")
         for ((key, file, status) in listOf(Triple("image", split.image, imageStatus), Triple("video", split.video, videoStatus))) {
             val label = if (key == "image") "保存拆分图片" else "保存拆分视频"
             OutlinedButton(onClick = {
@@ -65,6 +61,11 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
                 Text(if (saving == key) "正在保存…" else label)
             }
             status?.let { Text(it, Modifier.testTag("split-$key-status")) }
+        }
+    }
+    report?.let { text ->
+        Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
+            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("clean-split-report")) }
         }
     }
 }
