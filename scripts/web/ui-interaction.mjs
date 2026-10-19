@@ -18,7 +18,7 @@ export function composeDriver(page,viewport) {
       await page.mouse.wheel(0,b&&b.height>0?(b.y<64?-280:280):(attempt<25?280:-280));
       await page.waitForTimeout(100);
     }
-    throw Error('Shared Compose control is not reachable: '+await locator.count()+'; bounds='+JSON.stringify(history));
+    throw Error('Shared Compose control is not reachable: '+await locator.count()+'; locator='+locator+'; bounds='+JSON.stringify(history));
   };
   const click=async name=>{
     const locator=find(name);await reveal(locator);

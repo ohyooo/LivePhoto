@@ -65,7 +65,7 @@ public suspend fun prepareCleanSplit(
 }
 
 public fun formatCleanSplit(split: PreparedCleanSplit): String = buildString {
-    append("清理拆分已准备，尚未保存。\n已移除动态照片绑定；原片未修改，不转码、不重新编码音频。")
+    append("清理拆分已准备；准备时尚未保存，后续状态见各保存按钮下方。\n已移除动态照片绑定；原片未修改，不转码、不重新编码音频。")
     append("\n图片：").append(split.image.mime).append("；").append(formatMediaSize(split.image.bytes.size.toLong()))
     append("\n图片 SHA-256：").append(split.image.digest.value)
     append("\n视频：").append(split.video.mime).append("；").append(formatMediaSize(split.video.bytes.size.toLong()))

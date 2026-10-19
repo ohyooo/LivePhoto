@@ -239,7 +239,9 @@ try {
     await page.keyboard.press('Tab');
     await button('生成并保存 Live Photo').waitFor({state:'attached'});
     await driver.click('检查已有动态照片');
-    const analysisPicker=async input=>driver.choose(await button('选择待检查照片').count()?'选择待检查照片':'重新选择待检查照片',input);
+    // Expanding a taller panel can publish accessibility nodes on a later frame.
+    // Wait for either real picker name instead of deciding from a transient zero count.
+    const analysisPicker=async input=>driver.choose(/^(?:重新)?选择待检查照片$/,input);
     const analyze=async(input,expected)=>{
       await analysisPicker(input);
       await driver.click('开始检查（只读）');
