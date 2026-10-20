@@ -38,7 +38,7 @@
 - [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。
 - [ ] 随包 Wasm muxer 的单声道/多声道 AAC 字段保留：新 Core 写媒体入口当前只开放无音频或 sample-entry 与 ASC 均为立体声的 AAC。单声道规范化会被保真检查拒绝，现提前返回 Unsupported；不靠音频转码、手改字段或放宽检查解决。现有播放器预处理及桌面后端范围独立。
 - [ ] 将现有播放器的宽松预处理操作逐项迁移到上述严格 Core 媒体 profile。目前保留原有 Video/Canvas 当前画面截图及 ffmpeg.wasm 预处理，避免缩小已可用输入范围；不能把新有限 API 当作全部播放器流程已统一或全部媒体格式支持。
-- [x] 增加播放器内可展开的“Core 媒体工具（实验）”共享控件。浏览器通过 Wasm 类型化适配直接调用统一 Core 的含解码 Probe、整段 Remux、时间轴 copy Trim、当前位置 ExtractFrame 和显式整段 AVC Transcode；不经 JS 协议库或旧编辑器，不自动回退。只开放严格 profile，错误保持原输入；视频处理后暂要求重新选封面，不猜测旧时间映射。实际执行验收以当前 CI 为准，不能拿前一轮 Kotlin/JS Worker 证明 Wasm。
+- [x] 增加播放器内可展开的“Core 媒体工具（实验）”共享控件。浏览器通过 Wasm 类型化适配直接调用统一 Core 的含解码 Probe、整段 Remux、时间轴 copy Trim、当前位置 ExtractFrame 和显式整段 AVC Transcode；不经 JS 协议库或旧编辑器，不自动回退。只开放严格 profile，错误保持原输入。Core copy Trim 现接入已验证、单段等速且无隐藏内容的视频时间映射：沿用保留范围内的封面，并按实际视频原点重定位；封面在实际范围外则拒绝替换输入，不用音频包边界推算视频原点。其它操作、复杂/未证实映射仍要求重选封面。本轮新增映射与范围外拒绝的实际验收以当前 CI 为准，不用旧结果代替。
 - [x] 增加 Wasm Core 工具真实 UI 专项代码：两种尺寸、18 项检查、8 次实际生成下载，单列 `web-media-evidence.json.wasmUi`，原主线程 19 项与媒体 Worker 9 项不变。检查五个 Core 操作、独立 packet SHA/封面解码与实际 key、拒绝无输出、取消、重选清理及按需引擎加载；必须当前 CI 实际通过才算验收。
 - [x] Kotlin/Wasm Compose 应用：`6837e1a` 的 [Web CI 39190852421](https://github.com/ohyooo/LivePhoto/actions/runs/39190852421) 全部 7 个 job 通过。复用现有 `ui/commonMain`，浏览器入口采用类型化互操作；公共 Kotlin 测试在 JS/Wasm 下各 804 项、零失败零跳过，原有 222 项外围检查及 Worker 内部 42 项也通过。真实界面生成和下载由 Wasm 应用执行，独立 JS 库用于审计输出，不重写界面或协议。后续产物命名和缓存调整须再次通过相同 CI，在线状态以实际部署为准；不能仅凭 Skiko/FFmpeg 的 Wasm 文件宣称完成。
 - [ ] 搁置的观察项：播放器画面外透明孔洞/残影。用户未观察到，暂不投入处理、不阻塞后续任务，也不标记为已修复。

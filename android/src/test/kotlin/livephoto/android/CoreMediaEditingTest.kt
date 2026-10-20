@@ -7,6 +7,17 @@ import kotlin.test.*
 
 class CoreMediaEditingTest {
     @Test fun mediaBudgetAndRangesRejectBeforeCoreCalls() = runBlocking {
+        val start = Time(400, 1000u); val end = Time(1600, 1000u)
+        val range = TimeRange(start, end)
+        val map = listOf(TimelineSegment(range, TimeRange(Time.Zero, Time(1200, 1000u))))
+        assertEquals(range, retainedCoreVideoWindow(start, end, map, true, false))
+        assertNull(retainedCoreVideoWindow(start, end, map, false, false))
+        assertNull(retainedCoreVideoWindow(start, end, map, true, true))
+        assertNull(retainedCoreVideoWindow(start, end, map + map, true, false))
+        assertNull(retainedCoreVideoWindow(start, end, emptyList(), true, false))
+        assertNull(retainedCoreVideoWindow(start, end, listOf(map.single().copy(output = TimeRange(Time.Zero, Time(1, 1u)))), true, false))
+        assertNull(retainedCoreVideoWindow(start, end, listOf(map.single().copy(output = TimeRange(Time(1, 1000u), Time(1201, 1000u)))), true, false))
+        assertTrue(start in range); assertFalse(end in range)
         val core = object : LivePhotoCore by DefaultLivePhotoCore() {
             override suspend fun probe(request: ProbeRequest): CoreResult<MediaFacts> = error("Must not probe invalid input")
         }

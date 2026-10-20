@@ -400,9 +400,17 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     selectedFrame = Frame(reference, timeline.root, timeline.origin + actual.value.toDouble() / actual.timescale.toDouble())
                     CoreMediaEdit(prepared.summary, imageReference = reference)
                 } else {
-                    // Until complete per-track mappings are integrated with the player,
-                    // a new root deliberately rejects old cover timestamps. No guess.
-                    val reference = register(MediaKind.Video, output)
+                    val window = prepared.retainedVideoWindow
+                    val mapped = window?.let {
+                        val frame = selectedFrame?.takeIf { selected -> selected.root == timeline.root }
+                        if (frame != null) {
+                            val relative = Time(((frame.sourceTime - timeline.origin) * 1_000_000).roundToLong(), 1_000_000u)
+                            check(relative in it) { "KEY_PHOTO_OUTSIDE_TRIM：封面不在实际保留范围内；未替换输入，请重新选择封面。" }
+                        }
+                        Timeline(timeline.root, timeline.origin + it.start.value.toDouble() / it.start.timescale.toDouble())
+                    }
+                    // No validated unit-rate video map: keep rejecting stale covers.
+                    val reference = register(MediaKind.Video, output, mapped)
                     CoreMediaEdit(prepared.summary, video = EditedVideo(reference, prepared.summary))
                 }
             } finally { coreBusy = false }

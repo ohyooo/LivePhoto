@@ -27,9 +27,9 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v?.readyState>=2;});
       await driver.click('Core 媒体工具（实验）');
     };
-    const seek=async()=>{
-      await page.getByLabel('视频预览',{exact:true}).evaluate(video=>{video.pause();video.currentTime=.4;});
-      await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&!v.seeking&&Math.abs(v.currentTime-.4)<.01;});
+    const seek=async(time=.4)=>{
+      await page.getByLabel('视频预览',{exact:true}).evaluate((video,time)=>{video.pause();video.currentTime=time;},time);
+      await page.waitForFunction(time=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&!v.seeking&&Math.abs(v.currentTime-time)<.01;},time);
       await page.waitForTimeout(120);
     };
     const download=async action=>{
@@ -64,7 +64,9 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         if(b.codec_name!=='h264'||!after.packets.some(p=>p.stream_index===b.index&&!hashes.has(p.data_hash)))throw Error('Wasm UI transcode did not change video');
       }
       outputs.push({viewport:size,action,bytes:carrier.length,sha256:createHash('sha256').update(carrier).digest('hex'),videoSha256:createHash('sha256').update(bytes).digest('hex')});
-      return {audited,hash:createHash('sha256').update(bytes).digest('hex')};
+      const firstVideo=after.packets.find(p=>p.stream_index===after.streams.find(s=>s.codec_type==='video').index);
+      const sourcePacket=original.packets.find(p=>p.stream_index===original.streams.find(s=>s.codec_type==='video').index&&p.data_hash===firstVideo.data_hash);
+      return {audited,origin:sourcePacket?Number(sourcePacket.pts_time)-Number(firstVideo.pts_time):null,hash:createHash('sha256').update(bytes).digest('hex')};
     };
     try{
       const response=await page.goto(origin+'/livephoto/');
@@ -78,12 +80,18 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       for(const [action,button] of [['remux','Core 封装整段并使用（不编码）'],['trim','Core 裁剪并使用（音视频 copy）'],['transcode','Core 转码整段并使用（音频 copy）']]){
         if(action!=='remux')await choose(coreSource);
         if(action==='trim'){
-          await driver.click('裁剪视频');await driver.dragRange('start',.20);await driver.dragRange('end',.80);
+          await seek(1.2);await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
+          await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
         }
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
         await text(new RegExp('名称：core-'+action+'\\.mp4')).waitFor({state:'attached'});
         const result=await download(action);
+        if(action==='trim'){
+          await text(/已验证视频时间平移/).waitFor({state:'attached'});
+          const key=result.audited.key;
+          if(!key||!(result.origin>0)||Math.abs(Number(key.value)/Number(key.timescale)-(1.2-result.origin))>.05)throw Error('Core trim did not retain and rebase the selected cover');
+        }
         check(size+':core-'+action+'-independent-packets',action!=='remux'||result.hash===sourceHash);
       }
       await choose(coreSource);await seek();
@@ -91,6 +99,12 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       const frame=await download('frame');
       const key=frame.audited.key;
       check(size+':core-frame-actual-key-and-decode',frame.audited.width===64&&frame.audited.height===64&&key&&Math.abs(Number(key.value)/Number(key.timescale)-.4)<.1&&frame.hash===sourceHash);
+      // Keep the .4 s cover, but exclude it from the actual retained video.
+      // A failed edit must not replace the current input or silently drop the cover.
+      const beforeOutside=downloads;
+      await driver.click('裁剪视频');await driver.dragRange('end',.10);
+      await driver.click('Core 裁剪并使用（音视频 copy）');await status(/KEY_PHOTO_OUTSIDE_TRIM/);
+      if(downloads!==beforeOutside||await text(/名称：core-input\.mp4/).count()!==1)throw Error('Out-of-range Core cover replaced input');
       await choose(monoSource);const before=downloads;
       await driver.click('Core 封装整段并使用（不编码）');await status(/CAPABILITY_UNSUPPORTED/);
       check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-mono\.mp4/).count()===1);

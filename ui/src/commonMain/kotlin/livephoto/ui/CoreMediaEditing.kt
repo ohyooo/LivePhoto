@@ -5,8 +5,22 @@ import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.memory.MemoryOutputTransaction
 
 public enum class CoreMediaAction { Probe, Remux, Trim, ExtractFrame, Transcode }
-public data class PreparedCoreMedia(val bytes: Bytes?, val mime: String?, val actualTime: Time?, val summary: String)
+public data class PreparedCoreMedia(val bytes: Bytes?, val mime: String?, val actualTime: Time?, val summary: String,
+    val retainedVideoWindow: TimeRange? = null)
 public data class CoreMediaEdit(val summary: String, val imageReference: String? = null, val video: EditedVideo? = null)
+
+/** Only a verified, single, unit-rate video translation can reuse the player's cover clock.
+ * Audio packet boundaries are deliberately not used as the video origin. */
+public fun retainedCoreVideoWindow(start: Time, end: Time, mapping: List<TimelineSegment>,
+    bitstreamPreserved: Boolean, hiddenContent: Boolean): TimeRange? {
+    if (!bitstreamPreserved || hiddenContent || start < Time.Zero || end > Time(60, 1u) || end <= start) return null
+    val segment = mapping.singleOrNull() ?: return null
+    if (segment.input.start != start || segment.input.end != end || segment.output.start.compareTo(Time.Zero) != 0) return null
+    // Fail closed on a mixed-scale representation instead of guessing or floating-point arithmetic.
+    if (start.timescale != end.timescale) return null
+    val duration = Time(end.value - start.value, start.timescale)
+    return segment.input.takeIf { segment.output.end.compareTo(duration) == 0 }
+}
 
 /** Optional application contract; existing editor implementations keep their behaviour. */
 public interface CoreVideoEditor : VideoEditor {
@@ -25,6 +39,7 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, actio
     val output = MemoryOutputTransaction(ctx, "ui-core-media")
     var applied: OperationResult? = null
     var actualTime: Time? = null
+    var retainedWindow: TimeRange? = null
     var details = ""
     fun time(value: Time): String = "${value.value}/${value.timescale} 秒"
     try {
@@ -40,6 +55,8 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, actio
                 is CoreResult.Failure -> trim
                 is CoreResult.Success -> {
                     val value = trim.value
+                    retainedWindow = retainedCoreVideoWindow(value.actualStart, value.actualEnd, value.timelineMap,
+                        value.wasBitstreamPreserved, value.retainedHiddenContent)
                     details = "请求 ${time(value.requestedStart)}～${time(value.requestedEnd)}；实际 ${time(value.actualStart)}～${time(value.actualEnd)}。" +
                         value.tracks.joinToString { "轨道 ${it.trackId.value}：${time(it.presented.start)}～${time(it.presented.end)}，samplesPreserved=${it.samplesPreserved}" }
                     CoreResult.Success(value.operation)
@@ -69,8 +86,10 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, actio
                 val summary = "Core $action：" + result.value.execution.mapNotNull { it.backendId }.distinct().joinToString() + "。$details\n" +
                     records.joinToString { "${it.guarantee}: ${it.outcome}" } + "\nSHA-256：${asset.digest.value}；${asset.byteLength} bytes。" +
                     "\n不修改原文件、不编码音频；Unknown 不等于保留已验证。" +
-                    if (action == CoreMediaAction.ExtractFrame) "封面使用 Core 返回的实际帧时间。" else "请在处理后的视频上重新选封面，旧封面时间不自动沿用。"
-                CoreResult.Success(PreparedCoreMedia(output.committedAssets().getValue(asset.id), mime, actualTime, summary))
+                    if (action == CoreMediaAction.ExtractFrame) "封面使用 Core 返回的实际帧时间。"
+                    else if (retainedWindow != null) "已验证视频时间平移；保留范围内的旧封面可沿用，范围外拒绝替换输入。"
+                    else "请在处理后的视频上重新选封面，旧封面时间不自动沿用。"
+                CoreResult.Success(PreparedCoreMedia(output.committedAssets().getValue(asset.id), mime, actualTime, summary, retainedWindow))
             }
         }
     } finally {
