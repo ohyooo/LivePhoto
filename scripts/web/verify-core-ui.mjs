@@ -67,7 +67,8 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       return {audited,hash:createHash('sha256').update(bytes).digest('hex')};
     };
     try{
-      await page.goto(origin+'/livephoto/');
+      const response=await page.goto(origin+'/livephoto/');
+      if(!response?.ok())throw Error('Wasm UI index was not served: HTTP '+response?.status());
       await page.waitForFunction(()=>document.documentElement.dataset.livephotoRuntime==='kotlin-wasm-compose');
       await driver.choose('选择图片',imagePath);await choose(coreSource);
       check(size+':wasm-runtime-and-engine-lazy',engines===0&&downloads===0);

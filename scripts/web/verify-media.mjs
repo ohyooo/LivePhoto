@@ -64,9 +64,10 @@ const server=createServer(async(req,res)=>{
       res.setHeader('Content-Type','text/javascript');res.end(await readFile(file));return;
     }
     if(!path.startsWith('/livephoto/')) {res.writeHead(404).end();return;}
-    const file=resolve(root,'.'+path.slice('/livephoto'.length));
+    const relative=path.slice('/livephoto'.length);
+    const file=resolve(root,'.'+(relative==='/'?'/index.html':relative));
     if(!file.startsWith(root+sep)) {res.writeHead(403).end();return;}
-    res.setHeader('Content-Type',{'.js':'application/javascript','.mjs':'application/javascript','.wasm':'application/wasm','.json':'application/json'}[extname(file)]??'application/octet-stream');
+    res.setHeader('Content-Type',{'.html':'text/html','.css':'text/css','.js':'application/javascript','.mjs':'application/javascript','.wasm':'application/wasm','.json':'application/json'}[extname(file)]??'application/octet-stream');
     res.end(await readFile(file));
   }catch {res.writeHead(404).end();}
 });
