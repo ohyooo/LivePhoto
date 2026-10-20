@@ -29,6 +29,15 @@ if(process.argv.includes('--tests')) {
     if(proof.commit!==process.env.GITHUB_SHA||String(proof.run)!==process.env.GITHUB_RUN_ID||proof.tests!==count||proof.failures!==0||proof.checks?.length!==count||new Set(proof.checks).size!==count)throw Error('Incomplete/wrong-source test evidence: '+file);
   }
   const browser=await json('web-browser-evidence.json'),worker=browser.worker;
+  const media=await json('web-media-evidence.json'),mediaWorker=media.worker;
+  const mediaWorkerChecks=['worker-context-and-capabilities','worker-probe','worker-remux','worker-trim','worker-extractFrame',
+    'worker-transcode','worker-refusals-no-output','worker-cancellation-and-budget','worker-input-immutable'];
+  if(!mediaWorker?.success||mediaWorker.tests!==9||mediaWorker.failures!==0||mediaWorker.checks?.length!==9||
+    JSON.stringify([...mediaWorker.checks].sort())!==JSON.stringify([...mediaWorkerChecks].sort())||
+    mediaWorker.scope!=='module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'||
+    !/^[0-9a-f]{64}$/.test(mediaWorker.inputSha256)||mediaWorker.outputs?.length!==4||
+    JSON.stringify(mediaWorker.outputs.map(o=>o.action).sort())!==JSON.stringify(['extractFrame','remux','transcode','trim'])||
+    mediaWorker.outputs.some(o=>!Number.isSafeInteger(o.bytes)||o.bytes<=0||! /^[0-9a-f]{64}$/.test(o.sha256)))throw Error('Incomplete media module Worker execution or independent output audit');
   const workerChecks=['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].flatMap(protocol=>
     ['create','detect','validate','inspect','analyze','key','extract','split','same-target','convert','repair','immutable'].map(name=>protocol+':'+name))
     .concat(['malformed-structured-error','unsupported-no-output','ordinary-convert-not-create','missing-target','invalid-input-type','budget-rejected']);

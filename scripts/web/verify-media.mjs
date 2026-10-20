@@ -44,11 +44,13 @@ const monoInput=await readFile(monoSource);
 const shiftedInput=await readFile(shiftedSource);
 const emptyEncoderInput=await readFile(emptyEncoderSource);
 const input=await readFile(source), root=resolve('ci-output/web-ui'),apiRoot=resolve('ci-output/browser-api/web-library');
+const mediaWorker=await readFile('scripts/web/verify-media-worker.mjs');
 const server=createServer(async(req,res)=>{
   try {
     const path=new URL(req.url,'http://localhost').pathname;
     if(path==='/livephoto/test') {res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Media adapter validation</title>');return;}
     if(path==='/fixture') {res.setHeader('Content-Type','video/mp4');res.end(input);return;}
+    if(path==='/media-worker.mjs') {res.setHeader('Content-Type','text/javascript');res.end(mediaWorker);return;}
     if(path==='/core-fixture') {res.setHeader('Content-Type','video/mp4');res.end(coreInput);return;}
     if(path==='/core-mono-fixture') {res.setHeader('Content-Type','video/mp4');res.end(monoInput);return;}
     if(path==='/core-fractional-fixture') {res.setHeader('Content-Type','video/mp4');res.end(shiftedInput);return;}
@@ -207,9 +209,63 @@ try {
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable);
+  const workerResult=await page.evaluate(async()=>{
+    const input=await(await fetch('/core-fixture')).blob();
+    const worker=new Worker('/media-worker.mjs',{type:'module'});
+    let timer;
+    try{
+      const proof=await new Promise((resolve,reject)=>{
+        timer=setTimeout(()=>reject(Error('Media module Worker timeout')),180000);
+        worker.onmessage=({data})=>data.success?resolve(data):reject(Error('Media Worker: '+data.message));
+        worker.onerror=event=>reject(Error('Media Worker execution failed: '+event.message));
+        worker.postMessage({input});
+      });
+      const outputs={};
+      for(const [action,value] of Object.entries(proof.outputs)){
+        outputs[action]={report:value.report,bytes:value.blob?Array.from(new Uint8Array(await value.blob.arrayBuffer())):null};
+      }
+      return {...proof,outputs};
+    }finally{clearTimeout(timer);worker.terminate();}
+  });
+  const workerChecks=['worker-context-and-capabilities','worker-probe','worker-remux','worker-trim','worker-extractFrame',
+    'worker-transcode','worker-refusals-no-output','worker-cancellation-and-budget','worker-input-immutable'];
+  if(!workerResult.success||workerResult.tests!==9||workerResult.failures!==0||
+    JSON.stringify([...workerResult.checks].sort())!==JSON.stringify([...workerChecks].sort())||
+    workerResult.inputSha256!==createHash('sha256').update(coreInput).digest('hex'))throw Error('Wrong/incomplete media module Worker proof');
+  const workerOutputs=[];
+  for(const action of ['remux','trim','transcode']){
+    const value=workerResult.outputs[action],bytes=new Uint8Array(value.bytes),path=join(directory,'worker-'+action+'.mp4');
+    await writeFile(path,bytes);
+    const after=probe(path);
+    if(after.streams.length!==2||!value.report.execution.some(e=>e.backendId==='ffmpeg-wasm'))throw Error('Wrong Worker streams/backend');
+    for(const kind of action==='transcode'?['audio']:['video','audio']){
+      const a=coreBefore.streams.find(s=>s.codec_type===kind),b=after.streams.find(s=>s.codec_type===kind);
+      if(!a||!b||a.codec_name!==b.codec_name)throw Error('Worker changed copy codec');
+      const original=coreBefore.packets.filter(p=>p.stream_index===a.index).map(p=>p.data_hash),retained=after.packets.filter(p=>p.stream_index===b.index).map(p=>p.data_hash);
+      if(!retained.length||!original.some((_,i)=>retained.every((hash,j)=>hash&&hash===original[i+j]))||
+        (action!=='trim'&&original.length!==retained.length))throw Error('Independent Worker packet audit failed: '+action+'/'+kind);
+    }
+    if(action==='transcode'){
+      const a=coreBefore.streams.find(s=>s.codec_type==='video'),b=after.streams.find(s=>s.codec_type==='video');
+      const original=new Set(coreBefore.packets.filter(p=>p.stream_index===a.index).map(p=>p.data_hash));
+      if(b.codec_name!=='h264'||!after.packets.some(p=>p.stream_index===b.index&&!original.has(p.data_hash)))throw Error('Worker video was not encoded');
+    }
+    if(action==='trim'&&(!value.report.actual.wasBitstreamPreserved||value.report.actual.tracks.length!==2||
+      !value.report.actual.timelineMap.length))throw Error('Worker trim lacks verified timelines');
+    workerOutputs.push({action,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+  }
+  const workerFrame=workerResult.outputs.extractFrame;
+  const frameDecoded=await page.evaluate(async bytes=>{
+    const bitmap=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:'image/jpeg'}));
+    try{return bitmap.width===64&&bitmap.height===64;}finally{bitmap.close();}
+  },workerFrame.bytes);
+  if(!frameDecoded||workerFrame.report.actual.actualFrameIndex!=='10'||workerFrame.report.actual.trackId!=='1')throw Error('Worker frame failed independent decode');
+  workerOutputs.push({action:'extractFrame',bytes:workerFrame.bytes.length,sha256:createHash('sha256').update(new Uint8Array(workerFrame.bytes)).digest('hex')});
+  const worker={success:true,tests:9,failures:0,checks:workerResult.checks,inputSha256:workerResult.inputSha256,outputs:workerOutputs,
+    scope:'module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'};
   if(checks.length!==19||new Set(checks).size!==19)throw Error('Incomplete media evidence');
   await writeFile('ci-output/web-media-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
-    browserVersion:browser.version(),tests:checks.length,failures:0,checks,inputSha256:createHash('sha256').update(input).digest('hex'),
+    browserVersion:browser.version(),tests:checks.length,failures:0,checks,worker,inputSha256:createHash('sha256').update(input).digest('hex'),
     scope:'browser-video-canvas-real-single-thread-ffmpeg-wasm-native-packet-audit-synthetic-audio-no-device-proof'},null,2)+'\n');
-  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 19 checks; real Wasm editing and Core backend, native independent audio/video packet audit');
+  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 19 checks; MEDIA_WORKER_EVIDENCE=SUCCESS 9 checks; real Wasm editing and Core backend, native independent audio/video packet audit');
 }finally{await browser.close();await new Promise(r=>server.close(r));}
