@@ -17,6 +17,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.collect
+import livephoto.core.Time
+import kotlin.math.roundToLong
 
 /** UI adapter contract: no paths, browser objects or media processing in the shared screen. */
 public data class VideoPlayback(
@@ -65,25 +67,35 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var coverPreview by remember(editor) { mutableStateOf<String?>(null) }
     var capturing by remember(editor) { mutableStateOf(false) }
     var coreWorking by remember(editor) { mutableStateOf(false) }
+    var compatibilityTrim by remember(editor) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
     val enabled = !parentBusy && !working && !coreWorking && playback.ready
     val canCapture by rememberUpdatedState(enabled)
     fun process(transcode: Boolean) {
+        if (!enabled || capturing) return
+        working = true; onBusy(true)
         scope.launch {
-            working = true; onBusy(true)
             status = "正在本地加载和执行 FFmpeg；不会上传视频…"
             try {
                 val from = if (trimOpen) start else 0.0
                 val until = if (trimOpen) end else playback.duration
                 require(from >= 0 && from < until && until <= playback.duration + 0.001) { "请选择视频时长内的有效片段。" }
-                require(cover == null || cover >= from && cover < until) { "封面位置不在保留片段内，请调整封面或裁剪范围。" }
-                val result = editor.process(from, until, transcode)
+                val strictTrim = !transcode && editor is CoreVideoEditor && !compatibilityTrim
+                // Core checks the validated actual retained window, not merely
+                // the requested bounds. Legacy semantics remain explicit.
+                if (!strictTrim) require(cover == null || cover >= from && cover < until) { "封面位置不在保留片段内，请调整封面或裁剪范围。" }
+                val result = if (strictTrim) {
+                    require(from.isFinite() && until.isFinite() && from >= 0 && until <= 60) { "Core 裁剪仅限 60 秒内视频。" }
+                    val prepared = (editor as CoreVideoEditor).processCore(CoreMediaAction.Trim,
+                        Time((from * 1_000_000).roundToLong(), 1_000_000u), Time((until * 1_000_000).roundToLong(), 1_000_000u))
+                    checkNotNull(prepared.video) { "Core 裁剪未返回视频；输入未替换。" }
+                } else editor.process(from, until, transcode)
                 onVideo(result)
                 status = result.summary
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { status = "处理失败：${error.message ?: error.toString()}。没有替换输入视频。" }
+            catch (error: Exception) { status = "处理失败：${error.message?.take(2000) ?: "未知错误"}。没有替换输入视频，不自动切换处理路径。" }
             finally { working = false; onBusy(false) }
         }
     }
@@ -140,6 +152,15 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                     start = range.start.toDouble(); end = range.endInclusive.toDouble(); editor.seek(moved)
                 }, modifier = Modifier.fillMaxWidth().testTag("trim-progress").semantics { contentDescription = "裁剪范围" })
             Text("拖动两端手柄，保留中间高亮片段。")
+            if (editor is CoreVideoEditor) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(compatibilityTrim, { compatibilityTrim = it }, enabled = enabled && !capturing,
+                        modifier = Modifier.semantics { contentDescription = "旧版兼容裁剪" })
+                    Text("旧版兼容裁剪")
+                }
+                Text(if (compatibilityTrim) "当前使用旧预处理，不具备 Core 的完整保真检查；音视频仍为 copy。"
+                    else "默认使用 Core 验证裁剪；仅限已支持的媒体配置，失败不自动回退。旧版兼容裁剪需手动勾选。")
+            }
             Button(enabled = enabled && !capturing && start < end, modifier = Modifier.fillMaxWidth(), onClick = { process(false) }) {
                 Text("应用裁剪（音视频 copy）")
             }
@@ -148,7 +169,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             Text("显式转为 H.264 并使用（音频 copy）")
         }
         if (working) OutlinedButton(onClick = { editor.cancel() }) { Text("取消媒体处理") }
-        if (status.isNotEmpty()) Text(status)
+        if (status.isNotEmpty()) Text(status, modifier = Modifier.testTag("player-edit-status"))
         if (editor is CoreVideoEditor) CoreMediaControls(editor, !parentBusy && !working && !capturing && playback.ready,
             start, end, if (coverOpen) coverPosition else playback.current, trimOpen,
             onBusy = { coreWorking = it; onBusy(it) }, onImage = onImage, onVideo = onVideo)

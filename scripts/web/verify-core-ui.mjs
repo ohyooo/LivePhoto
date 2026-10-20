@@ -77,7 +77,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.click('Core 检查整段（含解码）');await status(/Core Probe：Partial.*MEDIA_DECODE_COMPLETED/);
       check(size+':core-probe-real-decode',engines>0&&downloads===0);
       await page.screenshot({path:`ci-output/web-ui-core-media-${size}.png`});
-      for(const [action,button] of [['remux','Core 封装整段并使用（不编码）'],['trim','Core 裁剪并使用（音视频 copy）'],['transcode','Core 转码整段并使用（音频 copy）']]){
+      for(const [action,button] of [['remux','Core 封装整段并使用（不编码）'],['trim','应用裁剪（音视频 copy）'],['transcode','Core 转码整段并使用（音频 copy）']]){
         if(action!=='remux')await choose(coreSource);
         // Whole-video transcode is a separate case, not an authorization to
         // carry the previous trimmed video's cover onto a newly selected input.
@@ -85,6 +85,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         if(action==='trim'){
           await seek(1.2);await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
           await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
+          if(await driver.find('旧版兼容裁剪').isChecked())throw Error('Compatibility trim must not be the default');
         }
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
@@ -108,9 +109,18 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       // A failed edit must not replace the current input or silently drop the cover.
       const beforeOutside=downloads;
       await driver.click('裁剪视频');await driver.dragRange('end',.10);
-      await driver.click('Core 裁剪并使用（音视频 copy）');await status(/KEY_PHOTO_OUTSIDE_TRIM/);
+      await driver.click('应用裁剪（音视频 copy）');
+      await page.locator('#player-edit-status').filter({hasText:/KEY_PHOTO_OUTSIDE_TRIM/}).waitFor({state:'attached'});
       if(downloads!==beforeOutside||await text(/名称：core-input\.mp4/).count()!==1)throw Error('Out-of-range Core cover replaced input');
       await choose(monoSource);const before=downloads;
+      await driver.click('裁剪视频');
+      await driver.click('旧版兼容裁剪');
+      await choose(monoSource);await driver.click('裁剪视频');
+      if(await driver.find('旧版兼容裁剪').isChecked())throw Error('Compatibility trim choice leaked across video inputs');
+      await driver.dragRange('end',.80);
+      await driver.click('应用裁剪（音视频 copy）');
+      await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
+      if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core trim automatically fell back');
       await driver.click('Core 封装整段并使用（不编码）');await status(/CAPABILITY_UNSUPPORTED/);
       check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-mono\.mp4/).count()===1);
       await choose(coreSource);

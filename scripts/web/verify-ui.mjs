@@ -195,6 +195,9 @@ try {
     };
     check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash,1.4));
     await driver.click('裁剪视频');
+    // This existing wider-profile fixture explicitly exercises the retained
+    // compatibility path; default strict Core trimming is audited separately.
+    await driver.click('旧版兼容裁剪');
     await driver.dragRange('start',1.2/await player.evaluate(v=>v.duration));
     await driver.dragRange('end',2.6/await player.evaluate(v=>v.duration));
     await click('应用裁剪（音视频 copy）');
