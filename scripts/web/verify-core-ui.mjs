@@ -79,6 +79,9 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await page.screenshot({path:`ci-output/web-ui-core-media-${size}.png`});
       for(const [action,button] of [['remux','Core 封装整段并使用（不编码）'],['trim','Core 裁剪并使用（音视频 copy）'],['transcode','Core 转码整段并使用（音频 copy）']]){
         if(action!=='remux')await choose(coreSource);
+        // Whole-video transcode is a separate case, not an authorization to
+        // carry the previous trimmed video's cover onto a newly selected input.
+        if(action==='transcode')await driver.choose(/^(?:重新)?选择图片$/,imagePath);
         if(action==='trim'){
           await seek(1.2);await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
           await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
