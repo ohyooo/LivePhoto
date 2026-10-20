@@ -209,6 +209,7 @@ try {
       return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
     });
     check(label+':AB-carrier-C-rebased-video-exact',await generateAndAudit(trimmedHash));
+    await driver.click('旧版兼容转码');
     await click('显式转为 H.264 并使用（音频 copy）');
     await text('名称：transcoded-H264.mp4').waitFor({state:'attached',timeout:120000});
     check(label+':explicit-transcode-used',await text(/显式 H.264 转码完成/).count()===1);

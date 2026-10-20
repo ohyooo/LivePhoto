@@ -22,7 +22,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
     const driver=composeDriver(page,viewport);
     const text=pattern=>page.getByText(pattern).or(page.getByLabel(pattern)).first();
     const mode=async pattern=>{
-      // LazyColumn need not compose an offscreen disclosure after toggling.
+      // Compose may omit offscreen accessibility text after toggling.
       // Bring it into view with real scrolling before reading the mode.
       const caption=text(pattern);await driver.reveal(caption);await caption.waitFor({state:'attached'});
     };
@@ -82,11 +82,18 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.click('Core 检查整段（含解码）');await status(/Core Probe：Partial.*MEDIA_DECODE_COMPLETED/);
       check(size+':core-probe-real-decode',engines>0&&downloads===0);
       await page.screenshot({path:`ci-output/web-ui-core-media-${size}.png`});
-      for(const [action,button] of [['remux','Core 封装整段并使用（不编码）'],['trim','应用裁剪（音视频 copy）'],['transcode','Core 转码整段并使用（音频 copy）']]){
+      for(const [action,button] of [['remux','Core 封装整段并使用（不编码）'],['trim','应用裁剪（音视频 copy）'],['transcode','显式转为 H.264 并使用（音频 copy）']]){
         if(action!=='remux')await choose(coreSource);
-        // Whole-video transcode is a separate case, not an authorization to
-        // carry the previous trimmed video's cover onto a newly selected input.
-        if(action==='transcode')await driver.choose(/^(?:重新)?选择图片$/,imagePath);
+        if(action==='transcode'){
+          await mode(/默认使用 Core 显式转码当前整段视频/);
+          await driver.click('裁剪视频');await driver.dragRange('end',.80);
+          await mode(/请先应用裁剪，再转码；不会忽略选段/);
+          if(await driver.find(button).isEnabled())throw Error('Default Core transcode silently ignores an open trim selection');
+          await driver.click('旧版兼容转码');await mode(/当前使用旧版转码预处理/);
+          if(!await driver.find(button).isEnabled())throw Error('Explicit compatibility transcode lost the combined trim workflow');
+          await choose(coreSource);await mode(/默认使用 Core 显式转码当前整段视频/);
+          await seek();await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
+        }
         if(action==='trim'){
           await seek(1.2);await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
           await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
@@ -98,6 +105,13 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         // Generating replaces the screen's operation status with the download
         // result. Inspect the edit report before triggering that next action.
         if(action==='trim')await text(/已验证视频时间平移/).waitFor({state:'attached'});
+        if(action==='transcode'){
+          const before=downloads;
+          await driver.click(/Google Motion Photo V2/);await driver.click('生成并保存 Live Photo');
+          await text(/视频范围或编码已改变，请在当前视频上重新选择封面/).waitFor({state:'attached'});
+          if(downloads!==before)throw Error('Core transcode reused an unverified cover timestamp');
+          await driver.choose(/^(?:重新)?选择图片$/,imagePath);
+        }
         const result=await download(action);
         if(action==='trim'){
           const key=result.audited.key;
@@ -129,6 +143,10 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.click('应用裁剪（音视频 copy）');
       await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
       if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core trim automatically fell back');
+      await driver.click('裁剪视频');await mode(/默认使用 Core 显式转码当前整段视频/);
+      await driver.click('显式转为 H.264 并使用（音频 copy）');
+      await page.locator('#player-edit-status').filter({hasText:/转码失败.*CAPABILITY_UNSUPPORTED/s}).waitFor({state:'attached'});
+      if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core transcode automatically fell back');
       await driver.click('Core 封装整段并使用（不编码）');await status(/CAPABILITY_UNSUPPORTED/);
       check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-mono\.mp4/).count()===1);
       await choose(coreSource);
@@ -136,7 +154,8 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       let release;
       holdEngine=new Promise(resolve=>{release=resolve;});
       try{
-        await driver.click('Core 检查整段（含解码）');await driver.click('取消 Core 媒体处理');await status(/已取消|CANCELLED/);
+        await driver.click('显式转为 H.264 并使用（音频 copy）');await driver.click('取消媒体处理');
+        await page.locator('#player-edit-status').filter({hasText:/已取消|CANCELLED/}).waitFor({state:'attached'});
       }finally{release();holdEngine=null;}
       check(size+':core-cancellation-keeps-input',downloads===before&&await text(/名称：core-input\.mp4/).count()===1);
     }catch(error){await page.screenshot({path:`ci-output/web-ui-core-media-${size}-failure.png`});throw error;}

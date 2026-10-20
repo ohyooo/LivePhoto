@@ -46,7 +46,7 @@ internal fun CoreMediaControls(editor: CoreVideoEditor, enabled: Boolean, start:
         Text("Core 媒体工具（实验）")
     }
     if (open) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("严格 Core profile，非通用转码器。仅接受可验证的格式、色彩、时间线和 metadata；当前写视频仅无音频或立体声 AAC。不满足时拒绝，不回退。普通裁剪按钮也默认使用 Core；旧版兼容裁剪需手动选择。截图和显式转码入口暂保留原实现。")
+        Text("严格 Core profile，非通用转码器。仅接受可验证的格式、色彩、时间线和 metadata；当前写视频仅无音频或立体声 AAC。不满足时拒绝，不回退。普通裁剪和显式转码按钮也默认使用 Core，旧版兼容路径需手动选择。当前画面截图暂保留原实现。")
         for ((action, label) in listOf(CoreMediaAction.Probe to "Core 检查整段（含解码）",
             CoreMediaAction.Remux to "Core 封装整段并使用（不编码）", CoreMediaAction.Trim to "Core 裁剪并使用（音视频 copy）",
             CoreMediaAction.ExtractFrame to "Core 抽取当前画面为封面", CoreMediaAction.Transcode to "Core 转码整段并使用（音频 copy）")) {

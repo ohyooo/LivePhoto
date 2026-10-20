@@ -68,6 +68,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var capturing by remember(editor) { mutableStateOf(false) }
     var coreWorking by remember(editor) { mutableStateOf(false) }
     var compatibilityTrim by remember(editor) { mutableStateOf(false) }
+    var compatibilityTranscode by remember(editor) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
@@ -82,20 +83,23 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 val from = if (trimOpen) start else 0.0
                 val until = if (trimOpen) end else playback.duration
                 require(from >= 0 && from < until && until <= playback.duration + 0.001) { "请选择视频时长内的有效片段。" }
-                val strictTrim = !transcode && editor is CoreVideoEditor && !compatibilityTrim
+                val strictCore = editor is CoreVideoEditor && (if (transcode) !compatibilityTranscode else !compatibilityTrim)
                 // Core checks the validated actual retained window, not merely
                 // the requested bounds. Legacy semantics remain explicit.
-                if (!strictTrim) require(cover == null || cover >= from && cover < until) { "封面位置不在保留片段内，请调整封面或裁剪范围。" }
-                val result = if (strictTrim) {
-                    require(from.isFinite() && until.isFinite() && from >= 0 && until <= 60) { "Core 裁剪仅限 60 秒内视频。" }
-                    val prepared = (editor as CoreVideoEditor).processCore(CoreMediaAction.Trim,
-                        Time((from * 1_000_000).roundToLong(), 1_000_000u), Time((until * 1_000_000).roundToLong(), 1_000_000u))
-                    checkNotNull(prepared.video) { "Core 裁剪未返回视频；输入未替换。" }
+                if (!strictCore) require(cover == null || cover >= from && cover < until) { "封面位置不在保留片段内，请调整封面或裁剪范围。" }
+                val result = if (strictCore) {
+                    require(!transcode || !trimOpen) { "请先应用裁剪，再执行 Core 转码；不会忽略当前选段。" }
+                    require(from.isFinite() && until.isFinite() && from >= 0 && until <= 60) { "Core 媒体处理仅限 60 秒内视频。" }
+                    val action = if (transcode) CoreMediaAction.Transcode else CoreMediaAction.Trim
+                    val prepared = (editor as CoreVideoEditor).processCore(action,
+                        if (transcode) Time.Zero else Time((from * 1_000_000).roundToLong(), 1_000_000u),
+                        if (transcode) Time.Zero else Time((until * 1_000_000).roundToLong(), 1_000_000u))
+                    checkNotNull(prepared.video) { "Core 未返回视频；输入未替换。" }
                 } else editor.process(from, until, transcode)
                 onVideo(result)
                 status = result.summary
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { status = "处理失败：${error.message?.take(2000) ?: "未知错误"}。没有替换输入视频，不自动切换处理路径。" }
+            catch (error: Exception) { status = "${if (transcode) "转码" else "裁剪"}失败：${error.message?.take(2000) ?: "未知错误"}。没有替换输入视频，不自动切换处理路径。" }
             finally { working = false; onBusy(false) }
         }
     }
@@ -165,7 +169,18 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 Text("应用裁剪（音视频 copy）")
             }
         }
-        OutlinedButton(enabled = enabled && !capturing, modifier = Modifier.fillMaxWidth(), onClick = { process(true) }) {
+        if (editor is CoreVideoEditor) {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Checkbox(compatibilityTranscode, { compatibilityTranscode = it }, enabled = enabled && !capturing,
+                    modifier = Modifier.semantics { contentDescription = "旧版兼容转码" })
+                Text("旧版兼容转码")
+            }
+            Text(if (compatibilityTranscode) "当前使用旧版转码预处理；可同时应用选段，不具备 Core 的完整保真检查，音频仍 copy。"
+                else if (trimOpen) "Core 转码处理当前整段视频。请先应用裁剪，再转码；不会忽略选段。"
+                else "默认使用 Core 显式转码当前整段视频；仅限已支持的媒体配置，音频 copy，失败不自动回退，处理后需重新选封面。")
+        }
+        OutlinedButton(enabled = enabled && !capturing && (editor !is CoreVideoEditor || compatibilityTranscode || !trimOpen),
+            modifier = Modifier.fillMaxWidth().testTag("player-transcode"), onClick = { process(true) }) {
             Text("显式转为 H.264 并使用（音频 copy）")
         }
         if (working) OutlinedButton(onClick = { editor.cancel() }) { Text("取消媒体处理") }
