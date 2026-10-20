@@ -85,7 +85,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         if(action==='trim'){
           await seek(1.2);await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
           await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
-          if(await driver.find('旧版兼容裁剪').isChecked())throw Error('Compatibility trim must not be the default');
+          if(await text(/默认使用 Core 验证裁剪/).count()!==1)throw Error('Compatibility trim must not be the default');
         }
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
@@ -115,8 +115,11 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await choose(monoSource);const before=downloads;
       await driver.click('裁剪视频');
       await driver.click('旧版兼容裁剪');
+      // Compose exposes this toggle as an accessible button, not a native
+      // HTML checkbox. Verify the actual mode disclosure, not isChecked().
+      if(await text(/当前使用旧预处理/).count()!==1)throw Error('Explicit compatibility choice did not take effect');
       await choose(monoSource);await driver.click('裁剪视频');
-      if(await driver.find('旧版兼容裁剪').isChecked())throw Error('Compatibility trim choice leaked across video inputs');
+      if(await text(/默认使用 Core 验证裁剪/).count()!==1)throw Error('Compatibility trim choice leaked across video inputs');
       await driver.dragRange('end',.80);
       await driver.click('应用裁剪（音视频 copy）');
       await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
