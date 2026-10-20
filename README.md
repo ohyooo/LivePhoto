@@ -676,6 +676,8 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 Web CI 只构建一次，协议、媒体、播放器及公共 Kotlin 测试独立运行。完整 UI 通过 reusable workflow 按窄屏、宽屏并行执行（89＋89 项），不删减原有检查；各组下载同一次编译产物、复用缓存，全部通过并校验合并报告后才发布。
 
+重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
+
 已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。部分 OPPO 文件修改时间字段长度会移动未经验证的 EXIF，因此保留 `UNSAFE_METADATA_REWRITE` 拒绝，不输出、不删除 EXIF 绕过；不是全部可创建文件都能修改关键时间。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
 
 ### 诊断日志
