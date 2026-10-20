@@ -21,6 +21,11 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
     page.setDefaultTimeout(180000);
     const driver=composeDriver(page,viewport);
     const text=pattern=>page.getByText(pattern).or(page.getByLabel(pattern)).first();
+    const mode=async pattern=>{
+      // LazyColumn need not compose an offscreen disclosure after toggling.
+      // Bring it into view with real scrolling before reading the mode.
+      const caption=text(pattern);await driver.reveal(caption);await caption.waitFor({state:'attached'});
+    };
     const status=pattern=>page.locator('#core-media-status').filter({hasText:pattern}).waitFor({state:'attached'});
     const choose=async path=>{
       await driver.choose(/^(?:重新)?选择视频$/,path);
@@ -85,7 +90,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         if(action==='trim'){
           await seek(1.2);await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
           await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
-          if(await text(/默认使用 Core 验证裁剪/).count()!==1)throw Error('Compatibility trim must not be the default');
+          await mode(/默认使用 Core 验证裁剪/);
         }
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
@@ -117,9 +122,9 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.click('旧版兼容裁剪');
       // Compose exposes this toggle as an accessible button, not a native
       // HTML checkbox. Verify the actual mode disclosure, not isChecked().
-      if(await text(/当前使用旧预处理/).count()!==1)throw Error('Explicit compatibility choice did not take effect');
+      await mode(/当前使用旧预处理/);
       await choose(monoSource);await driver.click('裁剪视频');
-      if(await text(/默认使用 Core 验证裁剪/).count()!==1)throw Error('Compatibility trim choice leaked across video inputs');
+      await mode(/默认使用 Core 验证裁剪/);
       await driver.dragRange('end',.80);
       await driver.click('应用裁剪（音视频 copy）');
       await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
