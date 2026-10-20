@@ -82,7 +82,7 @@ const originalVideoBlob = extracted.blob;
 
 创建只开放 `oplus.olive`（JPEG 无尾部 profile）、`google.motionphoto.v2`、`google.microvideo.v1` 三个已有目标；浏览器 API 不扩展协议/编码支持。`replaceCameraComment: true` 只允许前文明确列出的两种相机注释替换，默认不授权。失败返回结构化 `success/code/stage/message` 且不返回输出 Blob；参数类型、提前大小检查失败则 Promise 拒绝。
 
-`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。此协议功能库不提供抽帧、裁剪、转码或系统相册导入；下方网页界面的媒体预处理是独立适配。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件或可中途取消。
+`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。默认协议接口不加载媒体引擎；需要抽帧、裁剪、转码时，使用下方可选媒体后端，与网页播放器复用同一 Kotlin Core，不提供系统相册导入。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件。
 
 协议接口还提供 `inspectLivePhoto`、`analyzeLivePhoto`、`getKeyPhotoPosition`、`convertLivePhoto(input, { target })`、`splitLivePhoto`。检查结果位于 `result.report`：包含多重检测、资源范围、媒体/metadata、关键照片原始字段、检查明细及带条件的能力；Analyze 不把缺媒体后端说成可抽帧。64 位 offset/length、时间分子和任意精度 metadata 数字用十进制字符串，未知值保留 `null`。
 
@@ -662,17 +662,17 @@ const frame = await media.extractFrame(video, { start: 0.4 });
 const encoded = await media.transcode(video, { authorizeTranscode: true });
 ```
 
-只有显式 `authorizeTranscode: true` 才允许视频编码，音频始终 copy。`media.capabilities()` 不加载引擎，返回 Experimental 及具体条件。当前 Wasm 复封装/裁剪/转码仅开放无音频或立体声 AAC：其旧 muxer 会规范化单声道 sample-entry，无法保持原字段，因此单声道/多声道明确拒绝，不编码音频或手改字段绕过。桌面后端和现有播放器预处理不受此新入口限制影响。
+只有显式 `authorizeTranscode: true` 才允许视频编码，音频始终 copy。`media.capabilities()` 不加载引擎，返回 Experimental 及具体条件。当前 Wasm 复封装/裁剪/转码仅开放无音频或立体声 AAC：其 muxer 会规范化单声道 sample-entry，无法保持原字段，因此单声道/多声道明确拒绝，不编码音频或手改字段绕过。网页播放器遵守相同能力边界；桌面后端能力另行记录。
 
 输出 `assets` 与 `report` 包含 Core 保真及执行记录；裁剪报告实际边界，probe 的解码成功仍是 Partial，而非完整兼容认证。旧 Wasm muxer 转码还可能新写入 AVC 编码器标记；原 sample-entry 标记不能保持时会拒绝、无输出，不放宽 metadata 保真检查。因此不是任意 MP4 均可安全转码。
 
-返回 Blob 不会自行下载。独立 Core 抽帧不等同于播放器当前画面截图；现有播放器预处理尚未全部迁移，不宣称两个入口支持范围相同。实际验收见当前提交 CI。
+返回 Blob 不会自行下载。浏览器功能库与播放器调用同一 Core；播放器拖动时的浏览器截图仅用于只读预览，不作为生成输入。
 
-播放器的“应用裁剪”默认使用统一 Core；格式、metadata、色彩与音轨不符合有限 profile 时拒绝，不自动回退。需要原宽松预处理时，可手动勾选“旧版兼容裁剪”；重选视频后恢复默认 Core。两条路径都不编码音频，但旧路径不具备 Core 的完整保真检查。Core copy 裁剪在已验证的单段等速映射内沿用封面、按实际起点重定位，封面在实际保留范围外则拒绝替换输入；其它未知映射仍须重选封面。
+播放器只保留一套媒体操作：检查视频、重新封装、应用裁剪、使用当前画面为封面、显式 H.264 转码，统一调用 Kotlin Core。旧版预处理、兼容开关及重复的“Core 媒体工具”已移除。格式、metadata、色彩与音轨不符合有限 profile 时明确拒绝，不切换实现、不自动转码，音频始终 copy。裁剪按实际视频映射沿用范围内的封面，范围外拒绝替换；转码或未知映射须重选封面。
 
-普通“显式转为 H.264 并使用”也默认调用 Core，只转码当前整段视频、音频 copy。开启裁剪时须先应用裁剪，再转码，不会忽略选段；需要原有同时裁剪并转码的路径，可手动勾选“旧版兼容转码”，其保真检查范围不同。重选视频恢复默认 Core，Core 拒绝不自动回退。转码后须重新选择封面，不猜测旧封面的时间映射。
+转码只处理当前整段视频。开启裁剪时须先应用裁剪，再转码，不会忽略选段。拖动封面进度条实时更新预览，但不会替换已选图片；点击“使用当前画面为封面”后，由 Core 抽取实际帧、以返回的实际时间设置封面。
 
-播放器下方还可展开“Core 媒体工具（实验）”，直接使用 Wasm 中的 Core 检查、整段封装、所选范围 copy 裁剪、当前位置抽帧或显式整段视频转码。普通当前画面截图仍保留原实现，不能称为全部处理流程已统一。新默认入口与 Wasm 适配的执行结果以对应 CI 为准。
+所有媒体操作共用状态、取消和诊断报告，不再要求选择内部处理路径。实现范围及真实验收以当前提交 CI 为准；移除旧版不会让 Core 原本不支持的格式自动变为可用。
 
 已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。部分 OPPO 文件修改时间字段长度会移动未经验证的 EXIF，因此保留 `UNSAFE_METADATA_REWRITE` 拒绝，不输出、不删除 EXIF 绕过；不是全部可创建文件都能修改关键时间。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
 

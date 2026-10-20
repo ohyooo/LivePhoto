@@ -22,11 +22,6 @@ public fun retainedCoreVideoWindow(start: Time, end: Time, mapping: List<Timelin
     return segment.input.takeIf { segment.output.end.compareTo(duration) == 0 }
 }
 
-/** Optional application contract; existing editor implementations keep their behaviour. */
-public interface CoreVideoEditor : VideoEditor {
-    public suspend fun processCore(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit
-}
-
 /** Bounded application orchestration only. Commands, media proofs and publication stay in Core. */
 public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, action: CoreMediaAction,
     start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null): CoreResult<PreparedCoreMedia> {

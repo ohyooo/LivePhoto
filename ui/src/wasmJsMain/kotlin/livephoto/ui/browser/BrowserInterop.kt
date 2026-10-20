@@ -13,15 +13,11 @@ import org.w3c.files.File
 // Browser capabilities only. All controls and generation remain in shared Kotlin.
 internal external interface BrowserMedia : JsAny {
     val player: BrowserPlayerModule
-    val editor: BrowserEditorModule
 }
 internal external interface BrowserPlayerModule : JsAny {
     fun createPlayer(file: Blob, changed: (BrowserPlayback) -> Unit, scroll: (Float) -> Unit): BrowserPlayer
     fun imagePreview(file: Blob, scroll: (Float) -> Unit): BrowserPreview
     fun resultPreview(photo: Blob, movie: Blob, scroll: (Float) -> Unit): BrowserPreview
-}
-internal external interface BrowserEditorModule : JsAny {
-    fun startVideoEdit(file: Blob, options: BrowserEditOptions): BrowserEditJob
 }
 internal external interface BrowserPreview : JsAny {
     val element: HTMLElement
@@ -54,21 +50,8 @@ internal external interface BrowserCapture : JsAny {
     val blob: Blob
     val time: Double
 }
-internal external interface BrowserEditOptions : JsAny
-internal external interface BrowserEditJob : JsAny {
-    val promise: Promise<BrowserEditResult>
-    fun cancel()
-}
-internal external interface BrowserEditResult : JsAny {
-    val blob: Blob
-    val timelineKnown: Boolean
-    val origin: Double
-    val actualStart: Double?
-    val actualEnd: Double?
-}
-
 internal fun browserMediaReady(): Promise<BrowserMedia> =
-    js("window.livePhotoMediaReady.then(modules => ({player: modules[0], editor: modules[1]}))")
+    js("window.livePhotoMediaReady.then(player => ({player}))")
 internal fun browserFont(): Promise<ArrayBuffer> =
     js("fetch('fonts/NotoSansSC-Regular.otf').then(response => { if (!response.ok) throw new Error('Bundled font unavailable'); return response.arrayBuffer(); })")
 internal fun browserFileBytes(file: Blob): Promise<ArrayBuffer> = js("file.arrayBuffer()")
@@ -80,8 +63,6 @@ internal fun browserFile(blob: Blob, name: String, mime: String): File = js("new
 internal fun browserObjectUrl(blob: Blob): String = js("URL.createObjectURL(blob)")
 internal fun browserRevokeUrl(url: String): Unit = js("{ URL.revokeObjectURL(url); }")
 internal fun browserFullscreenEnabled(): Boolean = js("!!document.fullscreenEnabled")
-internal fun browserEditOptions(start: Double, end: Double, transcodeVideo: Boolean): BrowserEditOptions =
-    js("({start, end, transcodeVideo})")
 internal fun browserPreviewElement(preview: BrowserPreview): HTMLElement =
     js("{ preview.element.releasePreview = () => preview.dispose(); return preview.element; }")
 internal fun browserReleasePreview(element: HTMLElement): Unit = js("{ element.releasePreview(); }")

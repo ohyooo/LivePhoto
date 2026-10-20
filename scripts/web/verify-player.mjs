@@ -89,7 +89,8 @@ try {
     console.log('Shared end seek',label,await video.evaluate(v=>({current:v.currentTime,duration:v.duration,fullscreen:!!document.fullscreenElement})));
     check(label+':ended-progress-complete',await video.evaluate(v=>Math.abs(v.currentTime-v.duration)<.05));
     await driver.click('截取封面');
-    await page.getByText('名称：video-cover.jpg',{exact:true}).waitFor({state:'attached'});
+    await page.waitForFunction(()=>[...document.querySelectorAll('img[alt="已选封面预览"]')].some(i=>i.complete&&i.naturalWidth>0));
+    if(await page.locator('#image-selection').textContent()!=='图片：未选择')throw Error('Preview selected an image without explicit confirmation');
     const pictureHash=()=>page.getByAltText('已选封面预览').last().evaluate(async image=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await(await fetch(image.src)).arrayBuffer()))).join(','));
     const oldPicture=await pictureHash();
     await driver.drag(page.locator('#cover-progress'),.9,.4,false,async()=>{

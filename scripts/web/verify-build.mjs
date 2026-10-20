@@ -9,6 +9,7 @@ for(const [directory,document,scope] of [
   ['web-ui','web-ui-package-evidence.json','shared-compose-screen-browser-picker-local-core-download-no-server-processing'],
 ]) {
   const manifest=await json(document),base=resolve(root,directory);
+  if(directory==='web-ui'&&manifest.files?.some(file=>file.path==='media/ffmpeg.mjs'))throw Error('Removed legacy media implementation was packaged');
   if(manifest.commit!==process.env.GITHUB_SHA||String(manifest.run)!==process.env.GITHUB_RUN_ID||manifest.scope!==scope||!Array.isArray(manifest.files)||!manifest.files.length)throw Error('Wrong build identity: '+document);
   const seen=new Set();
   if(directory==='web-ui'&&(manifest.kotlinRuntime!=='wasmJs'||!manifest.applicationWasm?.length||

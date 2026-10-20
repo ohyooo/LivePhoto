@@ -84,7 +84,8 @@ try {
   await page.goto(origin+'/livephoto/test');
   const result=await page.evaluate(async()=>{
     const {createPlayer}=await import('/livephoto/media/player.mjs');
-    const {startVideoEdit}=await import('/livephoto/media/ffmpeg.mjs');
+    const {createMediaBackend}=await import('/api/livephoto.mjs');
+    const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs'});
     const file=await(await fetch('/fixture')).blob();
     const digest=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');
     const originalHash=await digest(file);
@@ -101,21 +102,24 @@ try {
     const captured=first.blob.type==='image/jpeg'&&decoded.width===64&&decoded.height===64&&
       await digest(first.blob)!==await digest(second.blob)&&Math.abs(first.time-.4)<.05;
     decoded.close();player.dispose();player.element.remove();
-    const copy=await startVideoEdit(file,{start:1.2,end:2.6}).promise;
-    const coded=await startVideoEdit(file,{start:.2,end:1.8,transcodeVideo:true}).promise;
-    let range=false,budget=false,cancel=false,malformed=false;
-    try{await startVideoEdit(file,{start:2,end:1}).promise;}catch{range=true;}
-    try{await startVideoEdit(new Blob([new Uint8Array(32*1024*1024+1)]),{start:0,end:1}).promise;}catch{budget=true;}
-    const pending=startVideoEdit(file,{start:0,end:1});pending.cancel();
-    try{await pending.promise;}catch{cancel=true;}
-    try{await startVideoEdit(new Blob([new Uint8Array([0,1,2,3])]),{start:0,end:1}).promise;}catch{malformed=true;}
-    return {loaded,captured,range,budget,cancel,malformed,immutable:await digest(file)===originalHash,
-      copy:{...copy,blob:null,bytes:Array.from(new Uint8Array(await copy.blob.arrayBuffer()))},
-      coded:{...coded,blob:null,bytes:Array.from(new Uint8Array(await coded.blob.arrayBuffer()))}};
+    const editable=await(await fetch('/core-fixture')).blob(),editableHash=await digest(editable);
+    const copy=await backend.trim(editable,{start:.4,end:1.6});
+    const coded=await backend.transcode(editable,{authorizeTranscode:true});
+    if(!copy.success||!coded.success)throw Error('Unified Core media execution failed');
+    const refused=async operation=>{try{return !(await operation).success;}catch{return true;}};
+    const range=await refused(backend.trim(editable,{start:2,end:1}));
+    const budget=await refused(backend.trim(new Blob([new Uint8Array(32*1024*1024+1)]),{start:0,end:1}));
+    const controller=new AbortController();controller.abort();
+    const cancel=await refused(createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).trim(editable,{start:0,end:1}));
+    const malformed=await refused(backend.trim(new Blob([new Uint8Array([0,1,2,3])]),{start:0,end:1}));
+    const seconds=t=>Number(t.value)/Number(t.timescale);
+    return {loaded,captured,range,budget,cancel,malformed,immutable:await digest(file)===originalHash&&await digest(editable)===editableHash,
+      copy:{timelineKnown:copy.report.actual.timelineMap.length===1,origin:seconds(copy.report.actual.actualStart),actualStart:seconds(copy.report.actual.actualStart),actualEnd:seconds(copy.report.actual.actualEnd),transcoded:copy.report.actual.wasTranscoded,bytes:Array.from(new Uint8Array(await copy.blob.arrayBuffer()))},
+      coded:{transcoded:coded.report.execution.some(e=>e.transcoded),audioCopied:true,timelineKnown:false,actualStart:null,bytes:Array.from(new Uint8Array(await coded.blob.arrayBuffer()))}};
   });
   check('native-player-decodes-local-video',result.loaded);
   check('paused-current-frame-capture',result.captured);
-  check('copy-actual-timeline-reported',result.copy.timelineKnown&&result.copy.actualStart<=1.2&&result.copy.actualEnd>result.copy.actualStart&&Number.isFinite(result.copy.origin)&&!result.copy.transcoded);
+  check('copy-actual-timeline-reported',result.copy.timelineKnown&&result.copy.actualStart<=.4&&result.copy.actualEnd>result.copy.actualStart&&Number.isFinite(result.copy.origin)&&!result.copy.transcoded);
   check('input-bytes-immutable',result.immutable);
   check('transcode-explicit-audio-copy',result.coded.transcoded&&result.coded.audioCopied&&!result.coded.timelineKnown&&result.coded.actualStart===null);
   check('invalid-range-rejected',result.range);
@@ -124,7 +128,7 @@ try {
   check('malformed-media-never-accepted-as-probe-success',result.malformed);
   const ffprobe=join(dirname(ffmpeg),process.platform==='win32'?'ffprobe.exe':'ffprobe');
   const probe=path=>JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-show_packets','-show_data_hash','sha256','-of','json',path],{timeout:30000,maxBuffer:16*1024*1024}));
-  const before=probe(source);
+  const before=probe(coreSource);
   for(const [kind,output] of [['copy',result.copy],['transcode',result.coded]]) {
     const path=join(directory,kind+'.mp4');await writeFile(path,new Uint8Array(output.bytes));
     const after=probe(path);

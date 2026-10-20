@@ -318,13 +318,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         return controller
     }
 
-    private inner class BrowserEditor(private val file: File, private val timeline: Timeline) : CoreVideoEditor {
+    private inner class BrowserEditor(private val file: File, private val timeline: Timeline) : VideoEditor {
         private val state = mutableStateOf(VideoPlayback())
         override val playback: State<VideoPlayback> = state
-        override val coverTime: Double? get() = selectedFrame?.takeIf { it.root == timeline.root }
-            ?.let { (it.sourceTime - timeline.origin).takeIf { time -> time >= 0 && time < state.value.duration } }
         private var surface: BrowserPlayer? = null
-        private var job: BrowserEditJob? = null
+        private var previewReference: String? = null
         private var disposed = false
         private var coreBusy = false
         private var coreCancelled = false
@@ -349,34 +347,19 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         override fun setMuted(muted: Boolean) { surface?.setMuted(muted) }
         override fun setRate(rate: Double) { surface?.setRate(rate) }
         override fun setFullscreen(fullscreen: Boolean) { surface?.setFullscreen(fullscreen) }
-        override suspend fun capture(): String {
+        override suspend fun previewFrame(): String {
             check(surface != null && !disposed) { "播放器不可用" }
             val result = browserAwait(surface!!.capture())
             check(!disposed) { "输入已改变" }
             val file = browserFile(result.blob, "video-cover.jpg", "image/jpeg")
-            val reference = register(MediaKind.Image, file)
-            selectedFrame = Frame(reference, timeline.root, timeline.origin + result.time)
+            previewReference?.let { files.remove(it) }
+            val reference = "preview:${next++}"
+            files[reference] = file
+            previewReference = reference
             return reference
         }
-        override suspend fun process(start: Double, end: Double, transcodeVideo: Boolean): EditedVideo {
-            check(!disposed && job == null && !coreBusy) { "已有媒体任务或输入已改变" }
-            val pending = media.editor.startVideoEdit(file, browserEditOptions(start, end, transcodeVideo))
-            job = pending
-            try {
-                val result = browserAwait(pending.promise)
-                check(!disposed) { "输入已改变" }
-                val name = if (transcodeVideo) "transcoded-H264.mp4" else "trimmed-video.mp4"
-                val editedFile = browserFile(result.blob, name, "video/mp4")
-                val known = result.timelineKnown
-                val mapped = if (known) Timeline(timeline.root, timeline.origin + result.origin) else null
-                val reference = register(MediaKind.Video, editedFile, mapped)
-                val summary = if (known) "copy 裁剪完成；请求 ${mediaSeconds(start)}～${mediaSeconds(end)}，实际保留的视频帧 ${mediaSeconds(checkNotNull(result.actualStart))}～${mediaSeconds(checkNotNull(result.actualEnd))}。音视频编码数据包已核对。" else
-                    "显式 H.264 转码完成，音频数据包 copy 已核对；未证明原始时间映射，请在新视频上重新选择封面。"
-                return EditedVideo(reference, summary + " 普通 metadata 保留不作完整保证。")
-            } finally { job = null }
-        }
-        override suspend fun processCore(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit {
-            check(!disposed && job == null && !coreBusy) { "已有媒体任务或输入已改变" }
+        override suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit {
+            check(!disposed && !coreBusy) { "已有媒体任务或输入已改变" }
             coreBusy = true; coreCancelled = false
             try {
                 check(browserFileSize(file) <= ANALYSIS_INPUT_LIMIT) { "Core 媒体输入超过 32 MiB" }
@@ -415,8 +398,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 }
             } finally { coreBusy = false }
         }
-        override fun cancel() { job?.cancel(); coreCancelled = true }
-        fun dispose() { disposed = true; cancel(); surface?.dispose(); surface = null }
+        override fun cancel() { coreCancelled = true }
+        fun dispose() { disposed = true; cancel(); previewReference?.let { files.remove(it) }; surface?.dispose(); surface = null }
     }
 
     override fun formatFailure(error: Exception, imageName: String?, videoName: String?): String =

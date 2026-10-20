@@ -21,6 +21,16 @@ generate(['-f','lavfi','-i','color=c=blue:s=64x64','-frames:v','1','-threads','1
 generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=30000/1001','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','30','-c:a','aac','-use_editlist','0','-video_track_timescale','90000','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoPath]);
 const video = await readFile(videoPath);
 const videoHash = createHash('sha256').update(video).digest('hex');
+// Keep the fractional original above for protocol creation/extraction tests.
+// Media writes use the independently bounded Core profile, not the removed
+// permissive preprocessor. Both fixtures remain synthetic and local to CI.
+const editVideo=join(fixtures,'edit-video.mp4'),editAudio=join(fixtures,'edit-audio.m4a'),editPath=join(fixtures,'edit.mp4');
+generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-frames:v','50','-vf','setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
+  '-c:v','libx264','-threads','1','-bf','0','-g','25','-sc_threshold','0','-pix_fmt','yuv420p','-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-use_editlist','0',
+  '-metadata:s:v','encoder=Lavc libx264','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',editVideo]);
+generate(['-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=2','-c:a','aac','-ac','2','-flags:a','+bitexact','-use_editlist','0','-fflags','+bitexact','-write_btrt','0',editAudio]);
+generate(['-i',editVideo,'-i',editAudio,'-map','0:v','-map','1:a','-c','copy','-use_editlist','0','-map_metadata','-1','-metadata:s:v','encoder=Lavc libx264','-fflags','+bitexact','-write_btrt','0',editPath]);
+const editHash=createHash('sha256').update(await readFile(editPath)).digest('hex');
 const server = createServer(async (req,res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
@@ -168,10 +178,13 @@ try {
       await page.waitForFunction(time=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&!v.seeking&&v.readyState>=2&&Math.abs(v.currentTime-time)<.01;},time);
       await page.waitForTimeout(150);
     };
+    await choose('重新选择视频',editPath);
+    await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
     await seek(1.4);
     await driver.click('截取封面');
     await driver.drag(page.locator('#cover-progress'),.1,1.4/await player.evaluate(v=>v.duration));
-    await text('名称：video-cover.jpg').waitFor({state:'attached'});
+    await driver.click('使用当前画面为封面');
+    await text('名称：core-frame.jpg').waitFor({state:'attached',timeout:180000});
     await page.waitForFunction(()=>{const image=document.querySelector('img[alt="已选封面预览"]');return image?.complete&&image.naturalWidth>0;});
     check(label+':current-frame-cover-selected',await page.getByAltText('已选封面预览').last().evaluate(image=>image.complete&&image.naturalWidth===64));
     const generateAndAudit=async(expectedVideoHash,expectedKey=.4)=>{
@@ -193,26 +206,26 @@ try {
       return audit.hash===expectedVideoHash&&audit.verdict!=='Invalid'&&audit.source==='ProtocolField'&&
         audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-expectedKey)<.05;
     };
-    check(label+':captured-C-carrier-key-and-video',await generateAndAudit(videoHash,1.4));
+    check(label+':captured-C-carrier-key-and-video',await generateAndAudit(editHash,1.4));
     await driver.click('裁剪视频');
-    // This existing wider-profile fixture explicitly exercises the retained
-    // compatibility path; default strict Core trimming is audited separately.
-    await driver.click('旧版兼容裁剪');
     await driver.dragRange('start',1.2/await player.evaluate(v=>v.duration));
-    await driver.dragRange('end',2.6/await player.evaluate(v=>v.duration));
+    await driver.dragRange('end',1.8/await player.evaluate(v=>v.duration));
     await click('应用裁剪（音视频 copy）');
-    await text('名称：trimmed-video.mp4').waitFor({state:'attached',timeout:120000});
-    check(label+':AB-copy-video-used',await text(/copy 裁剪完成；请求/).count()===1);
+    await text('名称：core-trim.mp4').waitFor({state:'attached',timeout:180000});
+    check(label+':AB-copy-video-used',await text(/Core Trim：ffmpeg-wasm/).count()===1);
     await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
     const trimmedHash=await player.evaluate(async video=>{
       const data=await(await fetch(video.currentSrc)).arrayBuffer();
       return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
     });
     check(label+':AB-carrier-C-rebased-video-exact',await generateAndAudit(trimmedHash));
-    await driver.click('旧版兼容转码');
+    await choose('重新选择视频',editPath);
+    await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
+    await seek(.4);await driver.click('使用当前画面为封面');
+    await text(/Core ExtractFrame：ffmpeg-wasm/).waitFor({state:'attached',timeout:180000});
     await click('显式转为 H.264 并使用（音频 copy）');
-    await text('名称：transcoded-H264.mp4').waitFor({state:'attached',timeout:120000});
-    check(label+':explicit-transcode-used',await text(/显式 H.264 转码完成/).count()===1);
+    await text('名称：core-transcode.mp4').waitFor({state:'attached',timeout:180000});
+    check(label+':explicit-transcode-used',await text(/Core Transcode：ffmpeg-wasm/).count()===1);
     const priorDownloads=downloads;
     await click('生成并保存 Live Photo');
     await text(/视频范围或编码已改变，请在当前视频上重新选择封面/).waitFor({state:'visible'});
@@ -221,6 +234,7 @@ try {
     await seek(.2);
     await driver.click('截取封面');
     await driver.drag(page.locator('#cover-progress'),.1,.2/await player.evaluate(v=>v.duration));
+    await driver.click('使用当前画面为封面');
     // Compose also exposes this status in its hidden accessibility bridge.
     // Existence acknowledges the callback; the real download/key/video audit
     // below, not DOM visibility of that bridge, proves the recaptured C works.
