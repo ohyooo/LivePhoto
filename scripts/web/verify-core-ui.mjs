@@ -89,9 +89,11 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
         await text(new RegExp('名称：core-'+action+'\\.mp4')).waitFor({state:'attached'});
+        // Generating replaces the screen's operation status with the download
+        // result. Inspect the edit report before triggering that next action.
+        if(action==='trim')await text(/已验证视频时间平移/).waitFor({state:'attached'});
         const result=await download(action);
         if(action==='trim'){
-          await text(/已验证视频时间平移/).waitFor({state:'attached'});
           const key=result.audited.key;
           if(!key||!(result.origin>0)||Math.abs(Number(key.value)/Number(key.timescale)-(1.2-result.origin))>.05)throw Error('Core trim did not retain and rebase the selected cover');
         }
