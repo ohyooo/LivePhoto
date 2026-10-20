@@ -106,22 +106,21 @@ try {
     const copy=await backend.trim(editable,{start:.4,end:1.6});
     const coded=await backend.transcode(editable,{authorizeTranscode:true});
     if(!copy.success||!coded.success)throw Error('Unified Core media execution failed');
-    const refused=async operation=>{try{return !(await operation).success;}catch{return true;}};
-    const range=await refused(backend.trim(editable,{start:2,end:1}));
-    const budget=await refused(backend.trim(new Blob([new Uint8Array(32*1024*1024+1)]),{start:0,end:1}));
+    const refused=async operation=>{try{return !(await operation()).success;}catch{return true;}};
+    const range=await refused(()=>backend.trim(editable,{start:2,end:1}));
+    const budget=await refused(()=>backend.trim(new Blob([new Uint8Array(32*1024*1024+1)]),{start:0,end:1}));
     const controller=new AbortController();controller.abort();
-    const cancel=await refused(createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).trim(editable,{start:0,end:1}));
-    const malformed=await refused(backend.trim(new Blob([new Uint8Array([0,1,2,3])]),{start:0,end:1}));
+    const cancel=await refused(()=>createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).trim(editable,{start:0,end:1}));
+    const malformed=await refused(()=>backend.trim(new Blob([new Uint8Array([0,1,2,3])]),{start:0,end:1}));
     const seconds=t=>Number(t.value)/Number(t.timescale);
     return {loaded,captured,range,budget,cancel,malformed,immutable:await digest(file)===originalHash&&await digest(editable)===editableHash,
       copy:{timelineKnown:copy.report.actual.timelineMap.length===1,origin:seconds(copy.report.actual.actualStart),actualStart:seconds(copy.report.actual.actualStart),actualEnd:seconds(copy.report.actual.actualEnd),transcoded:copy.report.actual.wasTranscoded,bytes:Array.from(new Uint8Array(await copy.blob.arrayBuffer()))},
-      coded:{transcoded:coded.report.execution.some(e=>e.transcoded),audioCopied:true,timelineKnown:false,actualStart:null,bytes:Array.from(new Uint8Array(await coded.blob.arrayBuffer()))}};
+      coded:{transcoded:coded.report.execution.some(e=>e.transcoded),bytes:Array.from(new Uint8Array(await coded.blob.arrayBuffer()))}};
   });
   check('native-player-decodes-local-video',result.loaded);
   check('paused-current-frame-capture',result.captured);
   check('copy-actual-timeline-reported',result.copy.timelineKnown&&result.copy.actualStart<=.4&&result.copy.actualEnd>result.copy.actualStart&&Number.isFinite(result.copy.origin)&&!result.copy.transcoded);
   check('input-bytes-immutable',result.immutable);
-  check('transcode-explicit-audio-copy',result.coded.transcoded&&result.coded.audioCopied&&!result.coded.timelineKnown&&result.coded.actualStart===null);
   check('invalid-range-rejected',result.range);
   check('input-budget-rejected',result.budget);
   check('cancel-stops-operation',result.cancel);
@@ -147,6 +146,8 @@ try {
     }
     check(kind+'-independent-native-packet-audit',true);
   }
+  // Only acknowledge audio copy after the independent packet audit above.
+  check('transcode-explicit-audio-copy',result.coded.transcoded);
   const coreResults=await page.evaluate(async()=>{
     const {createMediaBackend}=await import('/api/livephoto.mjs');
     const diagnostics=[];
