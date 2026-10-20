@@ -30,6 +30,15 @@ if(process.argv.includes('--tests')) {
   }
   const browser=await json('web-browser-evidence.json'),worker=browser.worker;
   const media=await json('web-media-evidence.json'),mediaWorker=media.worker;
+  const wasmUi=media.wasmUi;
+  const wasmChecks=['mobile','wide'].flatMap(size=>['wasm-runtime-and-engine-lazy','core-probe-real-decode',
+    'core-remux-independent-packets','core-trim-independent-packets','core-transcode-independent-packets',
+    'core-frame-actual-key-and-decode','core-refusal-keeps-input','core-reselection-clears-status','core-cancellation-keeps-input'].map(name=>size+':'+name));
+  if(!wasmUi?.success||wasmUi.tests!==18||wasmUi.failures!==0||wasmUi.checks?.length!==18||
+    JSON.stringify([...wasmUi.checks].sort())!==JSON.stringify(wasmChecks.sort())||wasmUi.outputs?.length!==8||
+    wasmUi.scope!=='shared-compose-wasm-typed-core-media-real-pointer-native-packet-audit'||
+    JSON.stringify(wasmUi.outputs.map(o=>o.viewport+':'+o.action).sort())!==JSON.stringify(['mobile','wide'].flatMap(s=>['frame','remux','transcode','trim'].map(a=>s+':'+a)).sort())||
+    wasmUi.outputs.some(o=>!Number.isSafeInteger(o.bytes)||o.bytes<=0||! /^[0-9a-f]{64}$/.test(o.sha256)||! /^[0-9a-f]{64}$/.test(o.videoSha256)))throw Error('Incomplete typed Wasm Core media UI or independent download audit');
   const mediaWorkerChecks=['worker-context-and-capabilities','worker-probe','worker-remux','worker-trim','worker-extractFrame',
     'worker-transcode','worker-refusals-no-output','worker-cancellation-and-budget','worker-input-immutable'];
   if(!mediaWorker?.success||mediaWorker.tests!==9||mediaWorker.failures!==0||mediaWorker.checks?.length!==9||

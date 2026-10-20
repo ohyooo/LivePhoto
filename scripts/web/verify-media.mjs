@@ -5,6 +5,7 @@ import {resolve,join,sep,extname,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {verifyCoreUi} from './verify-core-ui.mjs';
 
 const directory=await mkdtemp(join(tmpdir(),'livephoto-web-media-'));
 const ffmpeg=process.env.LIVEPHOTO_FFMPEG;
@@ -22,6 +23,8 @@ execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','la
   '-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0','-movflags','+faststart',shiftedSource],{timeout:60000});
 const generateCore=args=>execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error',...args],{timeout:60000});
 const videoOnly=join(directory,'core-video-only.mp4');
+const imagePath=join(directory,'core-cover.jpg');
+generateCore(['-f','lavfi','-i','color=c=blue:s=64x64','-frames:v','1','-threads','1','-update','1',imagePath]);
 generateCore(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-frames:v','50',
   '-vf','setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
   '-c:v','libx264','-threads','1','-bf','0','-g','25','-sc_threshold','0','-pix_fmt','yuv420p',
@@ -263,9 +266,10 @@ try {
   workerOutputs.push({action:'extractFrame',bytes:workerFrame.bytes.length,sha256:createHash('sha256').update(new Uint8Array(workerFrame.bytes)).digest('hex')});
   const worker={success:true,tests:9,failures:0,checks:workerResult.checks,inputSha256:workerResult.inputSha256,outputs:workerOutputs,
     scope:'module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'};
+  const wasmUi=await verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe});
   if(checks.length!==19||new Set(checks).size!==19)throw Error('Incomplete media evidence');
   await writeFile('ci-output/web-media-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
-    browserVersion:browser.version(),tests:checks.length,failures:0,checks,worker,inputSha256:createHash('sha256').update(input).digest('hex'),
+    browserVersion:browser.version(),tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(input).digest('hex'),
     scope:'browser-video-canvas-real-single-thread-ffmpeg-wasm-native-packet-audit-synthetic-audio-no-device-proof'},null,2)+'\n');
-  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 19 checks; MEDIA_WORKER_EVIDENCE=SUCCESS 9 checks; real Wasm editing and Core backend, native independent audio/video packet audit');
+  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 19 checks; MEDIA_WORKER_EVIDENCE=SUCCESS 9 checks; WASM_CORE_UI_EVIDENCE=SUCCESS 18 checks; real Wasm editing and Core backend, native independent audio/video packet audit');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

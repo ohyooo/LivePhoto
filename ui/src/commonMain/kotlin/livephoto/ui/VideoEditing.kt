@@ -64,10 +64,11 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var coverPosition by remember(editor) { mutableDoubleStateOf(0.0) }
     var coverPreview by remember(editor) { mutableStateOf<String?>(null) }
     var capturing by remember(editor) { mutableStateOf(false) }
+    var coreWorking by remember(editor) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
-    val enabled = !parentBusy && !working && playback.ready
+    val enabled = !parentBusy && !working && !coreWorking && playback.ready
     val canCapture by rememberUpdatedState(enabled)
     fun process(transcode: Boolean) {
         scope.launch {
@@ -148,6 +149,9 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
         }
         if (working) OutlinedButton(onClick = { editor.cancel() }) { Text("取消媒体处理") }
         if (status.isNotEmpty()) Text(status)
+        if (editor is CoreVideoEditor) CoreMediaControls(editor, !parentBusy && !working && !capturing && playback.ready,
+            start, end, if (coverOpen) coverPosition else playback.current, trimOpen,
+            onBusy = { coreWorking = it; onBusy(it) }, onImage = onImage, onVideo = onVideo)
         Text("编辑仅限 32 MiB / 60 秒内视频。copy 裁剪可能提前至关键帧，以实际保留范围为准；转码仅支持 8-bit SDR，需显式点击，音频不编码。截图不保证 HDR/色彩信息，普通 metadata 不作完整保留保证。")
     }
 }

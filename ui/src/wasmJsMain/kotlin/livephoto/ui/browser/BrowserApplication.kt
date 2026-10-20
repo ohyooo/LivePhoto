@@ -318,7 +318,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         return controller
     }
 
-    private inner class BrowserEditor(private val file: File, private val timeline: Timeline) : VideoEditor {
+    private inner class BrowserEditor(private val file: File, private val timeline: Timeline) : CoreVideoEditor {
         private val state = mutableStateOf(VideoPlayback())
         override val playback: State<VideoPlayback> = state
         override val coverTime: Double? get() = selectedFrame?.takeIf { it.root == timeline.root }
@@ -326,6 +326,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         private var surface: BrowserPlayer? = null
         private var job: BrowserEditJob? = null
         private var disposed = false
+        private var coreBusy = false
+        private var coreCancelled = false
         @Composable
         override fun Player(modifier: Modifier, onScroll: (Float) -> Unit) {
             key(this) {
@@ -357,7 +359,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             return reference
         }
         override suspend fun process(start: Double, end: Double, transcodeVideo: Boolean): EditedVideo {
-            check(!disposed && job == null) { "已有媒体任务或输入已改变" }
+            check(!disposed && job == null && !coreBusy) { "已有媒体任务或输入已改变" }
             val pending = media.editor.startVideoEdit(file, browserEditOptions(start, end, transcodeVideo))
             job = pending
             try {
@@ -373,7 +375,39 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                 return EditedVideo(reference, summary + " 普通 metadata 保留不作完整保证。")
             } finally { job = null }
         }
-        override fun cancel() { job?.cancel() }
+        override suspend fun processCore(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit {
+            check(!disposed && job == null && !coreBusy) { "已有媒体任务或输入已改变" }
+            coreBusy = true; coreCancelled = false
+            try {
+                check(browserFileSize(file) <= ANALYSIS_INPUT_LIMIT) { "Core 媒体输入超过 32 MiB" }
+                check(state.value.duration.isFinite() && state.value.duration > 0 && state.value.duration <= 60) { "Core 媒体工具仅限 60 秒内视频" }
+                val currentJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+                val result = prepareCoreMedia(browserMediaCore(), browserBytes(file), action, start, end,
+                    Cancellation { disposed || coreCancelled || currentJob?.isActive == false })
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                check(!disposed && !coreCancelled) { "媒体操作已取消；输入未替换" }
+                val prepared = when (result) {
+                    is CoreResult.Failure -> error("${result.error.code.value} / ${result.error.stage}：${result.error.message.take(1600)}")
+                    is CoreResult.Success -> result.value
+                }
+                val bytes = prepared.bytes ?: return CoreMediaEdit(prepared.summary)
+                val mime = checkNotNull(prepared.mime)
+                val name = if (action == CoreMediaAction.ExtractFrame) "core-frame.jpg" else "core-${action.name.lowercase()}.mp4"
+                val output = browserFile(outputBlob(bytes.toByteArray(), mime), name, mime)
+                return if (action == CoreMediaAction.ExtractFrame) {
+                    val actual = checkNotNull(prepared.actualTime)
+                    val reference = register(MediaKind.Image, output)
+                    selectedFrame = Frame(reference, timeline.root, timeline.origin + actual.value.toDouble() / actual.timescale.toDouble())
+                    CoreMediaEdit(prepared.summary, imageReference = reference)
+                } else {
+                    // Until complete per-track mappings are integrated with the player,
+                    // a new root deliberately rejects old cover timestamps. No guess.
+                    val reference = register(MediaKind.Video, output)
+                    CoreMediaEdit(prepared.summary, video = EditedVideo(reference, prepared.summary))
+                }
+            } finally { coreBusy = false }
+        }
+        override fun cancel() { job?.cancel(); coreCancelled = true }
         fun dispose() { disposed = true; cancel(); surface?.dispose(); surface = null }
     }
 
