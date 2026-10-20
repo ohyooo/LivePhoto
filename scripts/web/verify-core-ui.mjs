@@ -88,9 +88,16 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
           await mode(/默认使用 Core 显式转码当前整段视频/);
           await driver.click('裁剪视频');await driver.dragRange('end',.80);
           await mode(/请先应用裁剪，再转码；不会忽略选段/);
-          if(await driver.find(button).isEnabled())throw Error('Default Core transcode silently ignores an open trim selection');
+          // Compose paints/disables the canvas control; the accessibility
+          // element need not expose native HTML disabled/aria-disabled state.
+          // Click the real hit region and prove it does not run or replace input.
+          const beforeEngines=engines,beforeDownloads=downloads;
+          const beforeSource=await page.getByLabel('视频预览',{exact:true}).evaluate(v=>v.currentSrc);
+          await driver.click(button);await page.waitForTimeout(500);
+          const afterSource=await page.getByLabel('视频预览',{exact:true}).evaluate(v=>v.currentSrc);
+          if(engines!==beforeEngines||downloads!==beforeDownloads||afterSource!==beforeSource)throw Error('Default Core transcode silently ignores an open trim selection');
           await driver.click('旧版兼容转码');await mode(/当前使用旧版转码预处理/);
-          if(!await driver.find(button).isEnabled())throw Error('Explicit compatibility transcode lost the combined trim workflow');
+          // The full UI suite independently executes this compatibility path.
           await choose(coreSource);await mode(/默认使用 Core 显式转码当前整段视频/);
           await seek();await driver.click('Core 抽取当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
         }
