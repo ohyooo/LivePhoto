@@ -7,6 +7,11 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import {composeDriver} from './ui-interaction.mjs';
 
+const shard = process.env.LIVEPHOTO_UI_VIEWPORT;
+if (shard !== undefined && !['mobile', 'wide'].includes(shard)) throw Error('Invalid LIVEPHOTO_UI_VIEWPORT');
+const suffix = shard ? `-${shard}` : '';
+const viewports = [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]
+  .filter(([label]) => !shard || label === shard);
 const root = resolve('ci-output/web-ui');
 const apiRoot = resolve('ci-output/browser-api/web-library');
 const uiManifest = JSON.parse((await readFile('ci-output/web-ui-package-evidence.json','utf8')).replace(/^\uFEFF/,''));
@@ -52,7 +57,7 @@ const checks = [];
 let lastPage;
 const check = (name, valid) => { if (!valid) throw Error(name); checks.push(name); };
 try {
-  for (const [label,viewport] of [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]) {
+  for (const [label,viewport] of viewports) {
     const context = await browser.newContext({viewport,acceptDownloads:true,serviceWorkers:'block'});
     await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
     const page = await context.newPage();
@@ -651,16 +656,17 @@ try {
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==178||new Set(checks).size!==178) throw Error('Incomplete shared UI checks: '+checks.length);
-  await writeFile('ci-output/web-ui-browser-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log('WEB_UI_EVIDENCE=SUCCESS 178 checks; shared Compose key editing and reviewed safe repair under /livephoto/, two sizes, fifty-four audited downloads, no-op/blocked/stale/unsafe inputs never published');
+  const expected = viewports.length * 89;
+  if(checks.length!==expected||new Set(checks).size!==expected) throw Error('Incomplete shared UI checks: '+checks.length);
+  await writeFile(`ci-output/web-ui-browser-evidence${suffix}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),viewport:shard,tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
+  console.log(`WEB_UI_EVIDENCE=SUCCESS ${expected} checks; ${shard || 'mobile and wide'}; shared Compose real file chooser and audited downloads; no-op/blocked/stale/unsafe inputs never published`);
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {
-    await lastPage.screenshot({path:'ci-output/web-ui-failure.png'}).catch(()=>{});
-    await writeFile('ci-output/web-ui-failure.html',await lastPage.content()).catch(()=>{});
-    await writeFile('ci-output/web-ui-failure-a11y.txt',await lastPage.locator('body').ariaSnapshot()).catch(()=>{});
-    await writeFile('ci-output/web-ui-failure-shadow.html',await lastPage.evaluate(()=>{
+    await lastPage.screenshot({path:`ci-output/web-ui-failure${suffix}.png`}).catch(()=>{});
+    await writeFile(`ci-output/web-ui-failure${suffix}.html`,await lastPage.content()).catch(()=>{});
+    await writeFile(`ci-output/web-ui-failure${suffix}-a11y.txt`,await lastPage.locator('body').ariaSnapshot()).catch(()=>{});
+    await writeFile(`ci-output/web-ui-failure${suffix}-shadow.html`,await lastPage.evaluate(()=>{
       const visit=root=>Array.from(root.children).map(e=>e.outerHTML+(e.shadowRoot?'\nSHADOW:\n'+visit(e.shadowRoot):'')+'\n'+visit(e)).join('\n');
       return visit(document.body);
     })).catch(()=>{});

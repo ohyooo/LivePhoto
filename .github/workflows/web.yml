@@ -231,10 +231,6 @@ jobs:
             script: verify-player
             log: web-player.log
             evidence: web-player-evidence.json
-          - kind: ui
-            script: verify-ui
-            log: web-ui-browser.log
-            evidence: web-ui-browser-evidence.json
     steps:
       - uses: actions/checkout@v7
 
@@ -280,10 +276,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
+  ui:
+    name: Test Web UI (${{ matrix.viewport }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        viewport: [mobile, wide]
+    uses: ./.github/workflows/web-ui-tests.yml
+    with:
+      artifact: ${{ needs.build.outputs.artifact }}
+      viewport: ${{ matrix.viewport }}
+
   publish:
     name: Collect reports and publish tested outputs
     if: ${{ always() && needs.build.result == 'success' && !cancelled() }}
-    needs: [build, test, common]
+    needs: [build, test, common, ui]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -303,12 +311,16 @@ jobs:
           merge-multiple: true
           path: ci-output
 
+      - name: Merge and verify both complete UI viewport reports
+        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
+        run: node scripts/web/merge-ui-evidence.mjs
+
       - name: Verify source identity and complete independent evidence
-        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' }}
+        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
         run: node scripts/web/verify-build.mjs --tests
 
       - name: Publish verified browser library
-        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-web-js-${{ github.run_id }}-${{ github.run_attempt }}
@@ -319,7 +331,7 @@ jobs:
           retention-days: 14
 
       - name: Publish verified shared website
-        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-web-ui-${{ github.run_id }}-${{ github.run_attempt }}
@@ -360,6 +372,10 @@ jobs:
             ci-output/web-ui-browser.log
             ci-output/web-ui-package-evidence.json
             ci-output/web-ui-browser-evidence.json
+            ci-output/web-ui-browser-mobile.log
+            ci-output/web-ui-browser-wide.log
+            ci-output/web-ui-browser-evidence-mobile.json
+            ci-output/web-ui-browser-evidence-wide.json
             ci-output/web-media.log
             ci-output/web-media-evidence.json
             ci-output/web-player.log
@@ -369,12 +385,12 @@ jobs:
             ci-output/web-ui-player-failure-a11y.txt
             ci-output/web-ui-*.png
             ci-output/web-ui-failure*.html
-            ci-output/web-ui-failure-a11y.txt
+            ci-output/web-ui-failure*-a11y.txt
           if-no-files-found: warn
           retention-days: 14
 
       - name: Remove temporary handoff artifacts after successful collection
-        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && github.event_name != 'pull_request' && steps.protocol_reports.outcome == 'success' && steps.ui_reports.outcome == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && github.event_name != 'pull_request' && steps.protocol_reports.outcome == 'success' && steps.ui_reports.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -387,5 +403,5 @@ jobs:
           done
 
       - name: Keep failed test suites visible in the aggregate result
-        if: ${{ always() && (needs.test.result != 'success' || needs.common.result != 'success') }}
+        if: ${{ always() && (needs.test.result != 'success' || needs.common.result != 'success' || needs.ui.result != 'success') }}
         run: exit 1
