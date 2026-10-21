@@ -674,7 +674,9 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 所有媒体操作共用状态、取消和诊断报告，不再要求选择内部处理路径。实现范围及真实验收以当前提交 CI 为准；移除旧版不会让 Core 原本不支持的格式自动变为可用。
 
-Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 306 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
+Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 312 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
+
+新双页/响应式共享界面已在源码 `eee7f73` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39602762523) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归或新版网站已部署。
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 

@@ -4,15 +4,15 @@
 
 ## 已完成的基础
 
-### 共享界面重设计（验收中）
+### 共享界面重设计（浏览器验收通过，尚未部署）
 
 已按新设计接入“新建 / 照片工具”双页、800/1280 响应式列布局、三态主题、紧凑文件行和移除/重置确认、独立裁剪草稿与封面预览、折叠报告及显式复制。窗口变化、切页和主题切换应保留素材及编辑状态；待应用选段和失效封面阻止生成。未扩展协议、音频编码或媒体后端。
 
-新版真实浏览器回归尚在进行，不能使用下述旧 UI 成绩宣称通过。预期外围检查为 312 项（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），继续保留 28 个独立浏览器任务、两个公共 Kotlin 测试任务及统一发布门禁。新增检查覆盖布局变更、裁剪草稿阻止生成和重置确认。验收与线上部署分别确认；CI 构建成功不等于新版已上线。
+新版已在源码 `eee7f73` 的 [Web CI 39602762523](https://github.com/ohyooo/LivePhoto/actions/runs/39602762523) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 809 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。新增检查覆盖布局变更、裁剪草稿阻止生成和重置确认。正常部署地址目前连接超时，新版尚未部署；测试通过不等于已上线或所有浏览器/手机相册兼容。
 
-用户已明确允许预发布版以修复 Popup/Dialog 关闭后无障碍 DOM 停止同步的问题（[CMP-9368](https://youtrack.jetbrains.com/issue/CMP-9368) / [CMP-10623](https://youtrack.jetbrains.com/issue/CMP-10623)）。Compose 与共享 Material3 对齐 [1.13.0-alpha02](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.13.0-alpha02)，保留现有 Kotlin、Gradle 和 SDK；已删除点击标题、额外 Tab 和动画延时的无效绕行。测试要求弹层关闭后节点自行移除，并继续验证真实交互、下载与诊断；不关闭无障碍、不删除测试或放宽超时。当前仍在验收，Alpha 不等同于稳定版承诺，新版尚未发布。
+用户已明确允许预发布版以修复 Popup/Dialog 关闭后无障碍 DOM 停止同步的问题（[CMP-9368](https://youtrack.jetbrains.com/issue/CMP-9368) / [CMP-10623](https://youtrack.jetbrains.com/issue/CMP-10623)）。Compose 与共享 Material3 对齐 [1.13.0-alpha02](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.13.0-alpha02)，保留现有 Kotlin、Gradle 和 SDK；已删除点击标题、额外 Tab 和动画延时的无效绕行。弹层关闭后节点自行移除、真实交互、下载与诊断已在上述 CI 验证；不关闭无障碍、不删除测试。输入测试在全选与键入之间等待框架动画帧检查点，重选后等待旧报告节点移除，不把原生视频就绪当成 Compose 报告同步完成。Alpha 仍是预发布依赖，本轮不宣称 Android/Native 回归完成。
 
-- [x] Web 测试继续按独立场景拆分：UI 七种操作×两尺寸、播放器两尺寸×三画幅、主题两尺寸、协议主线程/Worker、媒体主线程/Worker/两尺寸真实 UI，共 28 个浏览器 job，JS/Wasm 公共测试另各一组。删除 UI 重复媒体链与共享处理器的重复协议矩阵；unknown 输入分类仅在分析 UI 验证，其它操作保留普通照片、损坏输入、预算拒绝。保留 API 完整矩阵、音频 copy、真实下载、输入不变、安全拒绝、取消和状态隔离。外围 70＋124＋9＋91＋12＝306 项，Worker42/9、WasmUI18另列。所有报告按同次提交/运行、准确检查集合核验，缺组不发布；真实结果以本轮 CI 为准。
+- [x] Web 测试继续按独立场景拆分：UI 七种操作×两尺寸、播放器两尺寸×三画幅、主题两尺寸、协议主线程/Worker、媒体主线程/Worker/两尺寸真实 UI，共 28 个浏览器 job，JS/Wasm 公共测试另各一组。删除 UI 重复媒体链与共享处理器的重复协议矩阵；unknown 输入分类仅在分析 UI 验证，其它操作保留普通照片、损坏输入、预算拒绝。保留 API 完整矩阵、音频 copy、真实下载、输入不变、安全拒绝、取消和状态隔离。外围 70＋130＋9＋91＋12＝312 项，Worker42/9、WasmUI18另列。所有报告按同次提交/运行、准确检查集合核验，缺组不发布。
 - [x] File/Blob → 有界内存 BinarySource，Promise API、结构化错误、Blob 输出和 TypeScript 声明。
 - [x] 三个既有 JPEG＋MP4 创建目标：OPPO/OnePlus、Google V2、Google V1；默认不转码、不覆盖原片。
 - [x] 基础检测、Structure/Protocol 验证、原字节视频提取；真实 Chromium 主线程和 module Worker 验收。
