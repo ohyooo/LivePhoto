@@ -107,7 +107,13 @@ export function composeDriver(page,viewport) {
       if(rendered==='')break;
       const after=await focusState();
       // Restore a stolen browser focus only when no edit occurred; never replay an edited value.
-      if(clearing<2&&after.tag==='CANVAS'&&rendered===original){console.log('UI_TEXT_FOCUS_RECOVERY',selector);continue;}
+      if(clearing<2&&after.tag==='CANVAS'&&rendered===original){
+        console.log('UI_TEXT_FOCUS_RECOVERY',selector);
+        // A lost native editor can leave Compose focus active; blur it before refocusing.
+        await page.mouse.click(100,24);
+        await page.waitForTimeout(150);
+        continue;
+      }
       throw Error('Backspace did not clear '+selector+'; rendered='+rendered+'; focus='+JSON.stringify({before,after}));
     }
     await page.keyboard.type(value,{delay:60});
