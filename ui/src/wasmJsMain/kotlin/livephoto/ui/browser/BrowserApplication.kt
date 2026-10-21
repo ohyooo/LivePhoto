@@ -432,7 +432,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     val actual = checkNotNull(prepared.actualTime)
                     val reference = register(MediaKind.Image, output)
                     selectedFrame = Frame(reference, timeline.root, timeline.origin + actual.value.toDouble() / actual.timescale.toDouble())
-                    CoreMediaEdit(prepared.summary, imageReference = reference, actualTime = actual)
+                    CoreMediaEdit(prepared.summary, imageReference = reference)
                 } else {
                     val window = prepared.retainedVideoWindow
                     val mapped = window?.let {

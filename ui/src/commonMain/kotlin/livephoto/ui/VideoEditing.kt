@@ -125,7 +125,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 result.video?.let { state.processedVideo(); onVideo(it) }
                 state.status = result.summary
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { state.status = "$label失败：${error.message?.take(2000) ?: "未知错误"}。输入未替换，不自动转码或切换实现。" }
+            catch (error: Exception) { state.status = "${label}失败：${error.message?.take(2000) ?: "未知错误"}。输入未替换，不自动转码或切换实现。" }
             finally { state.working = false; state.cancelling = false; onBusy(false) }
         }
     }
