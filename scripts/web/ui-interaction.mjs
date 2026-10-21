@@ -43,8 +43,11 @@ export function composeDriver(page,viewport) {
     // Each Compose popup owns a separate accessibility tree. Re-enter keyboard
     // navigation after dismissal before locating controls in the page tree.
     if(typeof name==='string'&&/^(工具|协议|主题)：/.test(name)){
-      await locator.waitFor({state:'detached'});
+      // The visual popup exits before its semantic mirror is refreshed. Give
+      // the exit animation its frames, then resume real keyboard navigation.
+      await page.waitForTimeout(250);
       await page.keyboard.press('Tab');
+      await locator.waitFor({state:'detached'});
     }
   };
   const selectTool=async name=>{
