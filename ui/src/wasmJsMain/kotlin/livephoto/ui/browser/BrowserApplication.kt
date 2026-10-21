@@ -62,8 +62,8 @@ public fun main() {
     browserRuntimeReady()
     ComposeViewport(document.getElementById("app")!!, configure = { isA11YEnabled = true }) {
         val browserDark = isSystemInDarkTheme()
-        var selectedDark by remember { mutableStateOf<Boolean?>(null) }
-        val dark = selectedDark ?: browserDark
+        var themeMode by remember { mutableStateOf(ThemeMode.System) }
+        val dark = when (themeMode) { ThemeMode.System -> browserDark; ThemeMode.Light -> false; ThemeMode.Dark -> true }
         SideEffect {
             (document.documentElement as? HTMLElement)?.style?.setProperty("color-scheme", if (dark) "dark" else "light")
             (document.documentElement as? HTMLElement)?.style?.setProperty("--livephoto-media-background", if (dark) "#151b26" else "#f5f7fb")
@@ -82,9 +82,9 @@ public fun main() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { fontError = true }
         }
-        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+        MaterialTheme(colorScheme = livePhotoColors(dark)) {
             Surface(Modifier.fillMaxSize()) {
-                if (fontsReady) LivePhotoScreen(platform, dark) { selectedDark = !dark }
+                if (fontsReady) LivePhotoScreen(platform, dark, themeMode = themeMode, onThemeSelected = { themeMode = it })
                 else Text(if (fontError) "Unable to load bundled font. Reload the page or check the static server." else "Loading fonts...")
             }
         }
@@ -115,6 +115,24 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
     override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
+    override val supportsClipboard: Boolean get() = browserClipboardAvailable()
+    override suspend fun copyText(text: String): Boolean { browserCopyText(text).await(); return true }
+    override fun release(reference: String) {
+        files.remove(reference); timelines.remove(reference)
+        if (selectedFrame?.image == reference) selectedFrame = null
+    }
+    override fun coverWarning(image: String?, video: String?): String? {
+        val frame = selectedFrame?.takeIf { it.image == image } ?: return null
+        val timeline = timelines[video]
+        return if (timeline == null || frame.root != timeline.root || frame.sourceTime < timeline.origin)
+            "视频已变化，请重新选择封面" else null
+    }
+    override fun coverPosition(image: String?, video: String?): Time? {
+        val frame = selectedFrame?.takeIf { it.image == image } ?: return null
+        val timeline = timelines[video] ?: return null
+        if (coverWarning(image, video) != null) return null
+        return Time(((frame.sourceTime - timeline.origin) * 1_000_000).roundToLong(), 1_000_000u)
+    }
 
     private fun register(kind: MediaKind, file: File, timeline: Timeline? = null): String {
         val prefix = "${kind.name}:"
@@ -293,7 +311,9 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         val file = files[reference] ?: return
         key(reference) {
             HtmlElementView(factory = {
-                browserPreviewElement(media.player.imagePreview(file, onScroll))
+                browserPreviewElement(media.player.imagePreview(file, onScroll)).also {
+                    if (reference.startsWith("thumbnail:")) it.setAttribute("alt", "时间轴缩略图")
+                }
             }, modifier = modifier.height(160.dp), onRelease = { browserReleasePreview(it) })
         }
     }
@@ -323,6 +343,9 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         override val playback: State<VideoPlayback> = state
         private var surface: BrowserPlayer? = null
         private var previewReference: String? = null
+        private val thumbnailReferences = mutableListOf<String>()
+        override var thumbnail: String? by mutableStateOf(null)
+            private set
         private var disposed = false
         private var coreBusy = false
         private var coreCancelled = false
@@ -358,6 +381,34 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             previewReference = reference
             return reference
         }
+        override suspend fun previewTimeline(): List<String> {
+            if (thumbnailReferences.isNotEmpty()) return thumbnailReferences.toList()
+            // A separate read-only decoder must not seek or reload the active player.
+            var ready: BrowserPlayback? = null
+            val decoder = media.player.createPlayer(file, { ready = it }, {})
+            decoder.element.setAttribute("preload", "auto")
+            try {
+                kotlinx.coroutines.withTimeout(15_000) {
+                    while (ready?.ready != true || ready?.seeking != false) kotlinx.coroutines.delay(30)
+                    val duration = ready!!.duration
+                    for (index in 0..4) {
+                        check(!disposed) { "输入已改变" }
+                        decoder.seek(duration * index / 5)
+                        while (ready?.seeking != false) kotlinx.coroutines.delay(30)
+                        val captured = browserAwait(decoder.capture())
+                        check(!disposed) { "输入已改变" }
+                        val reference = "thumbnail:${next++}"
+                        files[reference] = browserFile(captured.blob, "timeline.jpg", "image/jpeg")
+                        thumbnailReferences += reference
+                    }
+                }
+                thumbnail = thumbnailReferences.firstOrNull()
+                return thumbnailReferences.toList()
+            } catch (error: Exception) {
+                thumbnailReferences.forEach { files.remove(it) }; thumbnailReferences.clear()
+                throw error
+            } finally { decoder.dispose() }
+        }
         override suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit {
             check(!disposed && !coreBusy) { "已有媒体任务或输入已改变" }
             coreBusy = true; coreCancelled = false
@@ -381,7 +432,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     val actual = checkNotNull(prepared.actualTime)
                     val reference = register(MediaKind.Image, output)
                     selectedFrame = Frame(reference, timeline.root, timeline.origin + actual.value.toDouble() / actual.timescale.toDouble())
-                    CoreMediaEdit(prepared.summary, imageReference = reference)
+                    CoreMediaEdit(prepared.summary, imageReference = reference, actualTime = actual)
                 } else {
                     val window = prepared.retainedVideoWindow
                     val mapped = window?.let {
@@ -399,7 +450,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             } finally { coreBusy = false }
         }
         override fun cancel() { coreCancelled = true }
-        fun dispose() { disposed = true; cancel(); previewReference?.let { files.remove(it) }; surface?.dispose(); surface = null }
+        fun dispose() {
+            disposed = true; cancel(); previewReference?.let { files.remove(it) }
+            thumbnailReferences.forEach { files.remove(it) }; thumbnailReferences.clear()
+            surface?.dispose(); surface = null
+        }
     }
 
     override fun formatFailure(error: Exception, imageName: String?, videoName: String?): String =

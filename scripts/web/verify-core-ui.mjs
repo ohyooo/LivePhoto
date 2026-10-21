@@ -33,9 +33,9 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await page.waitForTimeout(120);
     };
     const download=async action=>{
-      await driver.click(/Google Motion Photo V2/);
+      await driver.selectProtocol('Google Motion Photo V2');
       const pending=page.waitForEvent('download');pending.catch(()=>{});
-      await driver.click('生成并保存 Live Photo');
+      await driver.click('生成动态照片');
       const file=await pending;
       const saved=join(directory,`wasm-ui-${size}-${action}.jpg`);await file.saveAs(saved);
       const carrier=await readFile(saved);
@@ -75,13 +75,13 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.choose('选择图片',imagePath);await choose(coreSource);
       check(size+':wasm-runtime-and-engine-lazy',engines===0&&downloads===0);
       if(await text('Core 媒体工具（实验）').count()||await text('旧版兼容裁剪').count()||await text('旧版兼容转码').count())throw Error('Duplicate media paths are still exposed');
-      await driver.click('检查视频（含解码）');await status(/Core Probe：Partial.*MEDIA_DECODE_COMPLETED/);
+      await driver.click('检查视频');await status(/Core Probe：Partial.*MEDIA_DECODE_COMPLETED/);
       check(size+':core-probe-real-decode',engines>0&&downloads===0);
       await page.screenshot({path:`ci-output/web-ui-core-media-${size}.png`});
-      for(const [action,button] of [['remux','重新封装（不编码）'],['trim','应用裁剪（音视频 copy）'],['transcode','显式转为 H.264 并使用（音频 copy）']]){
+      for(const [action,button] of [['remux','重新封装'],['trim','应用裁剪'],['transcode','转为 H.264']]){
         if(action!=='remux')await choose(coreSource);
         if(action==='transcode'){
-          await driver.click('裁剪视频');await driver.dragRange('end',.80);
+          await driver.click('裁剪范围');await driver.dragRange('end',.80);
           // Compose paints/disables the canvas control; the accessibility
           // element need not expose native HTML disabled/aria-disabled state.
           // Click the real hit region and prove it does not run or replace input.
@@ -91,22 +91,23 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
           const afterSource=await page.getByLabel('视频预览',{exact:true}).evaluate(v=>v.currentSrc);
           if(engines!==beforeEngines||downloads!==beforeDownloads||afterSource!==beforeSource)throw Error('Default Core transcode silently ignores an open trim selection');
           await choose(coreSource);
-          await seek();await driver.click('使用当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
+          await seek();await driver.click('使用当前画面作为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
         }
         if(action==='trim'){
-          await seek(1.2);await driver.click('使用当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
-          await driver.click('裁剪视频');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
+          await seek(1.2);await driver.click('使用当前画面作为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
+          await driver.click('裁剪范围');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
         }
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
         await text(new RegExp('名称：core-'+action+'\\.mp4')).waitFor({state:'attached'});
         // Generating replaces the screen's operation status with the download
         // result. Inspect the edit report before triggering that next action.
+        if(action==='trim')await driver.details('视频处理');
         if(action==='trim')await text(/已验证视频时间平移/).waitFor({state:'attached'});
         if(action==='transcode'){
           const before=downloads;
-          await driver.click(/Google Motion Photo V2/);await driver.click('生成并保存 Live Photo');
-          await text(/视频范围或编码已改变，请在当前视频上重新选择封面/).waitFor({state:'attached'});
+          await driver.selectProtocol('Google Motion Photo V2');await driver.click('生成动态照片');
+          await text(/视频已变化，请重新选择封面/).waitFor({state:'attached'});
           if(downloads!==before)throw Error('Core transcode reused an unverified cover timestamp');
           await driver.choose(/^(?:重新)?选择图片$/,imagePath);
         }
@@ -119,38 +120,38 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       }
       await choose(coreSource);await seek();
       const selectedImage=await page.locator('#image-name').textContent();
-      await driver.click('截取封面');
+      await driver.click('封面位置');
       await driver.drag(page.locator('#cover-progress'),.1,.4/await page.getByLabel('视频预览',{exact:true}).evaluate(v=>v.duration));
       if(await page.locator('#image-name').textContent()!==selectedImage)throw Error('Read-only cover preview replaced the selected image');
-      await driver.click('使用当前画面为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
+      await driver.click('使用当前画面作为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
       const frame=await download('frame');
       const key=frame.audited.key;
       check(size+':core-frame-actual-key-and-decode',frame.audited.width===64&&frame.audited.height===64&&key&&Math.abs(Number(key.value)/Number(key.timescale)-.4)<.1&&frame.hash===sourceHash);
       // Keep the .4 s cover, but exclude it from the actual retained video.
       // A failed edit must not replace the current input or silently drop the cover.
       const beforeOutside=downloads;
-      await driver.click('裁剪视频');await driver.dragRange('end',.10);
-      await driver.click('应用裁剪（音视频 copy）');
+      await driver.click('裁剪范围');await driver.dragRange('end',.10);
+      await driver.click('应用裁剪');
       await page.locator('#player-edit-status').filter({hasText:/KEY_PHOTO_OUTSIDE_TRIM/}).waitFor({state:'attached'});
       if(downloads!==beforeOutside||await text(/名称：core-input\.mp4/).count()!==1)throw Error('Out-of-range Core cover replaced input');
       await choose(monoSource);const before=downloads;
-      await driver.click('裁剪视频');
+      await driver.click('裁剪范围');
       await driver.dragRange('end',.80);
-      await driver.click('应用裁剪（音视频 copy）');
+      await driver.click('应用裁剪');
       await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
       if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core trim automatically fell back');
-      await driver.click('裁剪视频');
-      await driver.click('显式转为 H.264 并使用（音频 copy）');
+      await driver.click('裁剪范围');
+      await driver.click('转为 H.264');
       await status(/转码失败.*CAPABILITY_UNSUPPORTED/s);
       if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core transcode automatically fell back');
-      await driver.click('重新封装（不编码）');await status(/封装失败.*CAPABILITY_UNSUPPORTED/s);
+      await driver.click('重新封装');await status(/封装失败.*CAPABILITY_UNSUPPORTED/s);
       check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-mono\.mp4/).count()===1);
       await choose(coreSource);
       check(size+':core-reselection-clears-status',await page.locator('#player-edit-status').count()===0);
       let release;
       holdEngine=new Promise(resolve=>{release=resolve;});
       try{
-        await driver.click('显式转为 H.264 并使用（音频 copy）');await driver.click('取消媒体处理');
+        await driver.click('转为 H.264');await driver.click('取消媒体处理');
         await page.locator('#player-edit-status').filter({hasText:/已取消|CANCELLED/}).waitFor({state:'attached'});
       }finally{release();holdEngine=null;}
       check(size+':core-cancellation-keeps-input',downloads===before&&await text(/名称：core-input\.mp4/).count()===1);

@@ -64,8 +64,6 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
         }
     }
     report?.let { text ->
-        Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("clean-split-report")) }
-        }
+        ReportPanel(text, failed, "clean-split-report", "拆分", platform)
     }
 }

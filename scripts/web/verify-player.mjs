@@ -91,7 +91,7 @@ try {
     await driver.drag(page.locator('#playback-progress'),.6,1,shape==='portrait');await page.waitForFunction(()=>!document.querySelector('video').seeking);
     console.log('Shared end seek',label,await video.evaluate(v=>({current:v.currentTime,duration:v.duration,fullscreen:!!document.fullscreenElement})));
     check(label+':ended-progress-complete',await video.evaluate(v=>Math.abs(v.currentTime-v.duration)<.05));
-    await driver.click('截取封面');
+    await driver.click('封面位置');
     await page.waitForFunction(()=>[...document.querySelectorAll('img[alt="已选封面预览"]')].some(i=>i.complete&&i.naturalWidth>0));
     if(await page.locator('#image-selection').textContent()!=='图片：未选择')throw Error('Preview selected an image without explicit confirmation');
     const pictureHash=()=>page.getByAltText('已选封面预览').last().evaluate(async image=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await(await fetch(image.src)).arrayBuffer()))).join(','));
@@ -104,7 +104,7 @@ try {
     await page.waitForTimeout(350);
     await page.waitForFunction(()=>[...document.querySelectorAll('img[alt="已选封面预览"]')].some(i=>i.complete&&i.naturalWidth>0));
     check(label+':current-picture-capture',oldPicture!==await pictureHash()&&await page.getByAltText('已选封面预览').last().evaluate(i=>i.complete&&i.naturalWidth>0));
-    await driver.click('裁剪视频');await driver.dragRange('start',.25);
+    await driver.click('裁剪范围');await driver.dragRange('start',.25);
     console.log('Shared range start',label,await page.getByText(/^保留片段：/).first().textContent());
     await driver.dragRange('end',.75);
     const rangeText=await page.getByText(/^保留片段：/).first().textContent(),values=[...rangeText.matchAll(/([0-9.]+) 秒/g)].map(m=>Number(m[1]));

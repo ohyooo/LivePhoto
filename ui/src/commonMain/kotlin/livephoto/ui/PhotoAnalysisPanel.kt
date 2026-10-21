@@ -1,6 +1,12 @@
 package livephoto.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,7 +20,8 @@ import livephoto.core.CoreResult
 
 @Composable
 internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean, onBusy: (Boolean) -> Unit) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var tool by rememberSaveable { mutableIntStateOf(0) }
+    var menu by remember { mutableStateOf(false) }
     var reference by rememberSaveable { mutableStateOf<String?>(null) }
     var selectionRevision by rememberSaveable { mutableStateOf(0) }
     var report by rememberSaveable { mutableStateOf<String?>(null) }
@@ -37,22 +44,39 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* The explicit read operation reports an inaccessible input. */ }
     }
-    OutlinedButton(onClick = { expanded = !expanded }, enabled = enabled && !working,
-        modifier = Modifier.fillMaxWidth().testTag("toggle-analysis")) {
-        Text(if (expanded) "收起照片检查" else "检查已有动态照片")
-    }
-    if (expanded) {
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("只读检查", style = MaterialTheme.typography.titleMedium)
-                Text("选择一张已有动态照片或普通照片。无需视频，不修改原片、不修复、不转码；单文件上限 32 MiB。")
-                OutlinedButton(onClick = picker, enabled = enabled && !working,
-                    modifier = Modifier.fillMaxWidth().testTag("select-analysis")) {
-                    Text(if (reference == null) "选择待检查照片" else "重新选择待检查照片")
+    val names = listOf("检查照片", "提取原始视频", "清理拆分", "协议转换", "安全修复", "修改关键照片时间")
+    val supported = listOf(platform.supportsAnalysis, platform.supportsVideoExtraction, platform.supportsCleanSplit,
+        platform.supportsConversion, platform.supportsRepair, platform.supportsPhotoKey)
+    val scroll = rememberScrollState()
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 800.dp
+        val input = retainedContent {
+            SectionCard("选择已有动态照片") {
+            Text("已有照片单文件上限 32 MiB，不修改原片。")
+            Text("选择已有动态照片或普通照片。独立于新建素材；选择文件后不会自动执行处理。")
+            OutlinedButton(onClick = picker, enabled = enabled && !working,
+                modifier = Modifier.fillMaxWidth().testTag("select-analysis")) {
+                Text(if (reference == null) "选择待检查照片" else "重新选择待检查照片")
+            }
+            Text("待检查文件：${info?.displayName ?: if (reference == null) "未选择" else "未知"}",
+                modifier = Modifier.testTag("analysis-name"))
+            Text("大小：${if (reference == null) "—" else formatMediaSize(info?.sizeBytes)}")
+                Box {
+                    OutlinedButton(onClick = { menu = true }, enabled = enabled && !working,
+                        shape = ControlShape, modifier = Modifier.fillMaxWidth().testTag("tool-selector")
+                            .semantics { contentDescription = "选择照片工具" }) { Text(names[tool]) }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        names.forEachIndexed { index, name ->
+                            DropdownMenuItem(text = { Text(name) }, enabled = supported[index], onClick = { tool = index; menu = false },
+                                modifier = Modifier.testTag("tool-$index").semantics { contentDescription = "工具：$name"; role = Role.Button })
+                        }
+                    }
                 }
-                Text("待检查文件：${info?.displayName ?: if (reference == null) "未选择" else "未知"}",
-                    modifier = Modifier.testTag("analysis-name"))
-                Text("大小：${if (reference == null) "—" else formatMediaSize(info?.sizeBytes)}")
+            }
+        }
+        val operation = retainedContent {
+            SectionCard(names[tool], Modifier.testTag("tool-content")) {
+                if (tool == 0) {
                 Button(onClick = {
                     val selected = reference ?: return@Button
                     scope.launch {
@@ -72,7 +96,8 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     modifier = Modifier.fillMaxWidth().testTag("analyze")) {
                     Text(if (working && !extracting && !splitting && !converting && !repairing && !settingKey) "正在检查…" else "开始检查（只读）")
                 }
-                if (platform.supportsVideoExtraction) {
+                }
+                if (tool == 1 && platform.supportsVideoExtraction) {
                     Text("原始视频提取是单独操作：另存 MP4/MOV，不修改照片、不转码，不等于 Clean Split。")
                     OutlinedButton(onClick = {
                         val selected = reference ?: return@OutlinedButton
@@ -94,33 +119,31 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                         Text(if (working && extracting) "正在提取…" else "提取原始视频")
                     }
                     exportReport?.let { text ->
-                        Surface(color = if (exportFailed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-                            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("extraction-report")) }
-                        }
+                        ReportPanel(text, exportFailed, "extraction-report", "提取", platform)
                     }
                 }
-                if (platform.supportsCleanSplit) {
+                if (tool == 2 && platform.supportsCleanSplit) {
                     key(reference, selectionRevision) {
                         CleanSplitControls(platform, reference, enabled && !working) { busy ->
                             splitting = busy; working = busy; onBusy(busy)
                         }
                     }
                 }
-                if (platform.supportsConversion) {
+                if (tool == 3 && platform.supportsConversion) {
                     key(reference, selectionRevision) {
                         ConversionControls(platform, reference, enabled && !working) { busy ->
                             converting = busy; working = busy; onBusy(busy)
                         }
                     }
                 }
-                if (platform.supportsRepair) {
+                if (tool == 4 && platform.supportsRepair) {
                     key(reference, selectionRevision) {
                         RepairControls(platform, reference, enabled && !working) { busy ->
                             repairing = busy; working = busy; onBusy(busy)
                         }
                     }
                 }
-                if (platform.supportsPhotoKey) {
+                if (tool == 5 && platform.supportsPhotoKey) {
                     key(reference, selectionRevision) {
                         PhotoKeyControls(platform, reference, enabled && !working) { busy ->
                             settingKey = busy; working = busy; onBusy(busy)
@@ -128,10 +151,18 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     }
                 }
                 report?.let { text ->
-                    Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-                        SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("analysis-report")) }
-                    }
+                    ReportPanel(text, failed, "analysis-report", "检查", platform)
                 }
+            }
+        }
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(if (wide) 24.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("照片工具", style = MaterialTheme.typography.headlineSmall)
+            Box(Modifier.widthIn(max = 1800.dp).fillMaxWidth().align(Alignment.CenterHorizontally)) {
+                if (wide) Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Box(Modifier.width(300.dp)) { input() }
+                    Box(Modifier.weight(1f)) { operation() }
+                } else Column(verticalArrangement = Arrangement.spacedBy(16.dp)) { input(); operation() }
             }
         }
     }

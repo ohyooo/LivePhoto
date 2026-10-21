@@ -69,46 +69,12 @@ try {
     const text = value => page.getByText(value).or(page.getByLabel(value)).first();
     const button = name => page.getByRole('button',{name,exact:typeof name==='string'});
     const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const click = async name => {
-      const locator=button(name);
-      for(let attempt=0;attempt<20;attempt++) {
-        await settle();
-        const bounds=await locator.boundingBox({timeout:1000}).catch(()=>null);
-        await settle();
-        await page.waitForTimeout(200);
-        const current=await locator.boundingBox({timeout:1000}).catch(()=>null);
-        if(bounds && current && ['x','y','width','height'].some(key=>Math.abs(bounds[key]-current[key])>0.5)) {
-          await page.waitForTimeout(150);
-          continue;
-        }
-        // The accessibility overlay is pointer-events:none by design; users hit the canvas.
-        // Use its semantic bounds to deliver a real pointer event to that canvas, not a DOM click.
-        const placed=bounds && bounds.width>0 && bounds.height>0;
-        if(placed && bounds.y>=64 && bounds.y+bounds.height<=viewport.height) {
-          await page.mouse.click(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
-          await settle();
-          return;
-        }
-        await page.mouse.move(viewport.width/2,viewport.height/2);
-        // Compose reports clipped controls as 0x0 at (0,0), not their offscreen position.
-        // Search down first, then up; never interpret that synthetic zero as "above the app bar".
-        const direction=placed ? (bounds.y<64 ? -1 : 1) : (attempt<10 ? 1 : -1);
-        await page.mouse.wheel(0,direction*320);
-        await page.waitForTimeout(150);
-      }
-      throw Error('Shared Compose button is not reachable: '+name+'; '+errors.join(';'));
-    };
-    const choose = async (name,path) => {
-      const picker=page.waitForEvent('filechooser');
-      picker.catch(()=>{});
-      await click(name);
-      await (await picker).setFiles(path);
-      await settle();
-    };
+    const click = name => driver.click(name);
+    const choose = (name,path) => driver.choose(name,path);
     let downloads=0; page.on('download',()=>downloads++);
     const analysisInputs=[];
     if (scenario === 'create') {
-    await button('生成并保存 Live Photo').waitFor({state:'attached'});
+    await button('生成动态照片').waitFor({state:'attached'});
     check(label+':subpath-assets-loaded',
       await page.evaluate(()=>document.documentElement.dataset.livephotoRuntime)==='kotlin-wasm-compose' &&
       uiManifest.kotlinRuntime==='wasmJs' && uiManifest.applicationWasm?.length>0 &&
@@ -118,9 +84,9 @@ try {
       loaded.every(r=>r.status===200&&r.url.startsWith(origin+'/livephoto/')));
     // Compose's semantic DOM does not expose native HTML disabled state consistently.
     // Exercise the real canvas hit target instead: no inputs must not start a download or alter the status.
-    await click('生成并保存 Live Photo');
+    await click('生成动态照片');
     await page.waitForTimeout(200);
-    check(label+':initial-create-disabled',downloads===0&&await text(/可选择 JPEG 图片/).count()===1);
+    check(label+':initial-create-disabled',downloads===0&&await page.locator('#result-card').count()===0&&await text('还需选择图片和视频').count()===1);
     await page.mouse.move(viewport.width/2,viewport.height/2);
     await page.mouse.wheel(0,-2000);
     await page.waitForTimeout(200);
@@ -136,11 +102,10 @@ try {
     await page.locator('#livephoto-image-input').setInputFiles([]);
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
-      await click(name);
-      await button(name).filter({hasText:/^✓ /}).waitFor({state:'attached'});
+      await driver.selectProtocol(name.source.includes('OPPO')?'OPPO / OnePlus':name.source.includes('V2')?'Google Motion Photo V2':'Google MicroVideo V1');
       const pending=page.waitForEvent('download');
       pending.catch(()=>{});
-      await click('生成并保存 Live Photo');
+      await click('生成动态照片');
       const download=await pending;
       if(await download.failure()) throw Error('Browser download failed');
       const output=await readFile(await download.path());
@@ -175,7 +140,7 @@ try {
     check(label+':viewport-contained',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await choose('重新选择图片',imagePath);
     await choose('重新选择视频',{name:'broken.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,1,2,3])});
-    await click('生成并保存 Live Photo');
+    await click('生成动态照片');
     await text(/错误码：/).waitFor({state:'visible'});
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
 
@@ -191,13 +156,13 @@ try {
         }));
       });
       analysisInputs.push(...inputs.map(({target,bytes}) => ({target,output:Buffer.from(bytes)})));
-      await driver.click('检查已有动态照片');
+      await driver.click('照片工具');
     const analysisPicker=async input=>driver.choose(/^(?:重新)?选择待检查照片$/,input);
     const analyze=async(input,expected)=>{
       await analysisPicker(input);
       await driver.click('开始检查（只读）');
       await text(expected).waitFor({state:'attached'});
-      return text(expected).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      return driver.report(text(expected));
     };
     const oversized=join(fixtures,'oversized.jpg');
     await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
@@ -223,9 +188,9 @@ try {
     const budget=await analyze(oversized,/检查失败/);
     check(label+':analysis-budget-before-parse',budget.includes('RESOURCE_LIMIT_EXCEEDED')&&budget.includes('阶段：Read'));
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
-    check(label+':analysis-cancel-keeps-report',await text(/检查失败/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'')===budget&&await text('待检查文件：oversized.jpg').count()===1);
+    check(label+':analysis-cancel-keeps-report',await driver.report(text(/检查失败/))===budget&&await text('待检查文件：oversized.jpg').count()===1);
     check(label+':analysis-does-not-alter-create-state',downloads===downloadsBeforeAnalysis&&
-      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&
+      await driver.emptyCreateInputs()&&
       errors.length===0);
 
     }
@@ -240,11 +205,11 @@ try {
       if(await download.failure())throw Error('Raw video download failed');
       const bytes=await readFile(await download.path());
       await text(/已提取并发起视频下载/).waitFor({state:'attached'});
-      const report=await text(/已提取并发起视频下载/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      const report=await driver.report(text(/已提取并发起视频下载/));
       check(label+':extract-'+target+'-exact-video',createHash('sha256').update(bytes).digest('hex')===videoHash&&
         download.suggestedFilename()==='LivePhoto-video.mp4'&&report.includes(videoHash)&&
         report.includes('ExactExtraction：Verified')&&report.includes('video/mp4')&&report.includes('不是 Clean Split'));
-      inspectionPreserved&&=await text(/只读检查完成/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'')===inspection;
+      inspectionPreserved&&=await driver.report(text(/只读检查完成/))===inspection;
       if(target==='oplus.olive') {
         await page.mouse.move(viewport.width/2,viewport.height*.6);
         await page.mouse.wheel(0,180);await page.waitForTimeout(250);
@@ -261,13 +226,13 @@ try {
       const prior=downloads;
       await driver.click('提取原始视频');
       await text(/提取失败/).waitFor({state:'attached'});
-      const report=await text(/提取失败/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      const report=await driver.report(text(/提取失败/));
       check(label+':extract-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&
         report.includes('阶段：')&&(!code||report.includes(code)));
     }
     check(label+':extract-clears-stale-report',staleExportCleared);
     check(label+':extract-preserves-analysis-and-create-state',inspectionPreserved&&downloads===beforeExtraction+1&&
-      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+      await driver.emptyCreateInputs()&&errors.length===0);
 
     }
     if (scenario === 'split') {
@@ -278,7 +243,7 @@ try {
       const prior=downloads;
       await driver.click('准备清理拆分');
       await text(/清理拆分已准备/).waitFor({state:'attached'});
-      const report=await text(/清理拆分已准备/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      const report=await driver.report(text(/清理拆分已准备/));
       const preparedOnly=downloads===prior&&report.includes('尚未保存')&&report.includes('不是外部原子成对保存')&&
         report.includes('ImageDataPreserving：Verified')&&report.includes(videoHash);
       const outputs=[];
@@ -303,7 +268,7 @@ try {
       check(label+':split-'+target+'-clean-independent-files',preparedOnly&&audit.nonLive&&audit.idempotent&&audit.decoded&&
         createHash('sha256').update(outputs[1]).digest('hex')===videoHash&&
         report.includes(createHash('sha256').update(outputs[0]).digest('hex'))&&downloads===prior+2);
-      splitInspectionPreserved&&=await text(/只读检查完成/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'')===inspection;
+      splitInspectionPreserved&&=await driver.report(text(/只读检查完成/))===inspection;
       if(target==='oplus.olive') {
         await page.mouse.move(viewport.width/2,viewport.height*.6);
         await page.mouse.wheel(0,300);await page.waitForTimeout(250);
@@ -320,13 +285,13 @@ try {
       const prior=downloads;
       await driver.click('准备清理拆分');
       await text(/清理拆分失败/).waitFor({state:'attached'});
-      const report=await text(/清理拆分失败/).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
+      const report=await driver.report(text(/清理拆分失败/));
       check(label+':split-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&report.includes('阶段：')&&
         (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&await button('保存拆分图片').count()===0);
     }
     check(label+':split-clears-stale-preparation',splitStaleCleared);
     check(label+':split-preserves-analysis-and-create-state',splitInspectionPreserved&&downloads===beforeSplit+2&&
-      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+      await driver.emptyCreateInputs()&&errors.length===0);
 
     }
     if (scenario === 'convert') {
@@ -347,14 +312,14 @@ try {
         await driver.click('转换并另存');
         if(blocked) {
           await text(/转换失败/).waitFor({state:'attached'});
-          const report=await conversionReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+          const report=await driver.report(conversionReport());
           check(label+':convert-'+sourceTarget+'-to-'+target,downloads===prior&&report.includes('UNSAFE_METADATA_REWRITE')&&report.includes('阶段：'));
         } else {
           const download=await pending;
           if(await download.failure())throw Error('Converted photo download failed');
           const bytes=await readFile(await download.path());
           await text(/已转换并发起下载/).waitFor({state:'attached'});
-          const report=await conversionReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+          const report=await driver.report(conversionReport());
           const audit=await page.evaluate(async ({data,original,target})=>{
             const api=await import('/api/livephoto.mjs');
             const blob=new Blob([new Uint8Array(data)]),source=new Blob([new Uint8Array(original)]);
@@ -375,7 +340,7 @@ try {
             await page.screenshot({path:`ci-output/web-ui-conversion-${label}.png`});
           }
         }
-        conversionInspectionPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+        conversionInspectionPreserved&&=await driver.report(text(/只读检查完成/))===inspection;
       }
     }
     for(const [kind,input] of [
@@ -388,18 +353,18 @@ try {
       const prior=downloads;
       await driver.click('转换并另存');
       await text(/转换失败/).waitFor({state:'attached'});
-      const report=await conversionReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+      const report=await driver.report(conversionReport());
       check(label+':convert-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&report.includes('阶段：')&&
         (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')));
     }
     check(label+':convert-clears-stale-report',conversionStaleCleared);
     check(label+':convert-preserves-analysis-and-create-state',conversionInspectionPreserved&&downloads===beforeConversion+2&&
-      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+      await driver.emptyCreateInputs()&&errors.length===0);
 
     }
     if (scenario === 'repair') {
     const repairReport=()=>text(/(?:修复预览完成|无需修改（未写入）|修复被阻止|修复失败|已应用修复并发起下载)/);
-    const readRepairReport=()=>repairReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+    const readRepairReport=()=>driver.report(repairReport());
     // Compose canvas buttons do not expose reliable HTML disabled attributes.
     // Verify the actual hit target cannot publish or change the review instead.
     const repairCannotApply=async()=>{
@@ -454,7 +419,7 @@ try {
         report.includes(createHash('sha256').update(repaired).digest('hex'))&&report.includes('ImageDataPreserving: Verified')&&
         report.includes('BitstreamPreserving: Verified')&&download.suggestedFilename()==='LivePhoto-repaired.jpg'&&
         await repairCannotApply());
-      repairAnalysisPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+      repairAnalysisPreserved&&=await driver.report(text(/只读检查完成/))===inspection;
       if(target==='google.microvideo.v1') {
         repairedV1Digest=createHash('sha256').update(repaired).digest('hex');
         await page.mouse.move((viewport.width-Math.min(viewport.width,840))/2+8,viewport.height/2);
@@ -516,14 +481,15 @@ try {
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-selection-state-isolated',cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
     check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&
-      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+      await driver.emptyCreateInputs()&&errors.length===0);
 
     }
     if (scenario === 'key') {
     const v1=analysisInputs.find(p=>p.target==='google.microvideo.v1');
     const beforeKey=downloads,keyReport=()=>text(/^(?:已修改关键照片时间并发起下载|关键照片修改失败)/);
-    const readKeyReport=()=>keyReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+    const readKeyReport=()=>driver.report(keyReport());
     const enterKey=async value=>{
+      await driver.selectTool('修改关键照片时间');
       const field=page.locator('#key-seconds');
       // Activating the canvas can bring its previous focus target into view.
       // Remeasure after that first real click before typing into the field.
@@ -549,7 +515,7 @@ try {
       if(target==='oplus.olive') {
         const prior=downloads;await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
         check(label+':key-'+target+'-refused',downloads===prior&&(await readKeyReport()).includes('UNSAFE_METADATA_REWRITE'));
-        keyAnalysisPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+        keyAnalysisPreserved&&=await driver.report(text(/只读检查完成/))===inspection;
         continue;
       }
       const pending=page.waitForEvent('download');pending.catch(()=>{});
@@ -569,7 +535,7 @@ try {
       check(label+':key-'+target+'-preserving',audit.valid&&Math.abs(audit.position-.47)<=.1&&audit.hash===videoHash&&
         report.includes('实际时间：')&&report.includes('ImageDataPreserving: Verified')&&report.includes('BitstreamPreserving: Verified')&&
         report.includes(createHash('sha256').update(edited).digest('hex'))&&download.suggestedFilename()==='LivePhoto-key.jpg');
-      keyAnalysisPreserved&&=await text(/只读检查完成/).evaluate(e=>e.getAttribute('aria-label')||e.textContent||'')===inspection;
+      keyAnalysisPreserved&&=await driver.report(text(/只读检查完成/))===inspection;
       if(target==='google.microvideo.v1')await page.screenshot({path:`ci-output/web-ui-key-${label}.png`});
     }
     const beforeInvalid=downloads;
@@ -591,7 +557,7 @@ try {
     await analysisPicker({name:'key-reselect.jpg',mimeType:'image/jpeg',buffer:v1.output});
     check(label+':key-selection-state-isolated',await keyReport().count()===0);
     check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+1&&
-      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+      await driver.emptyCreateInputs()&&errors.length===0);
     }
     }
     await context.close();

@@ -7,7 +7,8 @@ import livephoto.core.memory.MemoryOutputTransaction
 public enum class CoreMediaAction { Probe, Remux, Trim, ExtractFrame, Transcode }
 public data class PreparedCoreMedia(val bytes: Bytes?, val mime: String?, val actualTime: Time?, val summary: String,
     val retainedVideoWindow: TimeRange? = null)
-public data class CoreMediaEdit(val summary: String, val imageReference: String? = null, val video: EditedVideo? = null)
+public data class CoreMediaEdit(val summary: String, val imageReference: String? = null, val video: EditedVideo? = null,
+    val actualTime: Time? = null)
 
 /** Only a verified, single, unit-rate video translation can reuse the player's cover clock.
  * Audio packet boundaries are deliberately not used as the video origin. */

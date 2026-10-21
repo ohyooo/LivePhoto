@@ -67,3 +67,5 @@ internal fun browserPreviewElement(preview: BrowserPreview): HTMLElement =
     js("{ preview.element.releasePreview = () => preview.dispose(); return preview.element; }")
 internal fun browserReleasePreview(element: HTMLElement): Unit = js("{ element.releasePreview(); }")
 internal fun browserRuntimeReady(): Unit = js("{ document.documentElement.dataset.livephotoRuntime = 'kotlin-wasm-compose'; }")
+internal fun browserClipboardAvailable(): Boolean = js("!!navigator.clipboard?.writeText")
+internal fun browserCopyText(text: String): Promise<JsAny?> = js("navigator.clipboard.writeText(text)")

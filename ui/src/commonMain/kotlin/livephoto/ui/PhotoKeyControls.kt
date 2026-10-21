@@ -39,7 +39,5 @@ internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?,
         }
     }, enabled = enabled && !working && reference != null && parseKeySeconds(seconds) != null,
         modifier = Modifier.fillMaxWidth().testTag("set-photo-key")) { Text(if (working) "正在修改关键照片…" else "修改关键照片时间并另存") }
-    report?.let { text -> Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-        SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("key-report")) }
-    } }
+    report?.let { text -> ReportPanel(text, failed, "key-report", "关键照片", platform) }
 }

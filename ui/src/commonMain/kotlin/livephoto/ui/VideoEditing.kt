@@ -1,10 +1,11 @@
 package livephoto.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -13,7 +14,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -29,138 +29,210 @@ public data class VideoPlayback(
 )
 public data class EditedVideo(val reference: String, val summary: String)
 
-/** One application media entry point. Preview is read-only and never selects an input. */
 public interface VideoEditor {
     public val playback: State<VideoPlayback>
     public fun seek(seconds: Double)
     public val canFullscreen: Boolean get() = false
+    public val thumbnail: String? get() = null
     public fun togglePlayback() {}
     public fun setVolume(volume: Double) {}
     public fun setMuted(muted: Boolean) {}
     public fun setRate(rate: Double) {}
     public fun setFullscreen(fullscreen: Boolean) {}
     public suspend fun previewFrame(): String
+    public suspend fun previewTimeline(): List<String> = emptyList()
     public suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit
     public fun cancel()
     @Composable public fun Player(modifier: Modifier, onScroll: (Float) -> Unit)
 }
 
-public fun mediaSeconds(value: Double): String {
-    val millis = (value.coerceAtLeast(0.0) * 1000).toLong()
-    return "${millis / 1000}.${(millis % 1000).toString().padStart(3, '0')} 秒"
+/** Drafts survive folding, navigation, theme and column changes. */
+public class VideoEditingState {
+    public var start by mutableDoubleStateOf(0.0)
+    public var end by mutableDoubleStateOf(0.0)
+    public var startText by mutableStateOf("0")
+    public var endText by mutableStateOf("0")
+    public var pendingTrim by mutableStateOf(false)
+    public var trimOpen by mutableStateOf(false)
+    public var toolsOpen by mutableStateOf(false)
+    public var coverOpen by mutableStateOf(false)
+    public var coverPosition by mutableDoubleStateOf(0.0)
+    public var coverPreview by mutableStateOf<String?>(null)
+    public var status by mutableStateOf("")
+    public var lastAction by mutableStateOf<CoreMediaAction?>(null)
+    public var working by mutableStateOf(false)
+    public var capturing by mutableStateOf(false)
+    public var cancelling by mutableStateOf(false)
+    public fun resetRange(duration: Double) {
+        start = 0.0; end = duration; startText = "0"; endText = decimalSeconds(duration); pendingTrim = false
+    }
+    public fun processedVideo() { resetRange(0.0); coverPreview = null }
+}
+
+private fun decimalSeconds(value: Double): String {
+    val millis = (value.coerceAtLeast(0.0) * 1000).roundToLong()
+    return "${millis / 1000}.${(millis % 1000).toString().padStart(3, '0')}"
+}
+public fun mediaSeconds(value: Double): String = decimalSeconds(value) + " 秒"
+public fun mediaClock(value: Double): String {
+    val millis = (value.coerceAtLeast(0.0) * 1000).roundToLong()
+    return "${millis / 60_000}".padStart(2, '0') + ":" + "${millis / 1000 % 60}".padStart(2, '0') +
+        "." + "${millis % 1000}".padStart(3, '0')
 }
 
 @Composable
 public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (Boolean) -> Unit,
     onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit,
-    player: @Composable () -> Unit, preview: @Composable (String, Modifier) -> Unit) {
+    player: @Composable () -> Unit, preview: @Composable (String, Modifier) -> Unit,
+    state: VideoEditingState, confirmedTime: Time? = null, coverWarning: String? = null,
+    platform: LivePhotoUiPlatform) {
     val playback by editor.playback
-    var start by remember(editor) { mutableDoubleStateOf(0.0) }
-    var end by remember(editor) { mutableDoubleStateOf(0.0) }
-    var trimOpen by remember(editor) { mutableStateOf(false) }
-    var coverOpen by remember(editor) { mutableStateOf(false) }
-    var coverPosition by remember(editor) { mutableDoubleStateOf(0.0) }
-    var coverPreview by remember(editor) { mutableStateOf<String?>(null) }
-    var working by remember(editor) { mutableStateOf(false) }
-    var capturing by remember(editor) { mutableStateOf(false) }
-    var status by remember(editor) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val focus = LocalFocusManager.current
-    LaunchedEffect(editor, playback.duration) { if (end == 0.0 && playback.duration > 0) end = playback.duration }
-    val enabled = !parentBusy && !working && playback.ready
+    var thumbnails by remember(editor) { mutableStateOf<List<String>>(emptyList()) }
+    var thumbnailError by remember(editor) { mutableStateOf<String?>(null) }
+    val enabled = !parentBusy && !state.working && playback.ready
     val canPreview by rememberUpdatedState(enabled)
+    LaunchedEffect(editor, playback.duration) {
+        if (state.end == 0.0 && playback.duration > 0 && !state.pendingTrim) state.resetRange(playback.duration)
+    }
+    LaunchedEffect(editor, playback.ready) {
+        if (playback.ready && thumbnails.isEmpty()) try { thumbnails = editor.previewTimeline() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { thumbnailError = "缩略图暂不可用，仍可使用时间与范围控件。" }
+    }
+    fun time(value: Double): Time {
+        require(value.isFinite() && value >= 0 && value <= 60) { "媒体处理仅限 60 秒内视频。" }
+        return Time((value * 1_000_000).roundToLong(), 1_000_000u)
+    }
     fun run(action: CoreMediaAction) {
-        if (!enabled || capturing) return
-        working = true; onBusy(true)
+        if (!enabled || state.capturing) return
+        state.working = true; state.cancelling = false; state.lastAction = action; onBusy(true)
         val label = when (action) {
-            CoreMediaAction.Probe -> "检查"
-            CoreMediaAction.Remux -> "封装"
-            CoreMediaAction.Trim -> "裁剪"
-            CoreMediaAction.ExtractFrame -> "抽帧"
-            CoreMediaAction.Transcode -> "转码"
+            CoreMediaAction.Probe -> "检查"; CoreMediaAction.Remux -> "封装"; CoreMediaAction.Trim -> "裁剪"
+            CoreMediaAction.ExtractFrame -> "抽帧"; CoreMediaAction.Transcode -> "转码"
         }
         scope.launch {
-            status = "正在处理视频；不会上传文件…"
+            state.status = "正在$label；本地处理，不上传文件…"
             try {
-                require(action != CoreMediaAction.Transcode || !trimOpen) { "请先应用裁剪，再转码；不会忽略选段。" }
-                fun time(value: Double): Time {
-                    require(value.isFinite() && value >= 0 && value <= 60) { "媒体处理仅限 60 秒内视频。" }
-                    return Time((value * 1_000_000).roundToLong(), 1_000_000u)
-                }
+                require(action != CoreMediaAction.Transcode || !state.pendingTrim) { "请先应用或放弃裁剪选段，再转码。" }
                 val from = when (action) {
-                    CoreMediaAction.Trim -> time(start)
-                    CoreMediaAction.ExtractFrame -> time(if (coverOpen) coverPosition else playback.current)
+                    CoreMediaAction.Trim -> time(state.start)
+                    CoreMediaAction.ExtractFrame -> time(if (state.coverOpen) state.coverPosition else playback.current)
                     else -> Time.Zero
                 }
-                val until = if (action == CoreMediaAction.Trim) time(end) else Time.Zero
-                val result = editor.process(action, from, until)
+                val result = editor.process(action, from, if (action == CoreMediaAction.Trim) time(state.end) else Time.Zero)
                 result.imageReference?.let(onImage)
-                result.video?.let(onVideo)
-                status = result.summary
+                result.video?.let { state.processedVideo(); onVideo(it) }
+                state.status = result.summary
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { status = "${label}失败：${error.message?.take(2000) ?: "未知错误"}。输入未替换，不自动转码或切换实现。" }
-            finally { working = false; onBusy(false) }
+            catch (error: Exception) { state.status = "$label失败：${error.message?.take(2000) ?: "未知错误"}。输入未替换，不自动转码或切换实现。" }
+            finally { state.working = false; state.cancelling = false; onBusy(false) }
         }
     }
-    LaunchedEffect(editor, coverOpen) {
-        if (coverOpen) try {
-            snapshotFlow { coverPosition }.conflate().collect { position ->
+    LaunchedEffect(editor, state.coverOpen) {
+        if (state.coverOpen) try {
+            snapshotFlow { state.coverPosition }.conflate().collect { position ->
                 if (canPreview) {
-                    capturing = true; onBusy(true)
+                    state.capturing = true; onBusy(true)
                     try {
-                        coverPreview = withTimeout(5000) {
+                        state.coverPreview = withTimeout(5000) {
                             editor.seek(position)
                             snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
                             editor.previewFrame()
                         }
-                    } catch (_: TimeoutCancellationException) { status = "预览加载超时，请重试。" }
+                    } catch (_: TimeoutCancellationException) { state.status = "预览加载超时，请重试。" }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { status = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
-                    finally { capturing = false; onBusy(false) }
+                    catch (error: Exception) { state.status = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
+                    finally { state.capturing = false; onBusy(false) }
                     delay(80)
                 }
             }
-        } finally { capturing = false; onBusy(false) }
+        } finally { state.capturing = false; onBusy(false) }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        player()
-        playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(trimOpen, { focus.clearFocus(); trimOpen = it }, enabled = enabled,
-                modifier = Modifier.semantics { contentDescription = "裁剪视频" })
-            Text("裁剪视频")
-            Spacer(Modifier.width(16.dp))
-            Checkbox(coverOpen, { focus.clearFocus(); coverOpen = it; if (it) coverPosition = playback.current }, enabled = enabled,
-                modifier = Modifier.semantics { contentDescription = "截取封面" })
-            Text("截取封面")
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionCard("视频预览") {
+            player()
+            if (!playback.ready && playback.error == null) Text("正在读取视频画面…")
+            playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Text("可播放不代表可以安全生成或编辑。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (coverOpen) {
-            Text("封面位置：${mediaSeconds(coverPosition)}")
-            MediaSeekBar(coverPosition, playback.duration, enabled, "封面位置", Modifier.fillMaxWidth().height(40.dp).testTag("cover-progress"), onSeek = { coverPosition = it })
-            coverPreview?.let { preview(it, Modifier.fillMaxWidth().height(160.dp)) }
-            Text("拖动只更新预览，不替换已选图片；点击下方按钮后抽取实际帧作为封面。")
+        SectionCard("视频编辑") {
+            Disclosure("裁剪范围", when {
+                state.pendingTrim -> "待应用 · ${mediaSeconds((state.end - state.start).coerceAtLeast(0.0))}"
+                state.lastAction == CoreMediaAction.Trim -> "已裁剪 · ${mediaSeconds(playback.duration)}"
+                else -> "保留完整视频"
+            }, state.trimOpen, { state.trimOpen = !state.trimOpen }) {
+                if (thumbnails.isNotEmpty()) Row(Modifier.fillMaxWidth().height(48.dp)) {
+                    thumbnails.forEachIndexed { index, reference ->
+                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                            preview(reference, Modifier.fillMaxSize())
+                            val position = playback.duration * (index + .5) / thumbnails.size
+                            if (position < state.start || position > state.end) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .4f)))
+                        }
+                    }
+                }
+                thumbnailError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                RangeSlider(value = state.start.toFloat()..state.end.toFloat(), enabled = enabled && playback.duration > 0,
+                    valueRange = 0f..playback.duration.coerceAtLeast(.001).toFloat(), onValueChange = { range ->
+                        val moved = if (range.start.toDouble() != state.start) range.start.toDouble() else range.endInclusive.toDouble()
+                        state.start = range.start.toDouble(); state.end = range.endInclusive.toDouble()
+                        state.startText = decimalSeconds(state.start); state.endText = decimalSeconds(state.end)
+                        state.pendingTrim = state.start > .001 || state.end < playback.duration - .001
+                        editor.seek(moved)
+                    }, modifier = Modifier.fillMaxWidth().testTag("trim-progress").semantics { contentDescription = "裁剪范围" })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (start in listOf(true, false)) OutlinedTextField(
+                        value = if (start) state.startText else state.endText,
+                        onValueChange = { value ->
+                            if (start) state.startText = value else state.endText = value
+                            state.pendingTrim = true
+                            val parsed = parseKeySeconds(value)?.let { it.value.toDouble() / it.timescale.toDouble() }
+                            if (parsed != null && parsed <= playback.duration && (if (start) parsed < state.end else parsed > state.start)) {
+                                if (start) state.start = parsed else state.end = parsed
+                                editor.seek(parsed)
+                            }
+                        }, label = { Text(if (start) "开始时间（秒）" else "结束时间（秒）") }, enabled = enabled,
+                        singleLine = true, shape = ControlShape, modifier = Modifier.weight(1f).testTag(if (start) "trim-start" else "trim-end"))
+                }
+                Text("保留片段：${mediaSeconds(state.start)} ～ ${mediaSeconds(state.end)}")
+                Text("选中时长：${mediaSeconds((state.end - state.start).coerceAtLeast(0.0))}；音视频 copy，以实际边界为准。", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val valid = parseKeySeconds(state.startText) != null && parseKeySeconds(state.endText) != null &&
+                        state.start >= 0 && state.end > state.start && state.end <= playback.duration &&
+                        kotlin.math.abs(state.start - (state.startText.toDoubleOrNull() ?: -1.0)) < .001 &&
+                        kotlin.math.abs(state.end - (state.endText.toDoubleOrNull() ?: -1.0)) < .001
+                    Button(onClick = { run(CoreMediaAction.Trim) }, enabled = enabled && !state.capturing && valid && state.pendingTrim,
+                        shape = ControlShape) { Text("应用裁剪") }
+                    TextButton(onClick = { state.resetRange(playback.duration) }, enabled = enabled) { Text("重置选段") }
+                }
+                Text("重置只放弃尚未应用的选择，不撤销已处理视频。", style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider()
+            Disclosure("更多视频处理", if (state.working) "正在处理" else "可选 · 音频不编码", state.toolsOpen, { state.toolsOpen = !state.toolsOpen }) {
+                OutlinedButton(onClick = { run(CoreMediaAction.Probe) }, enabled = enabled && !state.capturing, shape = ControlShape) { Text("检查视频") }
+                OutlinedButton(onClick = { run(CoreMediaAction.Remux) }, enabled = enabled && !state.capturing, shape = ControlShape) { Text("重新封装") }
+                OutlinedButton(onClick = { run(CoreMediaAction.Transcode) }, enabled = enabled && !state.capturing && !state.pendingTrim,
+                    shape = ControlShape, modifier = Modifier.testTag("player-transcode")) { Text("转为 H.264") }
+                Text("实验性：仅已验证的 8-bit SDR 等配置；视频显式编码，音频 copy。先应用或放弃选段，再转码。", style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider()
+            val confirmed = confirmedTime?.let { mediaClock(it.value.toDouble() / it.timescale.toDouble()) }
+            Disclosure("封面位置", coverWarning ?: confirmed?.let { "已确认 · $it" } ?: "使用所选图片", state.coverOpen,
+                { state.coverOpen = !state.coverOpen; if (state.coverOpen) state.coverPosition = playback.current }) {
+                MediaSeekBar(state.coverPosition, playback.duration, enabled, "封面位置",
+                    Modifier.fillMaxWidth().height(44.dp).testTag("cover-progress"), onSeek = { state.coverPosition = it })
+                Text("正在预览：${mediaClock(state.coverPosition)}")
+                Text("当前封面：${confirmed ?: "所选图片"}")
+                state.coverPreview?.let { preview(it, Modifier.fillMaxWidth().height(160.dp)) }
+                Text("仅预览，尚未替换封面。", style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { run(CoreMediaAction.ExtractFrame) }, enabled = enabled && !state.capturing, shape = ControlShape) { Text("使用当前画面作为封面") }
+            }
+            coverWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (state.pendingTrim) Text("选段尚未应用；请应用裁剪或重置选段后生成。", color = MaterialTheme.colorScheme.error)
+            if (state.working) OutlinedButton(onClick = { state.cancelling = true; editor.cancel() }, enabled = !state.cancelling, shape = ControlShape) {
+                Text(if (state.cancelling) "正在取消…" else "取消媒体处理")
+            }
+            if (state.status.isNotEmpty()) ReportPanel(state.status, state.status.contains("失败"), "player-edit-status", "视频处理", platform)
         }
-        OutlinedButton(onClick = { run(CoreMediaAction.ExtractFrame) }, enabled = enabled && !capturing, modifier = Modifier.fillMaxWidth()) {
-            Text("使用当前画面为封面")
-        }
-        if (trimOpen) {
-            Text("保留片段：${mediaSeconds(start)} ～ ${mediaSeconds(end)}")
-            RangeSlider(value = start.toFloat()..end.toFloat(), enabled = enabled && playback.duration > 0,
-                valueRange = 0f..playback.duration.coerceAtLeast(0.001).toFloat(),
-                onValueChange = { range ->
-                    val moved = if (range.start.toDouble() != start) range.start.toDouble() else range.endInclusive.toDouble()
-                    start = range.start.toDouble(); end = range.endInclusive.toDouble(); editor.seek(moved)
-                }, modifier = Modifier.fillMaxWidth().testTag("trim-progress").semantics { contentDescription = "裁剪范围" })
-            Text("拖动两端手柄，保留中间高亮片段。copy 以实际边界为准，音频不编码。")
-            Button(onClick = { run(CoreMediaAction.Trim) }, enabled = enabled && !capturing && start < end, modifier = Modifier.fillMaxWidth()) { Text("应用裁剪（音视频 copy）") }
-            Text("转码处理当前整段视频；请先应用裁剪，再转码，不会忽略选段。")
-        }
-        OutlinedButton(onClick = { run(CoreMediaAction.Transcode) }, enabled = enabled && !capturing && !trimOpen,
-            modifier = Modifier.fillMaxWidth().testTag("player-transcode")) { Text("显式转为 H.264 并使用（音频 copy）") }
-        OutlinedButton(onClick = { run(CoreMediaAction.Remux) }, enabled = enabled && !capturing, modifier = Modifier.fillMaxWidth()) { Text("重新封装（不编码）") }
-        OutlinedButton(onClick = { run(CoreMediaAction.Probe) }, enabled = enabled && !capturing, modifier = Modifier.fillMaxWidth()) { Text("检查视频（含解码）") }
-        if (working) OutlinedButton(onClick = { editor.cancel() }) { Text("取消媒体处理") }
-        if (status.isNotEmpty()) Text(status, modifier = Modifier.testTag("player-edit-status"))
-        Text("统一媒体处理仅限已验证的格式、色彩、时间线与 metadata，输入 32 MiB / 60 秒、输出 48 MiB。当前写视频只支持无音频或立体声 AAC；不支持时明确拒绝，不切换旧实现。预览不保证 HDR/色彩保真，保留情况以操作报告为准。")
     }
 }

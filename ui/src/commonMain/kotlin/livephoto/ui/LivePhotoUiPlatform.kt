@@ -26,9 +26,14 @@ public interface LivePhotoUiPlatform {
     public val conversionSuccessMessage: String get() = "已转换并另存。"
     public val videoExportSuccessMessage: String get() = "已保存原始视频。"
     public val hasResultPreview: Boolean get() = false
+    public val supportsClipboard: Boolean get() = false
+    public suspend fun copyText(text: String): Boolean = false
+    public fun coverWarning(image: String?, video: String?): String? = null
+    public fun coverPosition(image: String?, video: String?): Time? = null
     @Composable
     public fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit
     public suspend fun describe(reference: String): SelectedMediaInfo
+    public fun release(reference: String) {}
     public suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto>
     public suspend fun analyze(reference: String): CoreResult<AnalysisResult> = CoreResult.Failure(
         CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Inspect, "Photo analysis is not available in this adapter"))

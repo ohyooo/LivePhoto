@@ -45,8 +45,6 @@ internal fun ConversionControls(platform: LivePhotoUiPlatform, reference: String
         Text(if (working) "正在转换…" else "转换并另存")
     }
     report?.let { text ->
-        Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("conversion-report")) }
-        }
+        ReportPanel(text, failed, "conversion-report", "转换", platform)
     }
 }

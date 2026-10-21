@@ -41,8 +41,6 @@ internal fun RepairControls(platform: LivePhotoUiPlatform, reference: String?, e
     Button(onClick = { result?.review?.let(::runRepair) }, enabled = enabled && !working && result?.review != null,
         modifier = Modifier.fillMaxWidth().testTag("apply-repair")) { Text(if (working) "正在处理修复…" else "应用修复并另存") }
     report?.let { text ->
-        Surface(color = if (failed || result?.blocked?.isNotEmpty() == true) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant) {
-            SelectionContainer { Text(text, Modifier.padding(12.dp).testTag("repair-report")) }
-        }
+        ReportPanel(text, failed || result?.blocked?.isNotEmpty() == true, "repair-report", "修复", platform)
     }
 }

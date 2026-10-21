@@ -33,7 +33,7 @@ try {
     const driver=composeDriver(page,viewport);
     const theme=async(mode,path)=>{
       await page.waitForFunction(mode=>getComputedStyle(document.documentElement).colorScheme===mode,mode);
-      await driver.find(mode==='dark'?'切换到浅色模式':'切换到深色模式').waitFor({state:'attached'});
+      await driver.find('主题模式').waitFor({state:'attached'});
       await page.waitForTimeout(150);
       const png=await page.screenshot(path?{path}:{});
       // Inspect the actual rendered app bar, not just a DOM theme flag.
@@ -51,14 +51,21 @@ try {
     check(size+':default-follows-dark-browser',await theme('dark','ci-output/web-ui-theme-'+size+'-dark.png'));
     await page.emulateMedia({colorScheme:'light'});
     check(size+':browser-preference-updates-rendering',await theme('light','ci-output/web-ui-theme-'+size+'-light.png'));
-    const button=await driver.find('切换到深色模式').boundingBox();
+    const button=await driver.find('主题模式').boundingBox();
     check(size+':toggle-in-top-right',button&&button.x>viewport.width/2&&button.x+button.width<=viewport.width&&button.y>=0&&button.y+button.height<=64);
     // Unlike body controls, this button deliberately lives inside the fixed
     // app bar. Deliver a real pointer click to its already-checked bounds.
     await page.mouse.click(button.x+button.width/2,button.y+button.height/2);
+    await driver.click('主题：深色');
     check(size+':manual-toggle-keeps-selected-media',await theme('dark')&&await video.getAttribute('src')===source&&await page.getByText('名称：theme.mp4',{exact:true}).count()===1);
     await page.emulateMedia({colorScheme:'dark'});await page.emulateMedia({colorScheme:'light'});
     check(size+':manual-override-is-respected',await theme('dark'));
+    await driver.click('主题模式');await driver.click('主题：跟随系统');
+    if(!await theme('light'))throw Error('Explicit System mode did not restore browser following');
+    await driver.click('主题模式');await driver.click('主题：浅色');
+    await page.emulateMedia({colorScheme:'dark'});
+    if(!await theme('light'))throw Error('Explicit Light mode did not override dark browser');
+    await page.emulateMedia({colorScheme:'light'});
     await page.reload();await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
     check(size+':reload-follows-browser-again',await theme('light')&&errors.length===0);
     await context.close();

@@ -92,7 +92,7 @@ private fun playerClock(time: Double): String {
 @Composable
 private fun PlayerButton(label: String, symbol: String, enabled: Boolean = true, onClick: () -> Unit) {
     val PlayerInk = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(36.dp).semantics { contentDescription = label }) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(44.dp).semantics { contentDescription = label }) {
         Canvas(Modifier.size(20.dp)) {
             val k = size.width / 24f
             fun line(x: Float, y: Float, x2: Float, y2: Float) = drawLine(PlayerInk, Offset(x*k,y*k), Offset(x2*k,y2*k), 1.8f*k, StrokeCap.Round)
@@ -140,6 +140,7 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
     val palette = MaterialTheme.colorScheme
     val p by editor.playback
     var speedMenu by remember { mutableStateOf(false) }
+    var volumeOpen by remember { mutableStateOf(false) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         val aspect = if (p.width > 0 && p.height > 0) (p.width / p.height).toFloat() else 16f / 9f
@@ -149,10 +150,9 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
         // the toolbar, optional full-width volume row and two speed-menu rows.
         val playerHeight = if (fullscreen) maxHeight else windowHeight / 2
         val menuHeight = if (speedMenu) 92.dp else 0.dp
-        val basePictureHeight = (playerHeight - 80.dp - menuHeight).coerceAtLeast(1.dp)
-        val tentativeWidth = minOf(room, if (portrait) 720.dp else 1920.dp, basePictureHeight * aspect)
-        val separateVolume = !portrait && tentativeWidth + 24.dp < 560.dp
-        val heightLimit = (basePictureHeight - if (separateVolume) 48.dp else 0.dp).coerceAtLeast(1.dp)
+        val separateVolume = maxWidth < 300.dp
+        val heightLimit = (playerHeight - (if (portrait) 80.dp else 120.dp) - menuHeight -
+            if (separateVolume && volumeOpen) 48.dp else 0.dp).coerceAtLeast(1.dp)
         val pictureWidth = minOf(room, if (portrait) 720.dp else 1920.dp, heightLimit * aspect)
         val pictureHeight = pictureWidth / aspect
         val cardWidth = maxOf(pictureWidth + 24.dp + if (portrait) 40.dp else 0.dp,
@@ -174,24 +174,30 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
                     editor.Player(Modifier.size(pictureWidth, pictureHeight).testTag("video-picture"), onScroll)
                     if (portrait) MediaSeekBar(p.current, p.duration, enabled && p.ready, "播放进度", Modifier.width(32.dp).height(pictureHeight).testTag("playback-progress"), vertical = true, onSeek = editor::seek)
                 }
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+                if (!portrait) MediaSeekBar(p.current, p.duration, enabled && p.ready, "播放进度",
+                    Modifier.fillMaxWidth().height(32.dp).testTag("playback-progress"), onSeek = editor::seek)
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-controls"), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                     PlayerButton(if (p.paused) "播放" else "暂停", if (p.paused) "play" else "pause", enabled && p.ready, editor::togglePlayback)
-                    if (!portrait) {
-                        Text("${playerClock(p.current)} / ${playerClock(p.duration)}", fontSize = if (compact) 10.sp else 12.sp, fontFamily = FontFamily.Monospace)
-                        MediaSeekBar(p.current, p.duration, enabled && p.ready, "播放进度", Modifier.weight(1f).height(32.dp).testTag("playback-progress"), onSeek = editor::seek)
+                    Column(Modifier.width(40.dp)) {
+                        Text(playerClock(p.current), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("/" + playerClock(p.duration), fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                            color = palette.onSurfaceVariant)
+                    }
+                    PlayerButton(if (separateVolume) "音量设置" else if (p.muted || p.volume == 0.0) "取消静音" else "静音",
+                        if (p.muted || p.volume == 0.0) "muted" else "volume", enabled) {
+                        if (separateVolume) volumeOpen = !volumeOpen else editor.setMuted(!p.muted && p.volume > 0.0)
                     }
                     if (!separateVolume) {
-                        PlayerButton(if (p.muted || p.volume == 0.0) "取消静音" else "静音", if (p.muted || p.volume == 0.0) "muted" else "volume", enabled) { editor.setMuted(!p.muted && p.volume > 0.0) }
                         MediaSeekBar(if (p.muted) 0.0 else p.volume, 1.0, enabled, "音量",
-                            (if (portrait) Modifier.weight(1f) else Modifier.width(96.dp)).height(32.dp).testTag("volume-progress"), onSeek = editor::setVolume)
+                            Modifier.weight(1f).height(32.dp).testTag("volume-progress"), onSeek = editor::setVolume)
                     }
                     TextButton(onClick = { speedMenu = !speedMenu }, enabled = enabled,
-                        modifier = Modifier.width(48.dp).semantics { contentDescription = "播放倍速" }, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("${p.rate}x", fontSize = 12.sp, color = PlayerInk) }
+                        modifier = Modifier.width(44.dp).semantics { contentDescription = "播放倍速" }, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("${p.rate}x", fontSize = 12.sp, color = PlayerInk) }
                     PlayerButton(if (p.fullscreen) "退出全屏" else "全屏", "fullscreen", enabled && editor.canFullscreen) { editor.setFullscreen(!p.fullscreen) }
                 }
-                if (separateVolume) Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically,
+                if (separateVolume && volumeOpen) Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     PlayerButton(if (p.muted || p.volume == 0.0) "取消静音" else "静音", if (p.muted || p.volume == 0.0) "muted" else "volume", enabled) { editor.setMuted(!p.muted && p.volume > 0.0) }
                     MediaSeekBar(if (p.muted) 0.0 else p.volume, 1.0, enabled, "音量",
