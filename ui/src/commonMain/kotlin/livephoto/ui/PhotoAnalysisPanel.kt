@@ -21,6 +21,7 @@ import livephoto.core.CoreResult
 
 @Composable
 internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean, onBusy: (Boolean) -> Unit) {
+    val active by rememberUpdatedState(enabled)
     var tool by rememberSaveable { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     var reference by rememberSaveable { mutableStateOf<String?>(null) }
@@ -55,7 +56,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
             SectionCard("选择已有动态照片") {
             Text("已有照片单文件上限 32 MiB，不修改原片。")
             Text("选择已有动态照片或普通照片。独立于新建素材；选择文件后不会自动执行处理。")
-            OutlinedButton(onClick = picker, enabled = enabled && !working,
+            OutlinedButton(onClick = picker, enabled = active && !working,
                 modifier = Modifier.fillMaxWidth().testTag("select-analysis")) {
                 Text(if (reference == null) "选择待检查照片" else "重新选择待检查照片")
             }
@@ -63,7 +64,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                 modifier = Modifier.testTag("analysis-name"))
             Text("大小：${if (reference == null) "—" else formatMediaSize(info?.sizeBytes)}")
                 Box {
-                    OutlinedButton(onClick = { menu = true }, enabled = enabled && !working,
+                    OutlinedButton(onClick = { menu = true }, enabled = active && !working,
                         shape = ControlShape, modifier = Modifier.fillMaxWidth().testTag("tool-selector")
                             .semantics { contentDescription = "选择照片工具" }) { Text(names[tool]) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -93,7 +94,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                             report = "检查未完成：${error.message?.take(2000) ?: "未知异常"}\n未修改输入、未生成文件。请重新选择文件。"
                         } finally { working = false; onBusy(false) }
                     }
-                }, enabled = enabled && !working && reference != null,
+                }, enabled = active && !working && reference != null,
                     modifier = Modifier.fillMaxWidth().testTag("analyze")) {
                     Text(if (working && !extracting && !splitting && !converting && !repairing && !settingKey) "正在检查…" else "开始检查（只读）")
                 }
@@ -115,7 +116,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                                 exportReport = "提取或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查下载记录或相册，避免重复保存。"
                             } finally { working = false; extracting = false; onBusy(false) }
                         }
-                    }, enabled = enabled && !working && reference != null,
+                    }, enabled = active && !working && reference != null,
                         modifier = Modifier.fillMaxWidth().testTag("extract-video")) {
                         Text(if (working && extracting) "正在提取…" else "提取原始视频")
                     }
@@ -125,28 +126,28 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                 }
                 if (tool == 2 && platform.supportsCleanSplit) {
                     key(reference, selectionRevision) {
-                        CleanSplitControls(platform, reference, enabled && !working) { busy ->
+                        CleanSplitControls(platform, reference, active && !working) { busy ->
                             splitting = busy; working = busy; onBusy(busy)
                         }
                     }
                 }
                 if (tool == 3 && platform.supportsConversion) {
                     key(reference, selectionRevision) {
-                        ConversionControls(platform, reference, enabled && !working) { busy ->
+                        ConversionControls(platform, reference, active && !working) { busy ->
                             converting = busy; working = busy; onBusy(busy)
                         }
                     }
                 }
                 if (tool == 4 && platform.supportsRepair) {
                     key(reference, selectionRevision) {
-                        RepairControls(platform, reference, enabled && !working) { busy ->
+                        RepairControls(platform, reference, active && !working) { busy ->
                             repairing = busy; working = busy; onBusy(busy)
                         }
                     }
                 }
                 if (tool == 5 && platform.supportsPhotoKey) {
                     key(reference, selectionRevision) {
-                        PhotoKeyControls(platform, reference, enabled && !working) { busy ->
+                        PhotoKeyControls(platform, reference, active && !working) { busy ->
                             settingKey = busy; working = busy; onBusy(busy)
                         }
                     }

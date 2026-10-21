@@ -157,9 +157,8 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
         val pictureHeight = pictureWidth / aspect
         val cardWidth = maxOf(pictureWidth + 24.dp + if (portrait) 40.dp else 0.dp,
             // Preserve button hit areas/padding and leave usable flex space for
-            // portrait volume rather than moving it to a second toolbar row.
-            minOf(maxWidth, if (portrait) 360.dp else 260.dp))
-        val compact = cardWidth < 480.dp
+            // volume rather than moving it to a second toolbar row.
+            minOf(maxWidth, 360.dp))
         // Keep the platform video outside offscreen/clipping layers. Draw the
         // lightweight card directly so scrolling cannot leave a second opaque
         // rectangle where the interop surface used to be.

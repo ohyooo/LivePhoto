@@ -10,6 +10,8 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -27,9 +29,11 @@ import kotlin.math.sin
 public fun ThemeToggle(dark: Boolean, onClick: () -> Unit, mode: ThemeMode = ThemeMode.System,
     onSelect: ((ThemeMode) -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    fun closeMenu() { menu = false; focus.requestFocus() }
     val ink = MaterialTheme.colorScheme.onSurface
     Box {
-    IconButton(onClick = { if (onSelect == null) onClick() else menu = true }, modifier = Modifier.semantics {
+    IconButton(onClick = { if (onSelect == null) onClick() else menu = true }, modifier = Modifier.focusRequester(focus).semantics {
         contentDescription = "主题模式"
     }) {
         Canvas(Modifier.size(22.dp)) {
@@ -55,10 +59,10 @@ public fun ThemeToggle(dark: Boolean, onClick: () -> Unit, mode: ThemeMode = The
             }
         }
     }
-    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+    DropdownMenu(expanded = menu, onDismissRequest = ::closeMenu) {
         ThemeMode.entries.forEach { choice ->
             val label = when (choice) { ThemeMode.System -> "跟随系统"; ThemeMode.Light -> "浅色"; ThemeMode.Dark -> "深色" }
-            DropdownMenuItem(text = { Text((if (choice == mode) "✓ " else "") + label) }, onClick = { onSelect?.invoke(choice); menu = false },
+            DropdownMenuItem(text = { Text((if (choice == mode) "✓ " else "") + label) }, onClick = { onSelect?.invoke(choice); closeMenu() },
                 modifier = Modifier.semantics { contentDescription = "主题：$label"; role = Role.Button })
         }
     }
