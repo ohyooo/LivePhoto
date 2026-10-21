@@ -262,7 +262,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 }
                 Box(Modifier.fillMaxSize().offset { if (page == 1) IntOffset.Zero else IntOffset(windowWidth, 0) }
                     .then(if (page != 1) Modifier.clearAndSetSemantics { } else Modifier)) {
-                    PhotoAnalysisPanel(platform, !locked && page == 1) { analysisBusy = it }
+                    PhotoAnalysisPanel(platform, !locked) { analysisBusy = it }
                 }
             }
         }
