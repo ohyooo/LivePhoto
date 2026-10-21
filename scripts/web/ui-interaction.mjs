@@ -99,7 +99,11 @@ export function composeDriver(page,viewport) {
     if(!focused)throw Error('Browser text editor did not focus: '+selector+'; '+JSON.stringify(await focusState()));
     // Replace the selected text directly, without deleting the browser's backing edit host first.
     await page.keyboard.press('ControlOrMeta+A');
+    // Compose processes shortcuts at its next animation-frame checkpoint. Typing
+    // immediately can shorten the DOM text before the old selection is applied.
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
     await page.keyboard.type(value,{delay:60});
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
     await page.keyboard.press('Tab');
     // Wasm paints the edited value before its accessibility mirror catches up.
     for(let attempt=0;attempt<30;attempt++){
