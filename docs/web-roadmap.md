@@ -41,7 +41,7 @@
 
 - [ ] 不移动 EXIF 的固定长度 XMP 槽位优化及独立保留证明。当前 Core 对 XMP 调整会移动未验证 EXIF 的布局返回 `UNSAFE_METADATA_REWRITE`，Web 保留此拒绝，不删除 EXIF 或增加丢失授权。新建 OPPO 文件转 Google 的两个方向受此限制；同目标原样复制与无此布局依赖的转换分开验证。
 - [ ] 独立核验 OPPO 显式次级 `Padding="0"` 的修复边界。当前默认新建布局含此字段，现有 Core Repair 刻意不接受；Web 返回 `REPAIR_AMBIGUOUS` 且无输出，不能把可创建误写为可修复，也不在适配层移除字段绕过。
-- [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。当前不是任意大文件流式实现。
+- [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。第一步已完成：Wasm 界面的只读“检查照片”通过 `BinarySource` 按需读取 `Blob.slice`，单次切片最多 64 KiB，不预先加载整份输入；32 MiB 输入限额不变。源码 `4ebf20c` 的 [Web CI 39645751830](https://github.com/ohyooo/LivePhoto/actions/runs/39645751830) 全部 32 个 job 成功，两尺寸真实浏览器验证零整文件读取、超预算零切片和结构化读取错误。64 KiB 仅是适配器单次读取上限，不是 Core 的总内存上限。生成、提取等其它操作与独立 JS 功能库尚未迁移，UI 后台 Worker 也未完成；不能称任意大文件流式或零拷贝实现。
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。

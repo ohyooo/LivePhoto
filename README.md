@@ -680,6 +680,8 @@ Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 
+Wasm 界面的只读“检查照片”现通过 `BinarySource` 按需读取 `Blob.slice`，不预先加载整份输入；单次读取最多 64 KiB，输入仍限 32 MiB。`4ebf20c` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39645751830) 全部 32 个 job 通过，包含两尺寸的分块读取、超限前拒绝和 IO 错误检查。其它操作及独立 JS 库仍使用原有有界内存入口；这不是总内存仅 64 KiB、任意大文件、零拷贝或 UI 后台 Worker 的承诺。
+
 已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。部分 OPPO 文件修改时间字段长度会移动未经验证的 EXIF，因此保留 `UNSAFE_METADATA_REWRITE` 拒绝，不输出、不删除 EXIF 绕过；不是全部可创建文件都能修改关键时间。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
 
 ### 诊断日志
