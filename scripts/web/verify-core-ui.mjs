@@ -150,6 +150,8 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.click('重新封装');await status(/封装失败.*CAPABILITY_UNSUPPORTED/s);
       check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-mono\.mp4/).count()===1);
       await choose(coreSource);
+      // The native video can become ready before Compose's accessibility mirror updates.
+      await page.locator('#player-edit-status').waitFor({state:'detached',timeout:5000});
       check(size+':core-reselection-clears-status',await page.locator('#player-edit-status').count()===0);
       let release;
       holdEngine=new Promise(resolve=>{release=resolve;});
