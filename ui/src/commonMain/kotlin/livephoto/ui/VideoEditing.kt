@@ -2,6 +2,8 @@ package livephoto.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -56,6 +58,7 @@ public class VideoEditingState {
     public var trimOpen by mutableStateOf(false)
     public var toolsOpen by mutableStateOf(false)
     public var coverOpen by mutableStateOf(false)
+    internal var coverFocusRequest by mutableIntStateOf(0)
     public var coverPosition by mutableDoubleStateOf(0.0)
     public var coverPreview by mutableStateOf<String?>(null)
     public var status by mutableStateOf("")
@@ -88,6 +91,10 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     platform: LivePhotoUiPlatform) {
     val playback by editor.playback
     val scope = rememberCoroutineScope()
+    val coverFocus = remember { BringIntoViewRequester() }
+    LaunchedEffect(state.coverFocusRequest) {
+        if (state.coverFocusRequest > 0) { withFrameNanos { }; coverFocus.bringIntoView() }
+    }
     var thumbnails by remember(editor) { mutableStateOf<List<String>>(emptyList()) }
     var thumbnailError by remember(editor) { mutableStateOf<String?>(null) }
     val enabled = !parentBusy && !state.working && playback.ready
@@ -217,6 +224,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             }
             HorizontalDivider()
             val confirmed = confirmedTime?.let { mediaClock(it.value.toDouble() / it.timescale.toDouble()) }
+            Column(Modifier.bringIntoViewRequester(coverFocus)) {
             Disclosure("封面位置", coverWarning ?: confirmed?.let { "已确认 · $it" } ?: if (hasImage) "使用所选图片" else "尚未确认封面", state.coverOpen,
                 { state.coverOpen = !state.coverOpen; if (state.coverOpen) state.coverPosition = playback.current }) {
                 MediaSeekBar(state.coverPosition, playback.duration, enabled, "封面位置",
@@ -226,6 +234,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 state.coverPreview?.let { preview(it, Modifier.fillMaxWidth().height(160.dp)) }
                 Text("仅预览，尚未替换封面。", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = { run(CoreMediaAction.ExtractFrame) }, enabled = enabled && !state.capturing, shape = ControlShape) { Text("使用当前画面作为封面") }
+            }
             }
             coverWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (state.pendingTrim) Text("选段尚未应用；请应用裁剪或重置选段后生成。", color = MaterialTheme.colorScheme.error)

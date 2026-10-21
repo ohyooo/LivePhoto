@@ -76,7 +76,12 @@ export function composeDriver(page,viewport) {
       const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65);await page.waitForTimeout(100);
     }
     await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('Backspace');await page.keyboard.type(value,{delay:30});
-    await page.keyboard.press('Tab');await page.waitForTimeout(150);
+    await page.keyboard.press('Tab');
+    // Wasm paints the edited value before its accessibility mirror catches up.
+    for(let attempt=0;attempt<30;attempt++){
+      if((await field.textContent()).includes(value))return;
+      await page.waitForTimeout(100);
+    }
     if(!(await field.textContent()).includes(value))throw Error('Text did not reach Compose field: '+selector+'; rendered='+await field.textContent()+'; focus='+await page.evaluate(()=>({tag:document.activeElement?.tagName,shadow:document.activeElement?.shadowRoot?.activeElement?.outerHTML})));
   };
   const drag=async(locator,from,to,vertical=false,whileHeld=null,minHeight=1)=>{

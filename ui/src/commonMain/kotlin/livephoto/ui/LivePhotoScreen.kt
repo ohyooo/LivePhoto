@@ -210,7 +210,9 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                             modifier = Modifier.testTag(if (isVideo) "video-selection" else "image-selection"))
                         if (isVideo && playback?.ready == true) Text("${mediaClock(playback.duration)} · ${playback.width.toInt()} × ${playback.height.toInt()}", style = MaterialTheme.typography.bodySmall)
                     }
-                    if (editor != null) TextButton(onClick = { editing.coverOpen = true; editing.coverPosition = editor.playback.value.current }, enabled = !locked) { Text("从视频选封面") }
+                    if (editor != null) TextButton(onClick = {
+                        editing.coverOpen = true; editing.coverPosition = editor.playback.value.current; editing.coverFocusRequest++
+                    }, enabled = !locked) { Text("从视频选封面") }
                     Text("参与生成：${formatMediaSize(totalSize)} / 32 MiB", Modifier.testTag("input-total"), style = MaterialTheme.typography.bodySmall)
                     Text("不修改原片。JPEG＋已支持配置的 MP4；可播放不等于可生成。", style = MaterialTheme.typography.bodySmall)
                 }
