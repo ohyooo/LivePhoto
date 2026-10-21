@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -30,7 +31,7 @@ import kotlinx.coroutines.launch
 import livephoto.core.*
 
 private data class InputSnapshot(val image: String?, val video: String?, val profile: Int)
-private data class CreationReport(val input: InputSnapshot, val text: String, val failed: Boolean)
+private data class CreationReport(val input: InputSnapshot, val text: String, val failed: Boolean, val outputName: String? = null)
 private val ProfileNames = listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1")
 
 @Composable
@@ -108,7 +109,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                             operation.preservation.records.forEach { append("${it.guarantee}: ${it.outcome}\n") }
                             operation.preservation.changes.forEach { append("变化：${it.selector}\n") }
                             append("默认 BestEffortWithReport，不保证全部 metadata 无损。生成成功不等于手机相册兼容。")
-                        }, false)
+                        }, false, operation.output.assets.singleOrNull()?.recommendedName)
                     }
                     is CoreResult.Failure -> CreationReport(snapshot, formatCoreFailure(response.error, imageName, videoName), true)
                 }
@@ -231,7 +232,9 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 result?.let { report ->
                     val stale = report.input != InputSnapshot(image, video, profile)
                     SectionCard(if (stale) "上次结果 · 输入已变化" else "本次结果", Modifier.bringIntoViewRequester(resultFocus).testTag("result-card")) {
-                        Text(if (report.failed) "生成失败" else "已生成", color = if (report.failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                        Text(if (report.failed) "生成失败" else "已生成", color = if (report.failed) MaterialTheme.colorScheme.error
+                            else if (darkTheme) Color(0xff4ade80) else Color(0xff15803d))
+                        report.outputName?.let { Text(it, Modifier.testTag("result-file-name")) }
                         Text("图片：${report.input.image?.let { if (it == image) imageInfo?.displayName else null } ?: "本次操作所选图片"}；目标：${ProfileNames[report.input.profile]}", style = MaterialTheme.typography.bodySmall)
                         if (!report.failed) Text("已发起下载，实际保存状态请在浏览器中确认。")
                         if (!report.failed && platform.hasResultPreview) {

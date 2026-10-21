@@ -294,9 +294,10 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     val asset = result.value.output.assets.single()
                     val blob = outputBlob(output.committedAssets().getValue(asset.id).toByteArray(), asset.mime)
                     lastResult = blob to movie
-                    downloadBlob(blob, "LivePhoto-${target.protocol.value}.jpg")
+                    val outputName = "LivePhoto-${target.protocol.value}.jpg"
+                    downloadBlob(blob, outputName)
                     val operation = result.value.copy(output = MediaOutput(
-                        listOf(asset.copy(readableSource = null, accessReference = "browser-download:${asset.id.value}")), result.value.output.receipt))
+                        listOf(asset.copy(recommendedName = outputName, readableSource = null, accessReference = "browser-download:${asset.id.value}")), result.value.output.receipt))
                     CoreResult.Success(CreatedPhoto(operation))
                 }
             }

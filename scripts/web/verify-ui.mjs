@@ -149,7 +149,8 @@ try {
     const notCopied=await page.evaluate(()=>navigator.clipboard.readText())==='not-automatically-copied';
     await driver.click('复制报告');await text('已复制').waitFor({state:'attached'});
     const copied=await page.evaluate(()=>navigator.clipboard.readText());
-    check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1&&notCopied&&copied.includes('Core 验证：')&&copied.includes('SHA-256：'));
+    check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1&&notCopied&&copied.includes('Core 验证：')&&copied.includes('SHA-256：')&&
+      await page.locator('#result-file-name').textContent()==='LivePhoto-google.microvideo.v1.jpg');
     await click('按住预览生成结果');
     const preview=page.getByRole('button',{name:'按住预览生成结果',exact:true});
     const previewBounds=await preview.boundingBox();

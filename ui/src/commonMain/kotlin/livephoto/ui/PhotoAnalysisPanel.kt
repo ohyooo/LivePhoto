@@ -57,7 +57,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
             SectionCard("选择已有动态照片") {
             Text("已有照片单文件上限 32 MiB，不修改原片。")
             Text("选择已有动态照片或普通照片。独立于新建素材；选择文件后不会自动执行处理。")
-            OutlinedButton(onClick = { picker() }, enabled = active && !working,
+            OutlinedButton(onClick = { picker() }, enabled = active && !working, shape = ControlShape,
                 modifier = Modifier.fillMaxWidth().testTag("select-analysis").semantics {
                     stateDescription = if (active && !working) "可以选择文件" else "处理中，暂不可选择文件"
                 }) {
@@ -97,7 +97,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                             report = "检查未完成：${error.message?.take(2000) ?: "未知异常"}\n未修改输入、未生成文件。请重新选择文件。"
                         } finally { working = false; onBusy(false) }
                     }
-                }, enabled = active && !working && reference != null,
+                }, enabled = active && !working && reference != null, shape = ControlShape,
                     modifier = Modifier.fillMaxWidth().testTag("analyze")) {
                     Text(if (working && !extracting && !splitting && !converting && !repairing && !settingKey) "正在检查…" else "开始检查（只读）")
                 }
@@ -119,7 +119,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                                 exportReport = "提取或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查下载记录或相册，避免重复保存。"
                             } finally { working = false; extracting = false; onBusy(false) }
                         }
-                    }, enabled = active && !working && reference != null,
+                    }, enabled = active && !working && reference != null, shape = ControlShape,
                         modifier = Modifier.fillMaxWidth().testTag("extract-video")) {
                         Text(if (working && extracting) "正在提取…" else "提取原始视频")
                     }
