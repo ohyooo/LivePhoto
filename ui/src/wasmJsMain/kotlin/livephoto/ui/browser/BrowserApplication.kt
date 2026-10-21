@@ -187,7 +187,10 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Photo analysis input exceeds 32 MiB"))
         val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        return analyzeSelectedPhoto(core, browserBytes(file), Cancellation { job?.isActive == false })
+        val source = BrowserBlobSource(file, SourceId("browser-analysis:$reference"))
+        try {
+            return analyzeSelectedPhoto(core, source, Cancellation { job?.isActive == false })
+        } finally { source.close() }
     }
 
     override suspend fun extractVideo(reference: String): CoreResult<ExtractedVideo> {

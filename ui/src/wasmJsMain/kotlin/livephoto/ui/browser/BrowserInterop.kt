@@ -56,6 +56,8 @@ internal fun browserMediaReady(): Promise<BrowserMedia> =
 internal fun browserFont(): Promise<ArrayBuffer> =
     js("fetch('fonts/NotoSansSC-Regular.otf').then(response => { if (!response.ok) throw new Error('Bundled font unavailable'); return response.arrayBuffer(); })")
 internal fun browserFileBytes(file: Blob): Promise<ArrayBuffer> = js("file.arrayBuffer()")
+internal fun browserFileRangeBytes(file: Blob, start: Double, end: Double): Promise<ArrayBuffer> =
+    js("file.slice(start, end).arrayBuffer()")
 internal fun browserFileSize(file: Blob): Double = js("file.size")
 internal fun browserByte(values: Int8Array, index: Int): Byte = js("values[index]")
 internal fun browserSetByte(values: Int8Array, index: Int, value: Byte): Unit = js("{ values[index] = value; }")

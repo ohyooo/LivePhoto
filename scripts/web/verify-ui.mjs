@@ -200,6 +200,26 @@ try {
     await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
     if (scenario === 'analysis') {
     const downloadsBeforeAnalysis=downloads;
+    await page.evaluate(()=>{
+      const slice=Blob.prototype.slice;
+      globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
+      // Fail if this UI path regresses to eagerly loading a selected File.
+      File.prototype.arrayBuffer=function(){
+        globalThis.analysisIo.fullReads++;
+        return Promise.reject(Error('Analysis must read bounded Blob slices'));
+      };
+      Blob.prototype.slice=function(...args){
+        const part=slice.apply(this,args);
+        if(this instanceof File){
+          globalThis.analysisIo.slices++;
+          globalThis.analysisIo.maxSlice=Math.max(globalThis.analysisIo.maxSlice,part.size);
+          if(this.name==='unreadable.jpg')Object.defineProperty(part,'arrayBuffer',{
+            value:()=>Promise.reject(new DOMException('Synthetic read failure','NotReadableError')),
+          });
+        }
+        return part;
+      };
+    });
     for(const {target,output} of analysisInputs) {
       const report=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       check(label+':analysis-live-'+target,report.includes('识别结果：Live')&&report.includes('首选协议：'+target)&&
@@ -216,9 +236,14 @@ try {
     const unknown=await analyze({name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])},/只读检查完成/);
     check(label+':analysis-unknown-not-nonlive',unknown.includes('识别结果：Unknown')&&!unknown.includes('识别结果：NonLive'));
     const broken=await analyze({name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])},/检查失败/);
-    check(label+':analysis-malformed-error-not-nonlive',broken.includes('错误码：')&&broken.includes('阶段：')&&broken.includes('检查失败不等于普通照片'));
+    const unreadable=await analyze({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,217])},/检查失败/);
+    check(label+':analysis-malformed-error-not-nonlive',broken.includes('错误码：')&&broken.includes('阶段：')&&broken.includes('检查失败不等于普通照片')&&
+      unreadable.includes('IO_READ_FAILED')&&unreadable.includes('阶段：Read')&&!unreadable.includes('识别结果：NonLive'));
+    const slicesBeforeBudget=await page.evaluate(()=>globalThis.analysisIo.slices);
     const budget=await analyze(oversized,/检查失败/);
-    check(label+':analysis-budget-before-parse',budget.includes('RESOURCE_LIMIT_EXCEEDED')&&budget.includes('阶段：Read'));
+    const io=await page.evaluate(()=>globalThis.analysisIo);
+    check(label+':analysis-budget-before-parse',budget.includes('RESOURCE_LIMIT_EXCEEDED')&&budget.includes('阶段：Read')&&
+      io.slices===slicesBeforeBudget&&io.slices>0&&io.maxSlice<=64*1024&&io.fullReads===0);
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
     check(label+':analysis-cancel-keeps-report',await driver.report(text(/检查失败/))===budget&&await text('待检查文件：oversized.jpg').count()===1);
     check(label+':analysis-does-not-alter-create-state',downloads===downloadsBeforeAnalysis&&

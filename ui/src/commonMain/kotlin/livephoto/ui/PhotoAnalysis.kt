@@ -15,10 +15,24 @@ public suspend fun analyzeSelectedPhoto(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Photo analysis input exceeds 32 MiB"))
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-analysis"))
     try {
-        return core.analyze(AnalyzeRequest(SourceSet.Single(source),
-            layers = listOf(Layer.Structure, Layer.Protocol, Layer.Media),
-            context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 0u), cancellation = cancellation)))
+        return analyzeSelectedPhoto(core, source, cancellation)
     } finally { source.close() }
+}
+
+/** Borrowed random-access input; the adapter retains ownership and closes it. */
+public suspend fun analyzeSelectedPhoto(
+    core: LivePhotoCore,
+    source: BinarySource,
+    cancellation: Cancellation? = null,
+): CoreResult<AnalysisResult> {
+    when (val size = source.size()) {
+        is CoreResult.Failure -> return size
+        is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Photo analysis input exceeds 32 MiB"))
+    }
+    return core.analyze(AnalyzeRequest(SourceSet.Single(source),
+        layers = listOf(Layer.Structure, Layer.Protocol, Layer.Media),
+        context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 0u), cancellation = cancellation)))
 }
 
 /** UI presentation only. Keep unknown/zero, coverage and conditional capability distinct. */
