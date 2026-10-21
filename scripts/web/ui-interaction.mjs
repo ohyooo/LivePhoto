@@ -81,9 +81,15 @@ export function composeDriver(page,viewport) {
   };
   const typeField=async(selector,value)=>{
     const field=page.locator(selector);
+    const focusState=()=>page.evaluate(()=>{
+      let active=document.activeElement;
+      while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
+      return {tag:active?.tagName,id:active?.id,editable:active?.isContentEditable,text:active?.textContent,value:active?.value};
+    });
     let focused=false;
     for(let attempt=0;attempt<3&&!focused;attempt++){
-      const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65);
+      const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65,{delay:60});
+      await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
       focused=await page.waitForFunction(()=>{
         let active=document.activeElement;
         while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
@@ -91,9 +97,13 @@ export function composeDriver(page,viewport) {
       },undefined,{timeout:1000}).then(()=>true,()=>false);
     }
     if(!focused)throw Error('Browser text editor did not focus: '+selector);
+    const before=await focusState();
     await page.keyboard.press('ControlOrMeta+A');
     await page.evaluate(()=>new Promise(r=>requestAnimationFrame(r)));
-    await page.keyboard.press('Backspace');await page.keyboard.type(value,{delay:60});
+    await page.keyboard.press('Backspace');
+    for(let attempt=0;attempt<30&&(await field.textContent())!=='';attempt++)await page.waitForTimeout(100);
+    if((await field.textContent())!=='')throw Error('Backspace did not clear '+selector+'; rendered='+await field.textContent()+'; focus='+JSON.stringify({before,after:await focusState()}));
+    await page.keyboard.type(value,{delay:60});
     await page.keyboard.press('Tab');
     // Wasm paints the edited value before its accessibility mirror catches up.
     for(let attempt=0;attempt<30;attempt++){
