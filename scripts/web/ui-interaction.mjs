@@ -46,6 +46,9 @@ export function composeDriver(page,viewport) {
       // The visual popup exits before its semantic mirror is refreshed. Give
       // the exit animation its frames, then resume real keyboard navigation.
       await page.waitForTimeout(250);
+      // Return browser focus from the removed popup to the page canvas using
+      // the non-interactive application title, not an app handler or DOM click.
+      await page.mouse.click(100,24);
       await page.keyboard.press('Tab');
       await locator.waitFor({state:'detached'});
     }
