@@ -121,10 +121,18 @@ jobs:
           retention-days: 14
 
   common:
-    name: Test Kotlin common protocol
+    name: Test Kotlin common (${{ matrix.runtime }})
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: js
+            prefix: web-common
+          - runtime: wasmJs
+            prefix: web-wasm-common
     env:
       GRADLE_OPTS: -Dorg.gradle.project.livephoto.web=true
     steps:
@@ -163,25 +171,15 @@ jobs:
           restore-keys: |
             web-gradle-tasks-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}-
 
-      - name: Execute unchanged common Kotlin protocol tests in Chrome
+      - name: Execute common Kotlin tests for this runtime in Chrome
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew :verifyWebBuild :shared:jsBrowserTest --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-common.log
+          ./gradlew :verifyWebBuild :shared:${{ matrix.runtime }}BrowserTest --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/${{ matrix.prefix }}.log
 
       - name: Verify all declared cases executed without skipping
         shell: pwsh
-        run: ./scripts/verify-web-common-evidence.ps1
-
-      - name: Execute the same common Kotlin tests as Wasm in Chrome
-        shell: bash
-        run: |
-          set -o pipefail
-          ./gradlew :verifyWebBuild :shared:wasmJsBrowserTest --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-wasm-common.log
-
-      - name: Verify every Wasm test executed without skipping
-        shell: pwsh
-        run: ./scripts/verify-web-common-evidence.ps1 -Target wasmJs
+        run: ./scripts/verify-web-common-evidence.ps1 -Target '${{ matrix.runtime }}'
 
       - name: Collect raw common test diagnostics
         if: always()
@@ -198,7 +196,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: web-test-report-common-${{ github.run_id }}
+          name: web-test-report-common-${{ matrix.runtime }}-${{ github.run_id }}
           overwrite: true
           path: |
             ci-output/web-common.log
@@ -211,82 +209,47 @@ jobs:
           retention-days: 1
 
   test:
-    name: Test Web ${{ matrix.kind }}
+    name: Test Web ${{ matrix.suite }} (${{ matrix.part }})
     needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - kind: protocol
-            script: verify-browser
-            log: web-browser.log
-            evidence: web-browser-evidence.json
-          - kind: media
-            script: verify-media
-            log: web-media.log
-            evidence: web-media-evidence.json
-          - kind: player
-            script: verify-player
-            log: web-player.log
-            evidence: web-player-evidence.json
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.build.outputs.artifact }}
-          path: ci-output
-
-      - name: Verify exact compiled inputs and prepare API path
-        run: node scripts/web/verify-build.mjs
-
-      - uses: ./.github/actions/setup-web-tests
-
-      - name: Test browser-following theme and real toggle rendering
-        if: ${{ matrix.kind == 'player' }}
-        shell: bash
-        run: |
-          set -o pipefail
-          node scripts/web/verify-theme.mjs 2>&1 | tee ci-output/web-theme.log
-
-      - name: Run ${{ matrix.kind }} in real Chromium
-        shell: bash
-        run: |
-          set -o pipefail
-          node scripts/web/${{ matrix.script }}.mjs 2>&1 | tee ci-output/${{ matrix.log }}
-
-      - name: Preserve independent test evidence and diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          # Failed-job reruns replace only their own report, retaining siblings.
-          name: web-test-report-${{ matrix.kind }}-${{ github.run_id }}
-          overwrite: true
-          path: |
-            ci-output/${{ matrix.log }}
-            ci-output/${{ matrix.evidence }}
-            ci-output/web-theme.log
-            ci-output/web-theme-evidence.json
-            ci-output/web-ui-*.png
-            ci-output/web-ui-failure*.html
-            ci-output/web-ui-failure-a11y.txt
-            ci-output/web-ui-player-failure-a11y.txt
-          if-no-files-found: warn
-          retention-days: 1
+          - {suite: browser, part: main}
+          - {suite: browser, part: worker}
+          - {suite: media, part: main}
+          - {suite: media, part: worker}
+          - {suite: media, part: mobile}
+          - {suite: media, part: wide}
+          - {suite: theme, part: mobile}
+          - {suite: theme, part: wide}
+          - {suite: player, part: mobile-landscape}
+          - {suite: player, part: mobile-portrait}
+          - {suite: player, part: mobile-square}
+          - {suite: player, part: wide-landscape}
+          - {suite: player, part: wide-portrait}
+          - {suite: player, part: wide-square}
+    uses: ./.github/workflows/web-browser-tests.yml
+    with:
+      artifact: ${{ needs.build.outputs.artifact }}
+      suite: ${{ matrix.suite }}
+      part: ${{ matrix.part }}
 
   ui:
-    name: Test Web UI (${{ matrix.viewport }})
+    name: Test Web UI (${{ matrix.scenario }}, ${{ matrix.viewport }})
     needs: build
     strategy:
       fail-fast: false
       matrix:
         viewport: [mobile, wide]
-    uses: ./.github/workflows/web-ui-tests.yml
+        scenario: [create, analysis, extract, split, convert, repair, key]
+    uses: ./.github/workflows/web-browser-tests.yml
     with:
       artifact: ${{ needs.build.outputs.artifact }}
+      suite: ui
+      part: ${{ matrix.scenario }}-${{ matrix.viewport }}
       viewport: ${{ matrix.viewport }}
+      scenario: ${{ matrix.scenario }}
 
   publish:
     name: Collect reports and publish tested outputs
@@ -311,9 +274,9 @@ jobs:
           merge-multiple: true
           path: ci-output
 
-      - name: Merge and verify both complete UI viewport reports
+      - name: Merge and verify every independent scenario report
         if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
-        run: node scripts/web/merge-ui-evidence.mjs
+        run: node scripts/web/merge-web-evidence.mjs
 
       - name: Verify source identity and complete independent evidence
         if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
@@ -372,10 +335,8 @@ jobs:
             ci-output/web-ui-browser.log
             ci-output/web-ui-package-evidence.json
             ci-output/web-ui-browser-evidence.json
-            ci-output/web-ui-browser-mobile.log
-            ci-output/web-ui-browser-wide.log
-            ci-output/web-ui-browser-evidence-mobile.json
-            ci-output/web-ui-browser-evidence-wide.json
+            ci-output/shards/*.json
+            ci-output/shards/*.log
             ci-output/web-media.log
             ci-output/web-media-evidence.json
             ci-output/web-player.log

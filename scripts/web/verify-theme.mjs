@@ -6,6 +6,8 @@ import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {composeDriver} from './ui-interaction.mjs';
 
+const part=process.env.LIVEPHOTO_TEST_PART;
+if(!['mobile','wide'].includes(part))throw Error('Select theme viewport');
 const root=resolve('ci-output/web-ui'),fixtures=await mkdtemp(join(tmpdir(),'livephoto-theme-'));
 if(!process.env.LIVEPHOTO_FFMPEG)throw Error('Synthetic fixture generator required');
 const movie=join(fixtures,'theme.mp4');
@@ -22,6 +24,7 @@ let lastPage;
 const check=(name,ok)=>{if(!ok)throw Error(name);checks.push(name);};
 try {
   for(const [size,viewport] of [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]) {
+    if(size!==part)continue;
     const context=await browser.newContext({viewport,colorScheme:'dark',serviceWorkers:'block'});
     await context.route('**/*',r=>r.request().url().startsWith(origin+'/')?r.continue():r.abort());
     const page=await context.newPage();lastPage=page;page.setDefaultTimeout(30000);
@@ -60,12 +63,12 @@ try {
     check(size+':reload-follows-browser-again',await theme('light')&&errors.length===0);
     await context.close();
   }
-  if(checks.length!==12||new Set(checks).size!==12)throw Error('Incomplete theme evidence');
-  await writeFile('ci-output/web-theme-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'browser-preference-shared-compose-real-pixels-and-pointer-session-override'},null,2)+'\n');
-  console.log('WEB_THEME_EVIDENCE=SUCCESS 12 checks; real light/dark pixels, browser changes, top-right icon and media preservation');
+  if(checks.length!==6||new Set(checks).size!==6)throw Error('Incomplete theme evidence');
+  await writeFile(`ci-output/web-theme-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,scope:'browser-preference-shared-compose-real-pixels-and-pointer-session-override'},null,2)+'\n');
+  console.log(`WEB_THEME_EVIDENCE=SUCCESS 6 checks; ${part}`);
 }catch(error){
   if(lastPage&&!lastPage.isClosed()){
-    await lastPage.screenshot({path:'ci-output/web-ui-theme-failure.png'}).catch(()=>{});
+    await lastPage.screenshot({path:`ci-output/web-ui-theme-${part}-failure.png`}).catch(()=>{});
     console.error('Theme accessibility',await lastPage.locator('body').ariaSnapshot().catch(()=>''));}
   console.error('Theme failure after checks',checks,error);throw error;
 }finally{await browser.close();await new Promise(r=>server.close(r));}

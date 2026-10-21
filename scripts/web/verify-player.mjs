@@ -6,6 +6,8 @@ import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {composeDriver} from './ui-interaction.mjs';
 
+const part=process.env.LIVEPHOTO_TEST_PART;
+if(!/^(mobile|wide)-(landscape|portrait|square)$/.test(part||''))throw Error('Select player viewport and shape');
 const root=resolve('ci-output/web-ui'),fixtures=await mkdtemp(join(tmpdir(),'livephoto-player-'));
 const ffmpeg=process.env.LIVEPHOTO_FFMPEG;if(!ffmpeg)throw Error('Existing FFmpeg fixture generator required');
 const cases=[['landscape','320x180','30'],['portrait','180x320','30000/1001'],['square','160x160','30']];
@@ -18,8 +20,9 @@ const check=(name,valid)=>{if(!valid)throw Error(name);checks.push(name);};let l
 try {
   const ffprobe=join(dirname(ffmpeg),process.platform==='win32'?'ffprobe.exe':'ffprobe');
   const pts=JSON.parse(execFileSync(ffprobe,['-v','error','-select_streams','v:0','-show_entries','packet=pts_time','-of','json',join(fixtures,'square.mp4')],{timeout:30000})).packets.map(p=>Number(p.pts_time));
-  check('vfr-source-independently-confirmed',new Set(pts.slice(1).map((p,i)=>Math.round((p-pts[i])*1000))).size>1);
+  if(part==='mobile-square')check('vfr-source-independently-confirmed',new Set(pts.slice(1).map((p,i)=>Math.round((p-pts[i])*1000))).size>1);
   for(const [size,viewport] of [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]) for(const [shape] of cases) {
+    if(part!==size+'-'+shape)continue;
     const context=await browser.newContext({viewport,serviceWorkers:'block'});await context.route('**/*',r=>r.request().url().startsWith(origin+'/')?r.continue():r.abort());
     const page=await context.newPage();lastPage=page;page.setDefaultTimeout(30000);page.on('pageerror',error=>console.error('Player page error',String(error)));await page.goto(origin+'/livephoto/');await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
     const driver=composeDriver(page,viewport),label=size+':'+shape;
@@ -109,9 +112,9 @@ try {
     check(label+':range-handles-select-inner-segment',values.length===2&&values[0]>0&&values[0]<values[1]&&values[1]<await video.evaluate(v=>v.duration));
     if(shape==='landscape')await page.screenshot({path:`ci-output/web-ui-tools-${size}.png`});await context.close();
   }
-  if(checks.length!==91||new Set(checks).size!==91)throw Error('Incomplete player evidence');
-  await writeFile('ci-output/web-player-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),tests:checks.length,failures:0,checks,scope:'shared-kotlin-compose-controls-real-browser-pointer-keys-fullscreen-live-cover-preview'},null,2)+'\n');
-  console.log('WEB_PLAYER_EVIDENCE=SUCCESS 91 checks; actual shared Kotlin controls, optional range handles and live cover preview on two viewports');
+  if(checks.length!==(part==='mobile-square'?16:15)||new Set(checks).size!==checks.length)throw Error('Incomplete player evidence');
+  await writeFile(`ci-output/web-player-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,scope:'shared-kotlin-compose-controls-real-browser-pointer-keys-fullscreen-live-cover-preview'},null,2)+'\n');
+  console.log(`WEB_PLAYER_EVIDENCE=SUCCESS ${checks.length} checks; ${part}`);
 }catch(error){console.error('Player failure after checks:',checks,error);if(lastPage&&!lastPage.isClosed()){
   console.log('Failure layout',JSON.stringify(await lastPage.evaluate(()=>{
     const nodes=[];function visit(root){for(const element of root.querySelectorAll('*')){const r=element.getBoundingClientRect(),s=getComputedStyle(element);
@@ -119,5 +122,5 @@ try {
       if(element.shadowRoot)visit(element.shadowRoot);}}
     visit(document);return {fullscreen:!!document.fullscreenElement,scrollY,nodes};
   }).catch(()=>null)));
-  await lastPage.screenshot({path:'ci-output/web-ui-player-failure.png'}).catch(()=>{});await writeFile('ci-output/web-ui-player-failure-a11y.txt',await lastPage.locator('body').ariaSnapshot()).catch(()=>{});}throw error;}
+  await lastPage.screenshot({path:`ci-output/web-ui-player-${part}-failure.png`}).catch(()=>{});await writeFile(`ci-output/web-ui-player-${part}-failure-a11y.txt`,await lastPage.locator('body').ariaSnapshot()).catch(()=>{});}throw error;}
 finally{await browser.close();await new Promise(r=>server.close(r));}

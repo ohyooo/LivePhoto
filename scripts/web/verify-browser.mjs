@@ -6,6 +6,8 @@ import { resolve, sep, join, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 
+const part=process.env.LIVEPHOTO_TEST_PART;
+if(!['main','worker'].includes(part))throw Error('Select protocol context');
 const root = resolve('ci-output/web-library');
 const fixtures = await mkdtemp(join(tmpdir(), 'livephoto-web-'));
 const ffmpeg = process.env.LIVEPHOTO_FFMPEG;
@@ -40,7 +42,7 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(120000);
   await page.goto(origin);
-  const {checks, workerProof} = await page.evaluate(async () => {
+  const {checks, workerProof} = await page.evaluate(async part => {
     const api = await import('/livephoto.mjs');
     const image = new File([await (await fetch('/fixture-image')).blob()], 'misleading.mp4', { type: 'application/octet-stream' });
     const video = new File([await (await fetch('/fixture-video')).blob()], 'misleading.jpg', { type: 'application/octet-stream' });
@@ -48,6 +50,7 @@ try {
     const beforeImage = await digest(image), beforeVideo = await digest(video);
     const checks = [];
     const check = (name, condition, details = '') => { if (!condition) throw Error(name + ': ' + details); checks.push(name); };
+    if(part==='main'){
     let brokenV1;
     // Independently corrupt one owned length attribute in-place; do not touch JPEG
     // segment sizes, image coding, ordinary metadata or the complete video suffix.
@@ -224,6 +227,9 @@ try {
     let missingTarget = false;
     try { await api.convertLivePhoto(image); } catch(e) { missingTarget = e instanceof TypeError; }
     check('convert-target-required', missingTarget);
+    }
+    let workerProof;
+    if(part==='worker'){
     const workerResult = await new Promise((resolve, reject) => {
       const worker = new Worker('/worker.mjs', { type: 'module' });
       const timeout = setTimeout(() => { worker.terminate(); reject(Error('Worker timeout')); }, 120000);
@@ -234,19 +240,20 @@ try {
     check('module-worker-round-trip', workerResult.success && workerResult.tests === 42 && workerResult.failures === 0 &&
       workerResult.returnedVideo instanceof Blob && await digest(workerResult.returnedVideo) === beforeVideo &&
       workerResult.imageSha256 === beforeImage && workerResult.videoSha256 === beforeVideo, workerResult.message);
-    const {returnedVideo, ...workerProof} = workerResult;
+    const {returnedVideo, ...proof} = workerResult; workerProof=proof;
+    }
     return {checks, workerProof};
-  });
-  if (checks.length !== 70 || new Set(checks).size !== 70) throw new Error('Incomplete browser check count');
+  },part);
+  if (checks.length !== (part==='main'?69:1) || new Set(checks).size !== checks.length) throw new Error('Incomplete browser check count');
   const evidence = {
     commit: process.env.GITHUB_SHA, run: process.env.GITHUB_RUN_ID,
-    browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,
+    part, browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,
     worker: workerProof,
     imageSha256: createHash('sha256').update(image).digest('hex'),
     videoSha256: createHash('sha256').update(video).digest('hex'),
     scope: 'real-browser-production-js-library-synthetic-media-no-decoder-no-device-proof-no-ui',
   };
-  await writeFile('ci-output/web-browser-evidence.json', JSON.stringify(evidence, null, 2) + '\n');
+  await writeFile(`ci-output/web-browser-evidence-${part}.json`, JSON.stringify(evidence, null, 2) + '\n');
   console.log('WEB_BROWSER_EVIDENCE=SUCCESS ' + checks.length + ' checks; no source or generated media uploaded');
-  console.log('WEB_WORKER_EVIDENCE=SUCCESS 42 checks; all ten public APIs in a real module Worker; cross-thread Blob hash verified');
+  if(part==='worker')console.log('WEB_WORKER_EVIDENCE=SUCCESS 42 checks; all ten public APIs in a real module Worker; cross-thread Blob hash verified');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

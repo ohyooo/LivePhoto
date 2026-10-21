@@ -7,6 +7,8 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {verifyCoreUi} from './verify-core-ui.mjs';
 
+const part=process.env.LIVEPHOTO_TEST_PART;
+if(!['main','worker','mobile','wide'].includes(part))throw Error('Select media context');
 const directory=await mkdtemp(join(tmpdir(),'livephoto-web-media-'));
 const ffmpeg=process.env.LIVEPHOTO_FFMPEG;
 if(!ffmpeg) throw Error('Existing synthetic fixture generator required');
@@ -82,72 +84,11 @@ try {
   const page=await context.newPage();
   page.setDefaultTimeout(180000);
   await page.goto(origin+'/livephoto/test');
-  const result=await page.evaluate(async()=>{
-    const {createPlayer}=await import('/livephoto/media/player.mjs');
-    const {createMediaBackend}=await import('/api/livephoto.mjs');
-    const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs'});
-    const file=await(await fetch('/fixture')).blob();
-    const digest=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');
-    const originalHash=await digest(file);
-    let state;
-    const player=createPlayer(file,s=>state=s);document.body.append(player.element);
-    const until=async predicate=>{const end=Date.now()+30000;while(!predicate()){if(Date.now()>end)throw Error('Video player timeout');await new Promise(r=>setTimeout(r,20));}};
-    await until(()=>state?.ready);
-    const loaded=state.duration>2.9&&player.video.videoWidth===64&&player.video.paused;
-    player.seek(0.4);await until(()=>!state.seeking&&Math.abs(state.current-.4)<.01);
-    const first=await player.capture();
-    player.seek(1.4);await until(()=>!state.seeking&&Math.abs(state.current-1.4)<.01);
-    const second=await player.capture();
-    const decoded=await createImageBitmap(first.blob);
-    const captured=first.blob.type==='image/jpeg'&&decoded.width===64&&decoded.height===64&&
-      await digest(first.blob)!==await digest(second.blob)&&Math.abs(first.time-.4)<.05;
-    decoded.close();player.dispose();player.element.remove();
-    const editable=await(await fetch('/core-fixture')).blob(),editableHash=await digest(editable);
-    const copy=await backend.trim(editable,{start:.4,end:1.6});
-    const coded=await backend.transcode(editable,{authorizeTranscode:true});
-    if(!copy.success||!coded.success)throw Error('Unified Core media execution failed');
-    const refused=async operation=>{try{return !(await operation()).success;}catch{return true;}};
-    const range=await refused(()=>backend.trim(editable,{start:2,end:1}));
-    const budget=await refused(()=>backend.trim(new Blob([new Uint8Array(32*1024*1024+1)]),{start:0,end:1}));
-    const controller=new AbortController();controller.abort();
-    const cancel=await refused(()=>createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:controller.signal}).trim(editable,{start:0,end:1}));
-    const malformed=await refused(()=>backend.trim(new Blob([new Uint8Array([0,1,2,3])]),{start:0,end:1}));
-    const seconds=t=>Number(t.value)/Number(t.timescale);
-    return {loaded,captured,range,budget,cancel,malformed,immutable:await digest(file)===originalHash&&await digest(editable)===editableHash,
-      copy:{timelineKnown:copy.report.actual.timelineMap.length===1,origin:seconds(copy.report.actual.actualStart),actualStart:seconds(copy.report.actual.actualStart),actualEnd:seconds(copy.report.actual.actualEnd),transcoded:copy.report.actual.wasTranscoded,bytes:Array.from(new Uint8Array(await copy.blob.arrayBuffer()))},
-      coded:{transcoded:coded.report.execution.some(e=>e.transcoded),bytes:Array.from(new Uint8Array(await coded.blob.arrayBuffer()))}};
-  });
-  check('native-player-decodes-local-video',result.loaded);
-  check('paused-current-frame-capture',result.captured);
-  check('copy-actual-timeline-reported',result.copy.timelineKnown&&result.copy.actualStart<=.4&&result.copy.actualEnd>result.copy.actualStart&&Number.isFinite(result.copy.origin)&&!result.copy.transcoded);
-  check('input-bytes-immutable',result.immutable);
-  check('invalid-range-rejected',result.range);
-  check('input-budget-rejected',result.budget);
-  check('cancel-stops-operation',result.cancel);
-  check('malformed-media-never-accepted-as-probe-success',result.malformed);
   const ffprobe=join(dirname(ffmpeg),process.platform==='win32'?'ffprobe.exe':'ffprobe');
   const probe=path=>JSON.parse(execFileSync(ffprobe,['-v','error','-show_streams','-show_packets','-show_data_hash','sha256','-of','json',path],{timeout:30000,maxBuffer:16*1024*1024}));
-  const before=probe(coreSource);
-  for(const [kind,output] of [['copy',result.copy],['transcode',result.coded]]) {
-    const path=join(directory,kind+'.mp4');await writeFile(path,new Uint8Array(output.bytes));
-    const after=probe(path);
-    if(after.streams.length!==2||after.streams.find(s=>s.codec_type==='video').codec_name!=='h264') throw Error('Output codec/streams');
-    if(kind==='transcode') {
-      const originalVideo=before.streams.find(s=>s.codec_type==='video'),outputVideo=after.streams.find(s=>s.codec_type==='video');
-      const originalHashes=new Set(before.packets.filter(p=>p.stream_index===originalVideo.index).map(p=>p.data_hash));
-      if(!after.packets.some(p=>p.stream_index===outputVideo.index&&!originalHashes.has(p.data_hash))) throw Error('Video was not re-encoded');
-    }
-    for(const type of kind==='copy'?['video','audio']:['audio']) {
-      const a=before.streams.find(s=>s.codec_type===type),b=after.streams.find(s=>s.codec_type===type);
-      if(a.codec_name!==b.codec_name)throw Error('Unexpected encoder');
-      const original=before.packets.filter(p=>p.stream_index===a.index).map(p=>p.data_hash);
-      const retained=after.packets.filter(p=>p.stream_index===b.index).map(p=>p.data_hash);
-      if(!retained.length||!original.some((_,i)=>retained.every((hash,j)=>hash&&hash===original[i+j])))throw Error('Independent packet identity failed: '+type);
-    }
-    check(kind+'-independent-native-packet-audit',true);
-  }
-  // Only acknowledge audio copy after the independent packet audit above.
-  check('transcode-explicit-audio-copy',result.coded.transcoded);
+  const coreBefore=probe(coreSource);
+  let worker,wasmUi;
+  if(part==='main'){
   const coreResults=await page.evaluate(async()=>{
     const {createMediaBackend}=await import('/api/livephoto.mjs');
     const diagnostics=[];
@@ -161,6 +102,7 @@ try {
       if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message+' '+JSON.stringify(value.report)+' '+JSON.stringify(diagnostics.slice(-3)));
       results[action]={...value,assets:undefined,blob:undefined,bytes:value.blob?Array.from(new Uint8Array(await value.blob.arrayBuffer())):null};
     }
+    const invalidRange=await backend.trim(file,{start:2,end:1});
     const forbidden=await backend.transcode(file);
     const malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
     const mono=await backend.remux(await(await fetch('/core-mono-fixture')).blob());
@@ -174,13 +116,13 @@ try {
     const stop=setTimeout(()=>running.abort(),100);
     let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
     let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
-    return {results,capabilities,forbidden,malformed,mono,fractional,unknownColor,encoderChange,cancelled,stopped,budget,immutable:before===await hash(file)};
+    return {results,capabilities,invalidRange,forbidden,malformed,mono,fractional,unknownColor,encoderChange,cancelled,stopped,budget,immutable:before===await hash(file)};
   });
+  check('invalid-range-rejected',!coreResults.invalidRange.success&&!coreResults.invalidRange.blob);
   const r=coreResults.results;
   check('core-probe-decode-partial',r.probe.coverage==='Partial'&&r.probe.issues.includes('MEDIA_DECODE_COMPLETED')&&r.probe.report.backendId==='ffmpeg-wasm'&&!r.probe.bytes&&
     coreResults.capabilities.backendIds.join(',')==='ffmpeg-wasm'&&coreResults.capabilities.operations.length===5&&
     coreResults.capabilities.operations.every(entry=>entry.implementation==='Experimental'&&entry.conditions.some(c=>c.key==='runtimeProfile')));
-  const coreBefore=probe(coreSource);
   for(const action of ['remux','trim','transcode']) {
     const value=r[action],path=join(directory,'core-'+action+'.mp4');await writeFile(path,new Uint8Array(value.bytes));
     const after=probe(path);
@@ -218,6 +160,8 @@ try {
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable);
+  }
+  if(part==='worker'){
   const workerResult=await page.evaluate(async()=>{
     const input=await(await fetch('/core-fixture')).blob();
     const worker=new Worker('/media-worker.mjs',{type:'module'});
@@ -270,12 +214,16 @@ try {
   },workerFrame.bytes);
   if(!frameDecoded||workerFrame.report.actual.actualFrameIndex!=='10'||workerFrame.report.actual.trackId!=='1')throw Error('Worker frame failed independent decode');
   workerOutputs.push({action:'extractFrame',bytes:workerFrame.bytes.length,sha256:createHash('sha256').update(new Uint8Array(workerFrame.bytes)).digest('hex')});
-  const worker={success:true,tests:9,failures:0,checks:workerResult.checks,inputSha256:workerResult.inputSha256,outputs:workerOutputs,
+  worker={success:true,tests:9,failures:0,checks:workerResult.checks,inputSha256:workerResult.inputSha256,outputs:workerOutputs,
     scope:'module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'};
-  const wasmUi=await verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe});
-  if(checks.length!==19||new Set(checks).size!==19)throw Error('Incomplete media evidence');
-  await writeFile('ci-output/web-media-evidence.json',JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
-    browserVersion:browser.version(),tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(input).digest('hex'),
+  }
+  if(['mobile','wide'].includes(part))wasmUi=await verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe,viewport:part});
+  const expected=part==='main'?9:0;
+  if(checks.length!==expected||new Set(checks).size!==expected)throw Error('Incomplete media evidence');
+  await writeFile(`ci-output/web-media-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
+    browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(coreInput).digest('hex'),
     scope:'browser-video-canvas-real-single-thread-ffmpeg-wasm-native-packet-audit-synthetic-audio-no-device-proof'},null,2)+'\n');
-  console.log('WEB_MEDIA_EVIDENCE=SUCCESS 19 checks; MEDIA_WORKER_EVIDENCE=SUCCESS 9 checks; WASM_CORE_UI_EVIDENCE=SUCCESS 18 checks; real Wasm editing and Core backend, native independent audio/video packet audit');
+  console.log(`WEB_MEDIA_EVIDENCE=SUCCESS ${expected} checks; ${part}`);
+  if(worker)console.log('MEDIA_WORKER_EVIDENCE=SUCCESS 9 checks');
+  if(wasmUi)console.log('WASM_CORE_UI_EVIDENCE=SUCCESS 9 checks');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

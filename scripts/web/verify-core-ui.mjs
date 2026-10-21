@@ -4,11 +4,12 @@ import {createHash} from 'node:crypto';
 import {composeDriver} from './ui-interaction.mjs';
 
 /** Real Compose/Wasm UI -> typed adapter -> Core -> Worker. JS Core is used only to audit downloads. */
-export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe}){
+export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe,viewport:onlyViewport}){
   const checks=[],outputs=[];
   const original=probe(coreSource),sourceHash=createHash('sha256').update(await readFile(coreSource)).digest('hex');
   const check=(name,valid)=>{if(!valid)throw Error(name);checks.push(name);};
   for(const [size,viewport] of [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]){
+    if(size!==onlyViewport)continue;
     const context=await browser.newContext({viewport,acceptDownloads:true,serviceWorkers:'block'});
     const page=await context.newPage();
     let engines=0,downloads=0,holdEngine=null;
@@ -156,6 +157,6 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
     }catch(error){await page.screenshot({path:`ci-output/web-ui-core-media-${size}-failure.png`});throw error;}
     finally{await context.close();}
   }
-  if(checks.length!==18||new Set(checks).size!==18||outputs.length!==8)throw Error('Incomplete Wasm Core UI proof');
-  return {success:true,tests:18,failures:0,checks,outputs,scope:'shared-compose-wasm-typed-core-media-real-pointer-native-packet-audit'};
+  if(checks.length!==9||new Set(checks).size!==9||outputs.length!==4)throw Error('Incomplete Wasm Core UI proof');
+  return {success:true,tests:9,failures:0,checks,outputs,scope:'shared-compose-wasm-typed-core-media-real-pointer-native-packet-audit'};
 }

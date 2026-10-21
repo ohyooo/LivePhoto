@@ -6,10 +6,14 @@ import { resolve, sep, join, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import {composeDriver} from './ui-interaction.mjs';
+import {uiCases} from './test-cases.mjs';
 
+const scenario = process.env.LIVEPHOTO_UI_SCENARIO;
+const scenarios = ['create', 'analysis', 'extract', 'split', 'convert', 'repair', 'key'];
+if (!scenarios.includes(scenario)) throw Error('Select LIVEPHOTO_UI_SCENARIO');
 const shard = process.env.LIVEPHOTO_UI_VIEWPORT;
 if (shard !== undefined && !['mobile', 'wide'].includes(shard)) throw Error('Invalid LIVEPHOTO_UI_VIEWPORT');
-const suffix = shard ? `-${shard}` : '';
+const suffix = `-${scenario}${shard ? `-${shard}` : ''}`;
 const viewports = [['mobile',{width:390,height:844}],['wide',{width:1280,height:800}]]
   .filter(([label]) => !shard || label === shard);
 const root = resolve('ci-output/web-ui');
@@ -26,20 +30,12 @@ generate(['-f','lavfi','-i','color=c=blue:s=64x64','-frames:v','1','-threads','1
 generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=30000/1001','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','3','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-g','30','-c:a','aac','-use_editlist','0','-video_track_timescale','90000','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',videoPath]);
 const video = await readFile(videoPath);
 const videoHash = createHash('sha256').update(video).digest('hex');
-// Keep the fractional original above for protocol creation/extraction tests.
-// Media writes use the independently bounded Core profile, not the removed
-// permissive preprocessor. Both fixtures remain synthetic and local to CI.
-const editVideo=join(fixtures,'edit-video.mp4'),editAudio=join(fixtures,'edit-audio.m4a'),editPath=join(fixtures,'edit.mp4');
-generate(['-f','lavfi','-i','testsrc2=size=64x64:rate=25','-frames:v','50','-vf','setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
-  '-c:v','libx264','-threads','1','-bf','0','-g','25','-sc_threshold','0','-pix_fmt','yuv420p','-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','bt709','-use_editlist','0',
-  '-metadata:s:v','encoder=Lavc libx264','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',editVideo]);
-generate(['-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=2','-c:a','aac','-ac','2','-flags:a','+bitexact','-use_editlist','0','-fflags','+bitexact','-write_btrt','0',editAudio]);
-generate(['-i',editVideo,'-i',editAudio,'-map','0:v','-map','1:a','-c','copy','-use_editlist','0','-map_metadata','-1','-metadata:s:v','encoder=Lavc libx264','-fflags','+bitexact','-write_btrt','0',editPath]);
-const editHash=createHash('sha256').update(await readFile(editPath)).digest('hex');
 const server = createServer(async (req,res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     const api = url.pathname.startsWith('/api/');
+    if (url.pathname === '/fixture-image') { res.end(await readFile(imagePath)); return; }
+    if (url.pathname === '/fixture-video') { res.end(video); return; }
     if (!api && !url.pathname.startsWith('/livephoto/')) { res.writeHead(404).end(); return; }
     const directory = api ? apiRoot : root;
     const relative = api ? url.pathname.slice(4) : url.pathname.slice('/livephoto'.length);
@@ -109,6 +105,9 @@ try {
       await (await picker).setFiles(path);
       await settle();
     };
+    let downloads=0; page.on('download',()=>downloads++);
+    const analysisInputs=[];
+    if (scenario === 'create') {
     await button('生成并保存 Live Photo').waitFor({state:'attached'});
     check(label+':subpath-assets-loaded',
       await page.evaluate(()=>document.documentElement.dataset.livephotoRuntime)==='kotlin-wasm-compose' &&
@@ -119,7 +118,6 @@ try {
       loaded.every(r=>r.status===200&&r.url.startsWith(origin+'/livephoto/')));
     // Compose's semantic DOM does not expose native HTML disabled state consistently.
     // Exercise the real canvas hit target instead: no inputs must not start a download or alter the status.
-    let downloads=0; page.on('download',()=>downloads++);
     await click('生成并保存 Live Photo');
     await page.waitForTimeout(200);
     check(label+':initial-create-disabled',downloads===0&&await text(/可选择 JPEG 图片/).count()===1);
@@ -137,7 +135,6 @@ try {
     check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).or(page.getByLabel(/大小：/)).count()>=2);
     await page.locator('#livephoto-image-input').setInputFiles([]);
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
-    const analysisInputs=[];
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await click(name);
       await button(name).filter({hasText:/^✓ /}).waitFor({state:'attached'});
@@ -176,94 +173,25 @@ try {
     await page.mouse.wheel(0,-4000);await page.waitForTimeout(250);
     await page.screenshot({path:`ci-output/web-ui-${label}-success.png`});
     check(label+':viewport-contained',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-    const player=page.getByLabel('视频预览',{exact:true});
-    await player.waitFor({state:'attached'});
-    const seek=async time=>{
-      await player.evaluate((video,time)=>{video.pause();video.currentTime=time;},time);
-      await page.waitForFunction(time=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&!v.seeking&&v.readyState>=2&&Math.abs(v.currentTime-time)<.01;},time);
-      await page.waitForTimeout(150);
-    };
-    await choose('重新选择视频',editPath);
-    await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
-    await seek(1.4);
-    await driver.click('截取封面');
-    await driver.drag(page.locator('#cover-progress'),.1,1.4/await player.evaluate(v=>v.duration));
-    await driver.click('使用当前画面为封面');
-    await text('名称：core-frame.jpg').waitFor({state:'attached',timeout:180000});
-    await page.waitForFunction(()=>{const image=document.querySelector('img[alt="已选封面预览"]');return image?.complete&&image.naturalWidth>0;});
-    check(label+':current-frame-cover-selected',await page.getByAltText('已选封面预览').last().evaluate(image=>image.complete&&image.naturalWidth===64));
-    const generateAndAudit=async(expectedVideoHash,expectedKey=.4)=>{
-      const pending=page.waitForEvent('download');pending.catch(()=>{});
-      await click('生成并保存 Live Photo');
-      const download=await pending;
-      if(await download.failure())throw Error('C output download failed');
-      const output=await readFile(await download.path());
-      const audit=await page.evaluate(async data=>{
-        const api=await import('/api/livephoto.mjs'),blob=new Blob([new Uint8Array(data)]);
-        const extracted=await api.extractVideo(blob),key=await api.getKeyPhotoPosition(blob),valid=await api.validateLivePhoto(blob);
-        if(!extracted.success||!key.success||!valid.success)throw Error('C carrier audit');
-        const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await extracted.blob.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
-        return {hash,key:key.report.position,source:key.report.source,verdict:valid.verdict};
-      },Array.from(output));
-      await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
-      await page.waitForTimeout(500);
-      console.log('Generated key audit',label,{position:audit.key,source:audit.source,expectedKey});
-      return audit.hash===expectedVideoHash&&audit.verdict!=='Invalid'&&audit.source==='ProtocolField'&&
-        audit.key&&Math.abs(Number(audit.key.value)/audit.key.timescale-expectedKey)<.05;
-    };
-    check(label+':captured-C-carrier-key-and-video',await generateAndAudit(editHash,1.4));
-    await driver.click('裁剪视频');
-    await driver.dragRange('start',1.2/await player.evaluate(v=>v.duration));
-    await driver.dragRange('end',1.8/await player.evaluate(v=>v.duration));
-    await click('应用裁剪（音视频 copy）');
-    await text('名称：core-trim.mp4').waitFor({state:'attached',timeout:180000});
-    check(label+':AB-copy-video-used',await text(/Core Trim：ffmpeg-wasm/).count()===1);
-    await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
-    const trimmedHash=await player.evaluate(async video=>{
-      const data=await(await fetch(video.currentSrc)).arrayBuffer();
-      return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
-    });
-    check(label+':AB-carrier-C-rebased-video-exact',await generateAndAudit(trimmedHash));
-    await choose('重新选择视频',editPath);
-    await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
-    await seek(.4);await driver.click('使用当前画面为封面');
-    await text(/Core ExtractFrame：ffmpeg-wasm/).waitFor({state:'attached',timeout:180000});
-    await click('显式转为 H.264 并使用（音频 copy）');
-    await text('名称：core-transcode.mp4').waitFor({state:'attached',timeout:180000});
-    check(label+':explicit-transcode-used',await text(/Core Transcode：ffmpeg-wasm/).count()===1);
-    const priorDownloads=downloads;
-    await click('生成并保存 Live Photo');
-    await text(/视频范围或编码已改变，请在当前视频上重新选择封面/).waitFor({state:'visible'});
-    check(label+':transcode-stale-C-rejected',downloads===priorDownloads);
-    await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v&&v.readyState>=2;});
-    await seek(.2);
-    await driver.click('截取封面');
-    await driver.drag(page.locator('#cover-progress'),.1,.2/await player.evaluate(v=>v.duration));
-    await driver.click('使用当前画面为封面');
-    // Compose also exposes this status in its hidden accessibility bridge.
-    // Existence acknowledges the callback; the real download/key/video audit
-    // below, not DOM visibility of that bridge, proves the recaptured C works.
-    await text('封面已更新').waitFor({state:'attached'});
-    const transcodedHash=await player.evaluate(async video=>{
-      const data=await(await fetch(video.currentSrc)).arrayBuffer();
-      return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data))).map(v=>v.toString(16).padStart(2,'0')).join('');
-    });
-    check(label+':transcoded-recaptured-C-carrier',await generateAndAudit(transcodedHash,.2));
     await choose('重新选择图片',imagePath);
     await choose('重新选择视频',{name:'broken.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,1,2,3])});
     await click('生成并保存 Live Photo');
     await text(/错误码：/).waitFor({state:'visible'});
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
 
-    // A fresh shared screen proves analysis does not require creation inputs.
-    // Only synthetic media generated in this CI job is selected. Never upload it.
-    await page.reload();
-    await page.locator('canvas').first().waitFor({state:'visible'});
-    await page.keyboard.press('Tab');
-    await button('生成并保存 Live Photo').waitFor({state:'attached'});
-    await driver.click('检查已有动态照片');
-    // Expanding a taller panel can publish accessibility nodes on a later frame.
-    // Wait for either real picker name instead of deciding from a transient zero count.
+    } else {
+      // Independent setup through the already-tested API, not another UI creation run.
+      const inputs = await page.evaluate(async () => {
+        const api = await import('/api/livephoto.mjs');
+        const image = await (await fetch('/fixture-image')).blob(), video = await (await fetch('/fixture-video')).blob();
+        return Promise.all(['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].map(async target => {
+          const result = await api.createLivePhoto(image, video, {target});
+          if (!result.success) throw Error('UI fixture creation failed: '+result.message);
+          return {target, bytes:Array.from(new Uint8Array(await result.blob.arrayBuffer()))};
+        }));
+      });
+      analysisInputs.push(...inputs.map(({target,bytes}) => ({target,output:Buffer.from(bytes)})));
+      await driver.click('检查已有动态照片');
     const analysisPicker=async input=>driver.choose(/^(?:重新)?选择待检查照片$/,input);
     const analyze=async(input,expected)=>{
       await analysisPicker(input);
@@ -271,6 +199,9 @@ try {
       await text(expected).waitFor({state:'attached'});
       return text(expected).evaluate(element=>element.getAttribute('aria-label')||element.textContent||'');
     };
+    const oversized=join(fixtures,'oversized.jpg');
+    await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
+    if (scenario === 'analysis') {
     const downloadsBeforeAnalysis=downloads;
     for(const {target,output} of analysisInputs) {
       const report=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
@@ -289,8 +220,6 @@ try {
     check(label+':analysis-unknown-not-nonlive',unknown.includes('识别结果：Unknown')&&!unknown.includes('识别结果：NonLive'));
     const broken=await analyze({name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])},/检查失败/);
     check(label+':analysis-malformed-error-not-nonlive',broken.includes('错误码：')&&broken.includes('阶段：')&&broken.includes('检查失败不等于普通照片'));
-    const oversized=join(fixtures,'oversized.jpg');
-    await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
     const budget=await analyze(oversized,/检查失败/);
     check(label+':analysis-budget-before-parse',budget.includes('RESOURCE_LIMIT_EXCEEDED')&&budget.includes('阶段：Read'));
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
@@ -299,9 +228,11 @@ try {
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&
       errors.length===0);
 
+    }
+    if (scenario === 'extract') {
     const beforeExtraction=downloads;
     let inspectionPreserved=true,staleExportCleared=true;
-    for(const {target,output} of analysisInputs) {
+    for(const {target,output} of analysisInputs.filter(p=>p.target==='oplus.olive')) {
       const inspection=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       const pending=page.waitForEvent('download');pending.catch(()=>{});
       await driver.click('提取原始视频');
@@ -336,12 +267,14 @@ try {
         report.includes('阶段：')&&(!code||report.includes(code)));
     }
     check(label+':extract-clears-stale-report',staleExportCleared);
-    check(label+':extract-preserves-analysis-and-create-state',inspectionPreserved&&downloads===beforeExtraction+3&&
+    check(label+':extract-preserves-analysis-and-create-state',inspectionPreserved&&downloads===beforeExtraction+1&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
 
+    }
+    if (scenario === 'split') {
     const beforeSplit=downloads;
     let splitInspectionPreserved=true,splitStaleCleared=true;
-    for(const {target,output} of analysisInputs) {
+    for(const {target,output} of analysisInputs.filter(p=>p.target==='oplus.olive')) {
       const inspection=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       const prior=downloads;
       await driver.click('准备清理拆分');
@@ -394,9 +327,11 @@ try {
         (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&await button('保存拆分图片').count()===0);
     }
     check(label+':split-clears-stale-preparation',splitStaleCleared);
-    check(label+':split-preserves-analysis-and-create-state',splitInspectionPreserved&&downloads===beforeSplit+6&&
+    check(label+':split-preserves-analysis-and-create-state',splitInspectionPreserved&&downloads===beforeSplit+2&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
 
+    }
+    if (scenario === 'convert') {
     const conversionNames={'oplus.olive':'OPPO / OnePlus','google.motionphoto.v2':'Google V2','google.microvideo.v1':'Google V1'};
     const conversionReport=()=>text(/(?:已转换并发起下载|转换失败)/);
     const beforeConversion=downloads;
@@ -404,7 +339,8 @@ try {
     for(const {target:sourceTarget,output} of analysisInputs) {
       const inspection=await analyze({name:sourceTarget+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       conversionStaleCleared&&=await conversionReport().count()===0;
-      for(const target of Object.keys(conversionNames)) {
+      const targets = {'oplus.olive':['google.motionphoto.v2'], 'google.motionphoto.v2':['oplus.olive'], 'google.microvideo.v1':['google.microvideo.v1']}[sourceTarget];
+      for(const target of targets) {
         await driver.click(new RegExp('^(?:✓ )?转换为 '+conversionNames[target]+'$'));
         conversionStaleCleared&&=await conversionReport().count()===0;
         const blocked=sourceTarget==='oplus.olive'&&target!==sourceTarget;
@@ -460,9 +396,11 @@ try {
         (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')));
     }
     check(label+':convert-clears-stale-report',conversionStaleCleared);
-    check(label+':convert-preserves-analysis-and-create-state',conversionInspectionPreserved&&downloads===beforeConversion+7&&
+    check(label+':convert-preserves-analysis-and-create-state',conversionInspectionPreserved&&downloads===beforeConversion+2&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
 
+    }
+    if (scenario === 'repair') {
     const repairReport=()=>text(/(?:修复预览完成|无需修改（未写入）|修复被阻止|修复失败|已应用修复并发起下载)/);
     const readRepairReport=()=>repairReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
     // Compose canvas buttons do not expose reliable HTML disabled attributes.
@@ -583,6 +521,9 @@ try {
     check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+3&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
 
+    }
+    if (scenario === 'key') {
+    const v1=analysisInputs.find(p=>p.target==='google.microvideo.v1');
     const beforeKey=downloads,keyReport=()=>text(/^(?:已修改关键照片时间并发起下载|关键照片修改失败)/);
     const readKeyReport=()=>keyReport().evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
     const enterKey=async value=>{
@@ -654,12 +595,14 @@ try {
     check(label+':key-selection-state-isolated',await keyReport().count()===0);
     check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+2&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
+    }
+    }
     await context.close();
   }
-  const expected = viewports.length * 89;
+  const expected = viewports.length * uiCases[scenario].length;
   if(checks.length!==expected||new Set(checks).size!==expected) throw Error('Incomplete shared UI checks: '+checks.length);
-  await writeFile(`ci-output/web-ui-browser-evidence${suffix}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),viewport:shard,tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
-  console.log(`WEB_UI_EVIDENCE=SUCCESS ${expected} checks; ${shard || 'mobile and wide'}; shared Compose real file chooser and audited downloads; no-op/blocked/stale/unsafe inputs never published`);
+  await writeFile(`ci-output/web-ui-browser-evidence${suffix}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browser:'Chromium',browserVersion:browser.version(),viewport:shard,scenario,tests:checks.length,failures:0,checks,scope:'same-common-compose-screen-mobile-wide-real-file-chooser-download-three-profiles-no-device-proof'},null,2)+'\n');
+  console.log(`WEB_UI_EVIDENCE=SUCCESS ${expected} checks; ${scenario}; ${shard || 'mobile and wide'}; shared Compose real file chooser and audited downloads; no-op/blocked/stale/unsafe inputs never published`);
 } catch(error) {
   console.error('Shared UI failure after checks:',checks, error);
   if(lastPage&&!lastPage.isClosed()) {

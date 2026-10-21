@@ -1,0 +1,68 @@
+name: Independent Web scenario
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        required: true
+        type: string
+      suite:
+        required: true
+        type: string
+      part:
+        required: true
+        type: string
+      viewport:
+        default: ''
+        type: string
+      scenario:
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Chromium scenario
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact }}
+          path: ci-output
+
+      - name: Verify exact compiled inputs and prepare API path
+        run: node scripts/web/verify-build.mjs
+
+      - uses: ./.github/actions/setup-web-tests
+
+      - name: Run independent scenario
+        shell: bash
+        env:
+          LIVEPHOTO_UI_VIEWPORT: ${{ inputs.viewport }}
+          LIVEPHOTO_UI_SCENARIO: ${{ inputs.scenario }}
+          LIVEPHOTO_TEST_PART: ${{ inputs.part }}
+          TEST_SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          node -e 'import("./scripts/web/test-cases.mjs").then(({testPlan})=>{if(!testPlan.some(p=>p.suite===process.env.TEST_SUITE&&p.part===process.env.LIVEPHOTO_TEST_PART&&(p.scenario||"")===process.env.LIVEPHOTO_UI_SCENARIO&&(p.viewport||"")===process.env.LIVEPHOTO_UI_VIEWPORT))throw Error("Unknown test scenario")})'
+          node "scripts/web/verify-${TEST_SUITE}.mjs" 2>&1 | tee "ci-output/web-${TEST_SUITE}-${LIVEPHOTO_TEST_PART}.log"
+
+      - name: Preserve independent viewport evidence without media
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-test-report-${{ inputs.suite }}-${{ inputs.part }}-${{ github.run_id }}
+          overwrite: true
+          path: |
+            ci-output/web-${{ inputs.suite }}-${{ inputs.part }}.log
+            ci-output/web-*-evidence-${{ inputs.part }}.json
+            ci-output/web-ui-*.png
+            ci-output/web-ui-failure*.html
+            ci-output/web-ui-*-a11y.txt
+          if-no-files-found: warn
+          retention-days: 1
