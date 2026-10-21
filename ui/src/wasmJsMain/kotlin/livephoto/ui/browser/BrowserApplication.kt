@@ -66,7 +66,7 @@ public fun main() {
         val dark = when (themeMode) { ThemeMode.System -> browserDark; ThemeMode.Light -> false; ThemeMode.Dark -> true }
         SideEffect {
             (document.documentElement as? HTMLElement)?.style?.setProperty("color-scheme", if (dark) "dark" else "light")
-            (document.documentElement as? HTMLElement)?.style?.setProperty("--livephoto-media-background", if (dark) "#151b26" else "#f5f7fb")
+            (document.documentElement as? HTMLElement)?.style?.setProperty("--livephoto-media-background", if (dark) "#11151b" else "#f5f7fa")
         }
         val platform = remember { BrowserPlatform() }
         val resolver = LocalFontFamilyResolver.current
@@ -82,7 +82,7 @@ public fun main() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { fontError = true }
         }
-        MaterialTheme(colorScheme = livePhotoColors(dark)) {
+        MaterialTheme(colorScheme = livePhotoColors(dark), typography = LivePhotoTypography) {
             Surface(Modifier.fillMaxSize()) {
                 if (fontsReady) LivePhotoScreen(platform, dark, themeMode = themeMode, onThemeSelected = { themeMode = it })
                 else Text(if (fontError) "Unable to load bundled font. Reload the page or check the static server." else "Loading fonts...")

@@ -12,10 +12,19 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 public enum class ThemeMode { System, Light, Dark }
 internal val ControlShape = RoundedCornerShape(8.dp)
+public val LivePhotoTypography: Typography = Typography().let { base -> base.copy(
+    bodyLarge = base.bodyLarge.copy(fontSize = 14.sp, lineHeight = 20.sp),
+    bodyMedium = base.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = base.bodySmall.copy(fontSize = 12.sp, lineHeight = 18.sp),
+    titleLarge = base.titleLarge.copy(fontSize = 20.sp, lineHeight = 28.sp),
+    titleMedium = base.titleMedium.copy(fontSize = 16.sp, lineHeight = 24.sp),
+    labelLarge = base.labelLarge.copy(fontSize = 14.sp, lineHeight = 20.sp),
+) }
 
 public fun livePhotoColors(dark: Boolean): ColorScheme = if (dark) darkColorScheme(
     primary = Color(0xff5b9bff), onPrimary = Color(0xff11151b), background = Color(0xff11151b),
@@ -82,10 +91,12 @@ internal fun ReportPanel(text: String, failed: Boolean, tag: String, title: Stri
 }
 
 /** Retain state and the native media element when moving a module between columns. */
+private class ContentSlot(val content: @Composable () -> Unit)
+
 @Composable
 internal fun retainedContent(content: @Composable () -> Unit): @Composable () -> Unit {
-    // Compose lambdas may retain identity while their captured parameters change.
-    val current = remember { mutableStateOf(content, neverEqualPolicy()) }
-    current.value = content
-    return remember { movableContentOf { current.value() } }
+    val movable = remember { movableContentOf<ContentSlot> { it.content() } }
+    // A fresh parameter invalidates the moved subtree without composition-time state writes.
+    val slot = ContentSlot(content)
+    return { movable(slot) }
 }

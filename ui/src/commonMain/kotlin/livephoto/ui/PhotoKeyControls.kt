@@ -19,10 +19,10 @@ internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?,
     var working by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Text("修改已有动态照片的关键照片时间（秒）。选择最近画面，容差 100 毫秒；只改 metadata，不抽帧、不替换静态封面。")
-    OutlinedTextField(value = seconds, onValueChange = { seconds = it }, label = { Text("关键照片时间（秒）") },
+    OutlinedTextField(shape = ControlShape, value = seconds, onValueChange = { seconds = it }, label = { Text("关键照片时间（秒）") },
         enabled = enabled && !working, singleLine = true, isError = parseKeySeconds(seconds) == null,
         modifier = Modifier.fillMaxWidth().testTag("key-seconds"))
-    Button(onClick = {
+    Button(shape = ControlShape, onClick = {
         if (working) return@Button
         val selected = reference ?: return@Button
         val requested = parseKeySeconds(seconds) ?: return@Button

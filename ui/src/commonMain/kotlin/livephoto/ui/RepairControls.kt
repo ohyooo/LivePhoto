@@ -36,9 +36,9 @@ internal fun RepairControls(platform: LivePhotoUiPlatform, reference: String?, e
         }
     }
     Text("有限安全修复：先只读预览，再显式应用并另存 JPEG。仅修复 Core 可证明的 metadata 问题；OPPO 等不明确布局会拒绝，不猜测或删除检查。")
-    OutlinedButton(onClick = { runRepair(null) }, enabled = enabled && !working && reference != null,
+    OutlinedButton(shape = ControlShape, onClick = { runRepair(null) }, enabled = enabled && !working && reference != null,
         modifier = Modifier.fillMaxWidth().testTag("preview-repair")) { Text("预览安全修复（只读）") }
-    Button(onClick = { result?.review?.let(::runRepair) }, enabled = enabled && !working && result?.review != null,
+    Button(shape = ControlShape, onClick = { result?.review?.let(::runRepair) }, enabled = enabled && !working && result?.review != null,
         modifier = Modifier.fillMaxWidth().testTag("apply-repair")) { Text(if (working) "正在处理修复…" else "应用修复并另存") }
     report?.let { text ->
         ReportPanel(text, failed || result?.blocked?.isNotEmpty() == true, "repair-report", "修复", platform)

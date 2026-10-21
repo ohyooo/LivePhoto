@@ -54,7 +54,7 @@ let lastPage;
 const check = (name, valid) => { if (!valid) throw Error(name); checks.push(name); };
 try {
   for (const [label,viewport] of viewports) {
-    const context = await browser.newContext({viewport,acceptDownloads:true,serviceWorkers:'block'});
+    const context = await browser.newContext({viewport,acceptDownloads:true,serviceWorkers:'block',permissions:['clipboard-read','clipboard-write']});
     await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
     const page = await context.newPage();
     const loaded = [];
@@ -74,6 +74,7 @@ try {
     let downloads=0; page.on('download',()=>downloads++);
     const analysisInputs=[];
     if (scenario === 'create') {
+    await page.evaluate(()=>navigator.clipboard.writeText('not-automatically-copied'));
     await button('生成动态照片').waitFor({state:'attached'});
     check(label+':subpath-assets-loaded',
       await page.evaluate(()=>document.documentElement.dataset.livephotoRuntime)==='kotlin-wasm-compose' &&
@@ -145,7 +146,10 @@ try {
       await page.waitForTimeout(500);
     }
     await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
-    check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1);
+    const notCopied=await page.evaluate(()=>navigator.clipboard.readText())==='not-automatically-copied';
+    await driver.click('复制报告');await text('已复制').waitFor({state:'attached'});
+    const copied=await page.evaluate(()=>navigator.clipboard.readText());
+    check(label+':honest-download-status',await text(/已生成并发起浏览器下载/).count()===1&&notCopied&&copied.includes('Core 验证：')&&copied.includes('SHA-256：'));
     await click('按住预览生成结果');
     const preview=page.getByRole('button',{name:'按住预览生成结果',exact:true});
     const previewBounds=await preview.boundingBox();

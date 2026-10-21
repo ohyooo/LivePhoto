@@ -21,7 +21,7 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
     var videoStatus by remember(reference, platform) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     Text("清理拆分：先验证并准备普通图片和视频，再分别保存。不修改原片、不转码；当前仅 JPEG + MP4/MOV。")
-    OutlinedButton(onClick = {
+    OutlinedButton(shape = ControlShape, onClick = {
         val selected = reference ?: return@OutlinedButton
         scope.launch {
             onBusy(true); saving = "prepare"; prepared = null; report = null; failed = false
@@ -45,7 +45,7 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
         Text("已准备并验证两个文件，请分别保存；详细保留报告在下方。")
         for ((key, file, status) in listOf(Triple("image", split.image, imageStatus), Triple("video", split.video, videoStatus))) {
             val label = if (key == "image") "保存拆分图片" else "保存拆分视频"
-            OutlinedButton(onClick = {
+            OutlinedButton(shape = ControlShape, onClick = {
                 scope.launch {
                     saving = key; onBusy(true)
                     try {

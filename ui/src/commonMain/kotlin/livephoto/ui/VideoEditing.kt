@@ -66,7 +66,7 @@ public class VideoEditingState {
     public fun resetRange(duration: Double) {
         start = 0.0; end = duration; startText = "0"; endText = decimalSeconds(duration); pendingTrim = false
     }
-    public fun processedVideo() { resetRange(0.0); coverPreview = null }
+    public fun processedVideo() { resetRange(0.0); coverPreview = null; coverPosition = 0.0 }
 }
 
 private fun decimalSeconds(value: Double): String {
@@ -84,7 +84,7 @@ public fun mediaClock(value: Double): String {
 public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (Boolean) -> Unit,
     onImage: (String) -> Unit, onVideo: (EditedVideo) -> Unit, onScroll: (Float) -> Unit,
     player: @Composable () -> Unit, preview: @Composable (String, Modifier) -> Unit,
-    state: VideoEditingState, confirmedTime: Time? = null, coverWarning: String? = null,
+    state: VideoEditingState, confirmedTime: Time? = null, coverWarning: String? = null, hasImage: Boolean,
     platform: LivePhotoUiPlatform) {
     val playback by editor.playback
     val scope = rememberCoroutineScope()
@@ -217,12 +217,12 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             }
             HorizontalDivider()
             val confirmed = confirmedTime?.let { mediaClock(it.value.toDouble() / it.timescale.toDouble()) }
-            Disclosure("封面位置", coverWarning ?: confirmed?.let { "已确认 · $it" } ?: "使用所选图片", state.coverOpen,
+            Disclosure("封面位置", coverWarning ?: confirmed?.let { "已确认 · $it" } ?: if (hasImage) "使用所选图片" else "尚未确认封面", state.coverOpen,
                 { state.coverOpen = !state.coverOpen; if (state.coverOpen) state.coverPosition = playback.current }) {
                 MediaSeekBar(state.coverPosition, playback.duration, enabled, "封面位置",
                     Modifier.fillMaxWidth().height(44.dp).testTag("cover-progress"), onSeek = { state.coverPosition = it })
                 Text("正在预览：${mediaClock(state.coverPosition)}")
-                Text("当前封面：${confirmed ?: "所选图片"}")
+                Text("当前封面：${confirmed ?: if (hasImage) "所选图片" else "未选择"}")
                 state.coverPreview?.let { preview(it, Modifier.fillMaxWidth().height(160.dp)) }
                 Text("仅预览，尚未替换封面。", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = { run(CoreMediaAction.ExtractFrame) }, enabled = enabled && !state.capturing, shape = ControlShape) { Text("使用当前画面作为封面") }

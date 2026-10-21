@@ -20,12 +20,12 @@ internal fun ConversionControls(platform: LivePhotoUiPlatform, reference: String
     val scope = rememberCoroutineScope()
     Text("协议转换：仅用于已有动态照片。同目标原样保留；跨协议可能因 EXIF 布局或其它安全限制拒绝，不会删除 metadata 绕过限制。")
     for (choice in ConversionTarget.entries) {
-        OutlinedButton(onClick = { target = choice; report = null; failed = false }, enabled = enabled && !working,
+        OutlinedButton(shape = ControlShape, onClick = { target = choice; report = null; failed = false }, enabled = enabled && !working,
             modifier = Modifier.fillMaxWidth().testTag("conversion-target-${choice.name}")) {
             Text((if (target == choice) "✓ " else "") + "转换为 ${choice.displayName}")
         }
     }
-    Button(onClick = {
+    Button(shape = ControlShape, onClick = {
         val selected = reference ?: return@Button
         val selectedTarget = target.selector
         scope.launch {

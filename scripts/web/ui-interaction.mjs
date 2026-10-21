@@ -9,7 +9,8 @@ export function composeDriver(page,viewport) {
       const header=await page.locator('#app-bar').boundingBox().catch(()=>null);
       const footer=await page.locator('#main-action').boundingBox().catch(()=>null);
       const inFooter=await locator.evaluate(e=>!!e.closest('#main-action')).catch(()=>false);
-      const top=overlay?0:(header?header.y+header.height:64),bottom=overlay||inFooter?viewport.height:(footer?.y??viewport.height);
+      const fullscreen=await page.evaluate(()=>!!document.fullscreenElement);
+      const top=overlay||fullscreen?0:(header?header.y+header.height:64),bottom=overlay||fullscreen||inFooter?viewport.height:(footer?.y??viewport.height);
       if(b&&b.width>0&&b.height>=minHeight&&b.y>=top&&b.y+b.height<=bottom) {
         // Focus/bring-into-view can still animate after a control first becomes
         // visible. Do not use coordinates captured halfway through that scroll.
@@ -76,7 +77,7 @@ export function composeDriver(page,viewport) {
     }
     await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('Backspace');await page.keyboard.type(value,{delay:30});
     await page.keyboard.press('Tab');await page.waitForTimeout(150);
-    if(!(await field.textContent()).includes(value))throw Error('Text did not reach Compose field: '+selector);
+    if(!(await field.textContent()).includes(value))throw Error('Text did not reach Compose field: '+selector+'; rendered='+await field.textContent()+'; focus='+await page.evaluate(()=>({tag:document.activeElement?.tagName,shadow:document.activeElement?.shadowRoot?.activeElement?.outerHTML})));
   };
   const drag=async(locator,from,to,vertical=false,whileHeld=null,minHeight=1)=>{
     await reveal(locator,minHeight);

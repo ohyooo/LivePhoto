@@ -47,6 +47,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
     var result by remember { mutableStateOf<CreationReport?>(null) }
     var resetDialog by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
+    var moreMenu by remember { mutableStateOf(false) }
     var fileDetails by remember { mutableStateOf<SelectedMediaInfo?>(null) }
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
@@ -167,8 +168,13 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                         Spacer(Modifier.weight(1f))
                         if (onThemeSelected != null || onToggleTheme != null)
                             ThemeToggle(darkTheme, { onToggleTheme?.invoke() }, themeMode, onThemeSelected)
-                        TextButton(onClick = { about = true }, modifier = Modifier.size(44.dp).semantics { contentDescription = "更多菜单" },
-                            contentPadding = PaddingValues(0.dp)) { Text("⋯") }
+                        Box {
+                            TextButton(onClick = { moreMenu = true }, modifier = Modifier.size(44.dp).semantics { contentDescription = "更多菜单" },
+                                contentPadding = PaddingValues(0.dp)) { Text("⋯") }
+                            DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                                DropdownMenuItem(text = { Text("关于与限制") }, onClick = { moreMenu = false; about = true })
+                            }
+                        }
                     }
                     if (!wide) Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) { navigation() }
                 }
@@ -200,7 +206,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                                 if (isVideo) { video = null; editing = VideoEditingState() } else image = null
                             }, enabled = !locked, modifier = Modifier.semantics { contentDescription = "移除$label" }, contentPadding = PaddingValues(4.dp)) { Text("移除") }
                         }
-                        Text("$label：${if (reference == null) "未选择" else "已选择"}", style = MaterialTheme.typography.bodySmall,
+                        if (reference == null) Text("$label：未选择", style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.testTag(if (isVideo) "video-selection" else "image-selection"))
                         if (isVideo && playback?.ready == true) Text("${mediaClock(playback.duration)} · ${playback.width.toInt()} × ${playback.height.toInt()}", style = MaterialTheme.typography.bodySmall)
                     }
@@ -211,9 +217,12 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
             }
             val editingContent = retainedContent {
                 editor?.let { current -> VideoEditingPanel(current, busy || analysisBusy, { mediaBusy = it },
-                    onImage = { image = it }, onVideo = { video = it.reference }, onScroll = scrolling, player = player,
+                    onImage = { image = it }, onVideo = {
+                        video = it.reference
+                        editing.coverPosition = platform.coverPosition(image, it.reference)?.let { time -> time.value.toDouble() / time.timescale.toDouble() } ?: 0.0
+                    }, onScroll = scrolling, player = player,
                     preview = { reference, modifier -> platform.ImagePreview(reference, modifier, scrolling) }, state = editing,
-                    confirmedTime = confirmedTime, coverWarning = coverWarning, platform = platform) }
+                    confirmedTime = confirmedTime, coverWarning = coverWarning, hasImage = image != null, platform = platform) }
             }
             val outputContent = retainedContent {
                 OutputSettings(profile, { profile = it }, !locked)
