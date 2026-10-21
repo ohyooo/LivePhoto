@@ -51,7 +51,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const checks = [];
 let lastPage;
-const check = (name, valid) => { if (!valid) throw Error(name); checks.push(name); };
+const check = (name, valid) => { if (!valid) throw Error(name); checks.push(name); console.log('UI_CHECK',name); };
 try {
   for (const [label,viewport] of viewports) {
     const context = await browser.newContext({viewport,acceptDownloads:true,serviceWorkers:'block',permissions:['clipboard-read','clipboard-write']});

@@ -35,6 +35,9 @@ export function composeDriver(page,viewport) {
     await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
+    // Each Compose popup owns a separate accessibility tree. Re-enter keyboard
+    // navigation after dismissal before locating controls in the page tree.
+    if(typeof name==='string'&&/^(工具|协议|主题)：/.test(name))await page.keyboard.press('Tab');
   };
   const selectTool=async name=>{
     await rawClick('照片工具');
@@ -122,7 +125,7 @@ export function composeDriver(page,viewport) {
       window.__pickerEvents=[];
       if(!window.__pickerObserver){
         window.__pickerObserver=true;
-        document.addEventListener('click',event=>{if(event.target instanceof HTMLInputElement&&event.target.type==='file')window.__pickerEvents.push({id:event.target.id,connected:event.target.isConnected});},true);
+        document.addEventListener('click',event=>{if(event.target instanceof HTMLInputElement&&event.target.type==='file')window.__pickerEvents.push({id:event.target.id,connected:event.target.isConnected,activation:navigator.userActivation?.isActive,at:performance.now()});},true);
       }
     });
     const pending=page.waitForEvent('filechooser');pending.catch(()=>{});

@@ -174,7 +174,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             document.body!!.appendChild(input)
             onDispose { input.onchange = null; input.remove() }
         }
-        return { input.click() }
+        return { browserOpenPicker(input) }
     }
 
     override suspend fun describe(reference: String): SelectedMediaInfo {

@@ -7,6 +7,7 @@ import kotlin.js.Promise
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Int8Array
 import org.w3c.dom.HTMLElement
+import org.w3c.dom.HTMLInputElement
 import org.w3c.files.Blob
 import org.w3c.files.File
 
@@ -68,4 +69,5 @@ internal fun browserPreviewElement(preview: BrowserPreview): HTMLElement =
 internal fun browserReleasePreview(element: HTMLElement): Unit = js("{ element.releasePreview(); }")
 internal fun browserRuntimeReady(): Unit = js("{ document.documentElement.dataset.livephotoRuntime = 'kotlin-wasm-compose'; }")
 internal fun browserClipboardAvailable(): Boolean = js("!!navigator.clipboard?.writeText")
+internal fun browserOpenPicker(input: HTMLInputElement): Unit = js("{ if (typeof input.showPicker === 'function') input.showPicker(); else input.click(); }")
 internal fun browserCopyText(text: String): Promise<JsAny?> = js("navigator.clipboard.writeText(text)")
