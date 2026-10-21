@@ -674,7 +674,7 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 所有媒体操作共用状态、取消和诊断报告，不再要求选择内部处理路径。实现范围及真实验收以当前提交 CI 为准；移除旧版不会让 Core 原本不支持的格式自动变为可用。
 
-Web CI 只构建一次，协议、媒体、播放器及公共 Kotlin 测试独立运行。完整 UI 通过 reusable workflow 按窄屏、宽屏并行执行（89＋89 项），不删减原有检查；各组下载同一次编译产物、复用缓存，全部通过并校验合并报告后才发布。
+Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 306 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 

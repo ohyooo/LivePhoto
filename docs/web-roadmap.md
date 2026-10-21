@@ -4,7 +4,7 @@
 
 ## 已完成的基础
 
-- [x] 完整 Web UI 测试按窄屏、宽屏拆为 reusable workflow 的两个并行 job，每组 89 项，合计 178 项不去重、不删减。复用同次构建产物及浏览器/工具缓存，分片报告按提交、运行、浏览器及检查名称核验后合并；任一组失败禁止发布。实际结果以对应 CI 为准。
+- [x] Web 测试继续按独立场景拆分：UI 七种操作×两尺寸、播放器两尺寸×三画幅、主题两尺寸、协议主线程/Worker、媒体主线程/Worker/两尺寸真实 UI，共 28 个浏览器 job，JS/Wasm 公共测试另各一组。删除 UI 重复媒体链与共享处理器的重复协议矩阵；unknown 输入分类仅在分析 UI 验证，其它操作保留普通照片、损坏输入、预算拒绝。保留 API 完整矩阵、音频 copy、真实下载、输入不变、安全拒绝、取消和状态隔离。外围 70＋124＋9＋91＋12＝306 项，Worker42/9、WasmUI18另列。所有报告按同次提交/运行、准确检查集合核验，缺组不发布；真实结果以本轮 CI 为准。
 - [x] File/Blob → 有界内存 BinarySource，Promise API、结构化错误、Blob 输出和 TypeScript 声明。
 - [x] 三个既有 JPEG＋MP4 创建目标：OPPO/OnePlus、Google V2、Google V1；默认不转码、不覆盖原片。
 - [x] 基础检测、Structure/Protocol 验证、原字节视频提取；真实 Chromium 主线程和 module Worker 验收。
