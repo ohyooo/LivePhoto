@@ -117,6 +117,23 @@ export function composeDriver(page,viewport) {
     await page.waitForTimeout(200);
     await drag(range,from,to,false,null,48);
   };
-  const choose=async(name,path)=>{const pending=page.waitForEvent('filechooser');pending.catch(()=>{});await click(name);await(await pending).setFiles(path);await page.waitForTimeout(200);};
+  const choose=async(name,path)=>{
+    await page.evaluate(()=>{
+      window.__pickerEvents=[];
+      if(!window.__pickerObserver){
+        window.__pickerObserver=true;
+        document.addEventListener('click',event=>{if(event.target instanceof HTMLInputElement&&event.target.type==='file')window.__pickerEvents.push({id:event.target.id,connected:event.target.isConnected});},true);
+      }
+    });
+    const pending=page.waitForEvent('filechooser');pending.catch(()=>{});
+    await click(name);
+    try {await(await pending).setFiles(path);}
+    catch(error){
+      console.error('File picker diagnostics',await page.evaluate(()=>({events:window.__pickerEvents,
+        inputs:Array.from(document.querySelectorAll('input[type=file]'),e=>({id:e.id,disabled:e.disabled,connected:e.isConnected}))})),await find(name).ariaSnapshot());
+      throw error;
+    }
+    await page.waitForTimeout(200);
+  };
   return {find,reveal,click,drag,dragRange,choose,selectTool,selectProtocol,details,report,emptyCreateInputs,typeField};
 }

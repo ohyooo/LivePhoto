@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,8 +57,10 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
             SectionCard("选择已有动态照片") {
             Text("已有照片单文件上限 32 MiB，不修改原片。")
             Text("选择已有动态照片或普通照片。独立于新建素材；选择文件后不会自动执行处理。")
-            OutlinedButton(onClick = picker, enabled = active && !working,
-                modifier = Modifier.fillMaxWidth().testTag("select-analysis")) {
+            OutlinedButton(onClick = { picker() }, enabled = active && !working,
+                modifier = Modifier.fillMaxWidth().testTag("select-analysis").semantics {
+                    stateDescription = if (active && !working) "可以选择文件" else "处理中，暂不可选择文件"
+                }) {
                 Text(if (reference == null) "选择待检查照片" else "重新选择待检查照片")
             }
             Text("待检查文件：${info?.displayName ?: if (reference == null) "未选择" else "未知"}",
