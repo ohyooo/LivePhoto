@@ -61,7 +61,7 @@ try {
     page.on('response', response => loaded.push({url:response.url(),status:response.status()}));
     lastPage = page;
     const driver=composeDriver(page,viewport);
-    const errors=[]; page.on('pageerror', error => errors.push(String(error)));
+    const errors=[]; page.on('pageerror', error => {errors.push(String(error));console.error('Shared UI page error',String(error));});
     page.setDefaultTimeout(30000);
     await page.goto(origin + '/livephoto/');
     await page.locator('canvas').first().waitFor({state:'visible'});

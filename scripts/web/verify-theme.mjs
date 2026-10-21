@@ -28,7 +28,7 @@ try {
     const context=await browser.newContext({viewport,colorScheme:'dark',serviceWorkers:'block'});
     await context.route('**/*',r=>r.request().url().startsWith(origin+'/')?r.continue():r.abort());
     const page=await context.newPage();lastPage=page;page.setDefaultTimeout(30000);
-    const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+    const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error('Theme page error',String(e));});
     await page.goto(origin+'/livephoto/');await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
     const driver=composeDriver(page,viewport);
     const theme=async(mode,path)=>{
