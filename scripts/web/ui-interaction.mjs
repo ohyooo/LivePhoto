@@ -34,6 +34,7 @@ export function composeDriver(page,viewport) {
     const locator=find(name);await reveal(locator,1,overlay);
     await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
+    console.log('UI_POINTER',String(name),b);
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
     // Each Compose popup owns a separate accessibility tree. Re-enter keyboard
     // navigation after dismissal before locating controls in the page tree.
@@ -126,13 +127,20 @@ export function composeDriver(page,viewport) {
       if(!window.__pickerObserver){
         window.__pickerObserver=true;
         document.addEventListener('click',event=>{if(event.target instanceof HTMLInputElement&&event.target.type==='file')window.__pickerEvents.push({id:event.target.id,connected:event.target.isConnected,activation:navigator.userActivation?.isActive,at:performance.now()});},true);
+        if(HTMLInputElement.prototype.showPicker){
+          const original=HTMLInputElement.prototype.showPicker;
+          HTMLInputElement.prototype.showPicker=function(...args){
+            const event={method:'showPicker',id:this.id,activation:navigator.userActivation?.isActive,at:performance.now()};window.__pickerEvents.push(event);
+            try{return original.apply(this,args);}catch(error){event.error=String(error);throw error;}
+          };
+        }
       }
     });
-    const pending=page.waitForEvent('filechooser');pending.catch(()=>{});
+    const started=Date.now(),pending=page.waitForEvent('filechooser');pending.catch(()=>{});
     await click(name);
     try {await(await pending).setFiles(path);}
     catch(error){
-      console.error('File picker diagnostics',await page.evaluate(()=>({events:window.__pickerEvents,
+      console.error('File picker diagnostics','elapsed='+String(Date.now()-started),await page.evaluate(()=>({events:window.__pickerEvents,
         inputs:Array.from(document.querySelectorAll('input[type=file]'),e=>({id:e.id,disabled:e.disabled,connected:e.isConnected}))})),await find(name).ariaSnapshot());
       throw error;
     }
