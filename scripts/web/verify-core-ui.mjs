@@ -140,6 +140,8 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       await driver.click('应用裁剪');
       await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
       if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core trim automatically fell back');
+      // Refusal keeps the uncommitted range; explicitly discard it before a separate transcode.
+      await driver.click('重置选段');
       await driver.click('裁剪范围');
       await driver.click('转为 H.264');
       await status(/转码失败.*CAPABILITY_UNSUPPORTED/s);
