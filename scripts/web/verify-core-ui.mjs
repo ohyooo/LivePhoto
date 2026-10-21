@@ -24,8 +24,9 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
     const text=pattern=>page.getByText(pattern).or(page.getByLabel(pattern)).first();
     const status=pattern=>page.locator('#player-edit-status').filter({hasText:pattern}).waitFor({state:'attached'});
     const choose=async path=>{
+      const previous=await page.evaluate(()=>document.querySelector('video[aria-label="视频预览"]')?.currentSrc??'');
       await driver.choose(/^(?:重新)?选择视频$/,path);
-      await page.waitForFunction(()=>{const v=document.querySelector('video[aria-label="视频预览"]');return v?.readyState>=2;});
+      await page.waitForFunction(previous=>{const v=document.querySelector('video[aria-label="视频预览"]');return v?.readyState>=2&&v.currentSrc!==previous;},previous);
     };
     const seek=async(time=.4)=>{
       await page.getByLabel('视频预览',{exact:true}).evaluate((video,time)=>{video.pause();video.currentTime=time;},time);
