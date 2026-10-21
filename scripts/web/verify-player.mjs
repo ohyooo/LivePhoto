@@ -34,18 +34,21 @@ try {
     // full bounds instead, otherwise a half-visible portrait rail looks fitted.
     for(let attempt=0;attempt<20;attempt++) {
       const picture=await video.boundingBox(),button=await driver.find('播放').boundingBox({timeout:1000});
-      if(picture.y>=76&&button&&button.height>0&&button.y+button.height<=viewport.height-64)break;
-      const delta=picture.y<76?picture.y-76:picture.y+picture.height+144-viewport.height;
-      await page.mouse.move(viewport.width/2,viewport.height/2);await page.mouse.wheel(0,delta);await page.waitForTimeout(200);
+      const header=await page.locator('#app-bar').boundingBox(),footer=await page.locator('#main-action').boundingBox();
+      const top=header.y+header.height+12,bottom=(footer?.y??viewport.height)-12;
+      if(picture.y>=top&&button&&button.height>0&&button.y+button.height<=bottom)break;
+      const delta=picture.y<top?picture.y-top:picture.y+picture.height+96-bottom;
+      await page.mouse.move(8,viewport.height/2);await page.mouse.wheel(0,delta);await page.waitForTimeout(200);
     }
     const v=await video.boundingBox(),bar=await progress.boundingBox(),play=await driver.find('播放').boundingBox();
     const card=await page.locator('#video-player').boundingBox(),volume=await page.locator('#volume-progress').boundingBox();
     const controls=await page.locator('#player-controls').boundingBox(),mute=await driver.find('静音').boundingBox(),rate=await driver.find('播放倍速').boundingBox(),full=await driver.find('全屏').boundingBox();
-    const portraitRow=shape!=='portrait'||([play,mute,volume,rate,full].every((b,i,items)=>
+    const clock=await page.locator('#player-clock').boundingBox();
+    const portraitRow=shape!=='portrait'||([play,clock,mute,volume,rate,full].every((b,i,items)=>
       b&&Math.abs(b.y+b.height/2-(play.y+play.height/2))<=1&&b.x>=controls.x&&b.x+b.width<=controls.x+controls.width+1&&
-      (i===0||b.x>=items[i-1].x+items[i-1].width+1))&&
-      play.width>=32&&mute.width>=32&&rate.width>=48&&full.width>=32&&volume.width>=120&&
-      Math.abs(volume.width-(controls.width-play.width-mute.width-rate.width-full.width-8))<=2);
+      (i===0||b.x>=items[i-1].x+items[i-1].width-1))&&
+      play.width>=44&&mute.width>=44&&rate.width>=44&&full.width>=44&&volume.width>=80&&
+      Math.abs(volume.width-(controls.width-play.width-clock.width-mute.width-rate.width-full.width))<=2);
     console.log('Player height and volume',label,{player:card.height,viewport:viewport.height,volume:volume.width});
     check(label+':aspect-and-viewport',card.height<=viewport.height/2+1&&v.y>=76&&v.y+v.height<=viewport.height&&v.width/v.height>0&&Math.abs(v.width/v.height-await video.evaluate(v=>v.videoWidth/v.videoHeight))<.01&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&scrollY===0));
     check(label+':controls-outside-picture',play&&play.y>=v.y+v.height-1&&volume.y>=v.y+v.height-1&&volume.width>=80&&portraitRow);

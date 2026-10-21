@@ -57,9 +57,10 @@ export function composeDriver(page,viewport) {
   };
   const details=async title=>{if(await find('展开'+title+'详情').count())await rawClick('展开'+title+'详情');};
   const report=async locator=>{
-    const id=await locator.getAttribute('id');
-    const title={'status':'生成','analysis-report':'检查','extraction-report':'提取','clean-split-report':'拆分',
-      'conversion-report':'转换','repair-report':'修复','key-report':'关键照片','player-edit-status':'视频处理'}[id];
+    const titles={'status':'生成','analysis-report':'检查','extraction-report':'提取','clean-split-report':'拆分',
+      'conversion-report':'转换','repair-report':'修复','key-report':'关键照片','player-edit-status':'视频处理'};
+    const id=await locator.evaluate((e,ids)=>{for(let p=e;p;p=p.parentElement)if(ids.includes(p.id))return p.id;return null;},Object.keys(titles));
+    const title=titles[id];
     if(title)await details(title);
     return locator.evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
   };
@@ -67,6 +68,15 @@ export function composeDriver(page,viewport) {
     await rawClick('新建');
     const empty=await page.getByText('图片：未选择',{exact:true}).count()===1&&await page.getByText('视频：未选择',{exact:true}).count()===1;
     await rawClick('照片工具');return empty;
+  };
+  const typeField=async(selector,value)=>{
+    const field=page.locator(selector);
+    for(let attempt=0;attempt<2;attempt++){
+      const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65);await page.waitForTimeout(100);
+    }
+    await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('Backspace');await page.keyboard.type(value,{delay:30});
+    await page.keyboard.press('Tab');await page.waitForTimeout(150);
+    if(!(await field.textContent()).includes(value))throw Error('Text did not reach Compose field: '+selector);
   };
   const drag=async(locator,from,to,vertical=false,whileHeld=null,minHeight=1)=>{
     await reveal(locator,minHeight);
@@ -102,5 +112,5 @@ export function composeDriver(page,viewport) {
     await drag(range,from,to,false,null,48);
   };
   const choose=async(name,path)=>{const pending=page.waitForEvent('filechooser');pending.catch(()=>{});await click(name);await(await pending).setFiles(path);await page.waitForTimeout(200);};
-  return {find,reveal,click,drag,dragRange,choose,selectTool,selectProtocol,details,report,emptyCreateInputs};
+  return {find,reveal,click,drag,dragRange,choose,selectTool,selectProtocol,details,report,emptyCreateInputs,typeField};
 }

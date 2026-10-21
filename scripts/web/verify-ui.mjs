@@ -101,6 +101,26 @@ try {
     check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).or(page.getByLabel(/大小：/)).count()>=2);
     await page.locator('#livephoto-image-input').setInputFiles([]);
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
+    await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
+    const originalVideo=await page.getByLabel('视频预览',{exact:true}).evaluate(v=>{v.pause();v.currentTime=.4;return v.currentSrc;});
+    await page.waitForFunction(()=>!document.querySelector('video[aria-label="视频预览"]').seeking);
+    let retained=true;
+    for(const [layout,size] of [['double',{width:900,height:800}],['triple',{width:1440,height:900}]]){
+      await page.setViewportSize(size);await page.locator('#layout-'+layout).waitFor({state:'attached'});await page.waitForTimeout(200);
+      retained&&=await page.getByLabel('视频预览',{exact:true}).evaluate((v,src)=>v.currentSrc===src&&v.paused&&Math.abs(v.currentTime-.4)<.05,originalVideo);
+      if(label==='wide')await page.screenshot({path:`ci-output/web-ui-layout-${layout}.png`});
+    }
+    await page.setViewportSize(viewport);await page.waitForTimeout(200);
+    await click('照片工具');await button('选择待检查照片').waitFor({state:'attached'});await click('新建');
+    retained&&=await page.getByLabel('视频预览',{exact:true}).evaluate((v,src)=>v.currentSrc===src&&v.paused&&Math.abs(v.currentTime-.4)<.05,originalVideo);
+    check(label+':responsive-workspace-retains-video',retained&&await text('名称：cover.jpg').count()===1&&await text('名称：clip.mp4').count()===1);
+    await click('裁剪范围');await driver.typeField('#trim-end','1.5');
+    await click('裁剪范围');const beforeDraft=downloads;await click('生成动态照片');await page.waitForTimeout(200);
+    const pendingBlocked=downloads===beforeDraft&&(await page.locator('#input-readiness').textContent()).includes('先应用裁剪');
+    await click('裁剪范围');const keptDraft=(await page.locator('#trim-end').textContent()).includes('1.5');
+    await click('重置选段');await click('裁剪范围');
+    check(label+':pending-trim-and-reset-draft',pendingBlocked&&keptDraft&&downloads===beforeDraft&&
+      (await page.locator('#input-readiness').textContent()).includes('素材已准备好'));
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await driver.selectProtocol(name.source.includes('OPPO')?'OPPO / OnePlus':name.source.includes('V2')?'Google Motion Photo V2':'Google MicroVideo V1');
       const pending=page.waitForEvent('download');
@@ -143,6 +163,13 @@ try {
     await click('生成动态照片');
     await text(/错误码：/).waitFor({state:'visible'});
     check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
+    const beforeReset=downloads;await click('移除视频');
+    const removed=await text('视频：未选择').count()===1&&await text('名称：cover.jpg').count()===1;
+    await click('重置输入');await click('取消');
+    const cancelledReset=await text('名称：cover.jpg').count()===1;
+    await click('重置输入');await click('确认重置');
+    check(label+':input-removal-and-reset-confirmation',removed&&cancelledReset&&downloads===beforeReset&&
+      await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&await text('上次结果 · 输入已变化').count()===1);
 
     } else {
       // Independent setup through the already-tested API, not another UI creation run.

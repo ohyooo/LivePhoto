@@ -180,7 +180,7 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("player-controls"), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                     PlayerButton(if (p.paused) "播放" else "暂停", if (p.paused) "play" else "pause", enabled && p.ready, editor::togglePlayback)
-                    Column(Modifier.width(40.dp)) {
+                    Column(Modifier.width(40.dp).testTag("player-clock")) {
                         Text(playerClock(p.current), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                         Text("/" + playerClock(p.duration), fontSize = 10.sp, fontFamily = FontFamily.Monospace,
                             color = palette.onSurfaceVariant)

@@ -3,7 +3,8 @@ const protocols=['oplus.olive','google.motionphoto.v2','google.microvideo.v1'];
 const invalid=['ordinary','malformed','budget'];
 export const uiCases={
   create:['subpath-assets-loaded','initial-create-disabled','appbar-does-not-cover-picker','shared-file-names-and-sizes','cancel-keeps-selection',
-    ...protocols.map(p=>p+'-download-valid-exact-video'),'honest-download-status','result-hold-preview','viewport-contained','malformed-input-error-visible'],
+    ...protocols.map(p=>p+'-download-valid-exact-video'),'honest-download-status','result-hold-preview','viewport-contained','malformed-input-error-visible',
+    'responsive-workspace-retains-video','pending-trim-and-reset-draft','input-removal-and-reset-confirmation'],
   analysis:[...protocols.map(p=>'analysis-live-'+p),'analysis-ordinary-not-live','analysis-unknown-not-nonlive','analysis-malformed-error-not-nonlive',
     'analysis-budget-before-parse','analysis-cancel-keeps-report','analysis-does-not-alter-create-state'],
   extract:['extract-oplus.olive-exact-video',...invalid.map(p=>'extract-'+p+'-no-output'),'extract-clears-stale-report','extract-preserves-analysis-and-create-state'],

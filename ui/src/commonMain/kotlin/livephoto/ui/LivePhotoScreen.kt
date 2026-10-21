@@ -235,7 +235,8 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 Column(Modifier.fillMaxSize().offset { if (page == 0) IntOffset.Zero else IntOffset(windowWidth, 0) }
                     .then(if (page != 0) Modifier.clearAndSetSemantics { } else Modifier)
                     .verticalScroll(scroll).padding(if (wide) 24.dp else 16.dp).testTag("new-page"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Box(Modifier.widthIn(max = 1800.dp).fillMaxWidth().align(Alignment.CenterHorizontally)) {
+                    Box(Modifier.widthIn(max = 1800.dp).fillMaxWidth().align(Alignment.CenterHorizontally)
+                        .testTag(if (threeColumns) "layout-triple" else if (wide) "layout-double" else "layout-single")) {
                         if (!wide) Column(verticalArrangement = Arrangement.spacedBy(16.dp)) { inputContent(); editingContent(); outputContent() }
                         else Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                             Box(Modifier.width(if (threeColumns) 300.dp else 280.dp)) { inputContent() }

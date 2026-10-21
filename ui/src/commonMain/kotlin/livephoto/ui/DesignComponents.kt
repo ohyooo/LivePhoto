@@ -84,6 +84,8 @@ internal fun ReportPanel(text: String, failed: Boolean, tag: String, title: Stri
 /** Retain state and the native media element when moving a module between columns. */
 @Composable
 internal fun retainedContent(content: @Composable () -> Unit): @Composable () -> Unit {
-    val current by rememberUpdatedState(content)
-    return remember { movableContentOf { current() } }
+    // Compose lambdas may retain identity while their captured parameters change.
+    val current = remember { mutableStateOf(content, neverEqualPolicy()) }
+    current.value = content
+    return remember { movableContentOf { current.value() } }
 }
