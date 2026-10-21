@@ -1,14 +1,18 @@
 /** Drive actual Compose canvas hit regions, never call app handlers or semantic actions. */
 export function composeDriver(page,viewport) {
   const find=name=>page.getByRole('button',{name,exact:true}).or(page.getByRole('checkbox',{name,exact:true})).first();
+  const optionalBounds=async selector=>{
+    const locator=page.locator(selector);
+    return await locator.count()?locator.boundingBox({timeout:1000}).catch(()=>null):null;
+  };
   const reveal=async (locator,minHeight=1,overlay=false)=>{
     const history=[];
     for(let attempt=0;attempt<40;attempt++) {
       const b=await locator.boundingBox({timeout:1000}).catch(()=>null);
       history.push(b);
-      const header=await page.locator('#app-bar').boundingBox().catch(()=>null);
-      const footer=await page.locator('#main-action').boundingBox().catch(()=>null);
-      const inFooter=await locator.evaluate(e=>!!e.closest('#main-action')).catch(()=>false);
+      const header=await optionalBounds('#app-bar');
+      const footer=await optionalBounds('#main-action');
+      const inFooter=b?await locator.evaluate(e=>!!e.closest('#main-action'),undefined,{timeout:1000}).catch(()=>false):false;
       const fullscreen=await page.evaluate(()=>!!document.fullscreenElement);
       const top=overlay||fullscreen?0:(header?header.y+header.height:64),bottom=overlay||fullscreen||inFooter?viewport.height:(footer?.y??viewport.height);
       if(b&&b.width>0&&b.height>=minHeight&&b.y>=top&&b.y+b.height<=bottom) {
@@ -38,7 +42,10 @@ export function composeDriver(page,viewport) {
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
     // Each Compose popup owns a separate accessibility tree. Re-enter keyboard
     // navigation after dismissal before locating controls in the page tree.
-    if(typeof name==='string'&&/^(工具|协议|主题)：/.test(name))await page.keyboard.press('Tab');
+    if(typeof name==='string'&&/^(工具|协议|主题)：/.test(name)){
+      await locator.waitFor({state:'detached'});
+      await page.keyboard.press('Tab');
+    }
   };
   const selectTool=async name=>{
     await rawClick('照片工具');
