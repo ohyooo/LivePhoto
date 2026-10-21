@@ -86,36 +86,19 @@ export function composeDriver(page,viewport) {
       while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
       return {tag:active?.tagName,id:active?.id,editable:active?.isContentEditable,text:active?.textContent,value:active?.value};
     });
-    for(let clearing=0;clearing<3;clearing++){
-      let focused=false;
-      for(let attempt=0;attempt<3&&!focused;attempt++){
-        const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65,{delay:60});
-        await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-        focused=await page.waitForFunction(()=>{
-          let active=document.activeElement;
-          while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
-          return !active?.closest('#cmp_a11y_root')&&(active?.isContentEditable||['INPUT','TEXTAREA'].includes(active?.tagName));
-        },undefined,{timeout:1000}).then(()=>true,()=>false);
-      }
-      if(!focused)throw Error('Browser text editor did not focus: '+selector);
-      const before=await focusState(),original=await field.textContent();
-      await page.keyboard.press('ControlOrMeta+A');
-      await page.evaluate(()=>new Promise(r=>requestAnimationFrame(r)));
-      await page.keyboard.press('Backspace');
-      for(let attempt=0;attempt<30&&(await field.textContent())!=='';attempt++)await page.waitForTimeout(100);
-      const rendered=await field.textContent();
-      if(rendered==='')break;
-      const after=await focusState();
-      // Restore a stolen browser focus only when no edit occurred; never replay an edited value.
-      if(clearing<2&&after.tag==='CANVAS'&&rendered===original){
-        console.log('UI_TEXT_FOCUS_RECOVERY',selector);
-        // A lost native editor can leave Compose focus active; blur it before refocusing.
-        await page.mouse.click(100,24);
-        await page.waitForTimeout(150);
-        continue;
-      }
-      throw Error('Backspace did not clear '+selector+'; rendered='+rendered+'; focus='+JSON.stringify({before,after}));
+    let focused=false;
+    for(let attempt=0;attempt<3&&!focused;attempt++){
+      const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65,{delay:60});
+      await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+      focused=await page.waitForFunction(()=>{
+        let active=document.activeElement;
+        while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
+        return !active?.closest('#cmp_a11y_root')&&(active?.isContentEditable||['INPUT','TEXTAREA'].includes(active?.tagName));
+      },undefined,{timeout:1000}).then(()=>true,()=>false);
     }
+    if(!focused)throw Error('Browser text editor did not focus: '+selector+'; '+JSON.stringify(await focusState()));
+    // Replace the selected text directly, without deleting the browser's backing edit host first.
+    await page.keyboard.press('ControlOrMeta+A');
     await page.keyboard.type(value,{delay:60});
     await page.keyboard.press('Tab');
     // Wasm paints the edited value before its accessibility mirror catches up.
