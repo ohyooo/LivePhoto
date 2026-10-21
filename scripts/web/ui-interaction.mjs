@@ -40,16 +40,8 @@ export function composeDriver(page,viewport) {
     const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
     console.log('UI_POINTER',String(name),b);
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
-    // Each Compose popup owns a separate accessibility tree. Re-enter keyboard
-    // navigation after dismissal before locating controls in the page tree.
     if(typeof name==='string'&&(/^(工具|协议|主题)：/.test(name)||['确认重置','取消','知道了'].includes(name))){
-      // The visual popup exits before its semantic mirror is refreshed. Give
-      // the exit animation its frames, then resume real keyboard navigation.
-      await page.waitForTimeout(250);
-      // Return browser focus from the removed popup to the page canvas using
-      // the non-interactive application title, not an app handler or DOM click.
-      await page.mouse.click(100,24);
-      await page.keyboard.press('Tab');
+      // Assert the upstream fix: dismissal must refresh semantics unaided.
       await locator.waitFor({state:'detached'});
     }
   };
@@ -135,25 +127,11 @@ export function composeDriver(page,viewport) {
     await drag(range,from,to,false,null,48);
   };
   const choose=async(name,path)=>{
-    await page.evaluate(()=>{
-      window.__pickerEvents=[];
-      if(!window.__pickerObserver){
-        window.__pickerObserver=true;
-        document.addEventListener('click',event=>{if(event.target instanceof HTMLInputElement&&event.target.type==='file')window.__pickerEvents.push({id:event.target.id,connected:event.target.isConnected,activation:navigator.userActivation?.isActive,at:performance.now()});},true);
-        if(HTMLInputElement.prototype.showPicker){
-          const original=HTMLInputElement.prototype.showPicker;
-          HTMLInputElement.prototype.showPicker=function(...args){
-            const event={method:'showPicker',id:this.id,activation:navigator.userActivation?.isActive,at:performance.now()};window.__pickerEvents.push(event);
-            try{return original.apply(this,args);}catch(error){event.error=String(error);throw error;}
-          };
-        }
-      }
-    });
     const started=Date.now(),pending=page.waitForEvent('filechooser');pending.catch(()=>{});
     await click(name);
     try {await(await pending).setFiles(path);}
     catch(error){
-      console.error('File picker diagnostics','elapsed='+String(Date.now()-started),await page.evaluate(()=>({events:window.__pickerEvents,
+      console.error('File picker diagnostics','elapsed='+String(Date.now()-started),await page.evaluate(()=>({
         inputs:Array.from(document.querySelectorAll('input[type=file]'),e=>({id:e.id,disabled:e.disabled,connected:e.isConnected}))})),await find(name).ariaSnapshot());
       throw error;
     }
