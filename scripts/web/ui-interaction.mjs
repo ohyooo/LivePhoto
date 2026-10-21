@@ -81,17 +81,26 @@ export function composeDriver(page,viewport) {
   };
   const typeField=async(selector,value)=>{
     const field=page.locator(selector);
-    for(let attempt=0;attempt<2;attempt++){
-      const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65);await page.waitForTimeout(100);
+    let focused=false;
+    for(let attempt=0;attempt<3&&!focused;attempt++){
+      const b=await reveal(field,56);await page.mouse.click(b.x+Math.min(60,b.width/2),b.y+b.height*.65);
+      focused=await page.waitForFunction(()=>{
+        let active=document.activeElement;
+        while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
+        return active?.isContentEditable||['INPUT','TEXTAREA'].includes(active?.tagName);
+      },undefined,{timeout:1000}).then(()=>true,()=>false);
     }
-    await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('Backspace');await page.keyboard.type(value,{delay:30});
+    if(!focused)throw Error('Browser text editor did not focus: '+selector);
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(r)));
+    await page.keyboard.press('Backspace');await page.keyboard.type(value,{delay:60});
     await page.keyboard.press('Tab');
     // Wasm paints the edited value before its accessibility mirror catches up.
     for(let attempt=0;attempt<30;attempt++){
-      if((await field.textContent()).includes(value))return;
+      if((await field.textContent()).trim()===value)return;
       await page.waitForTimeout(100);
     }
-    if(!(await field.textContent()).includes(value))throw Error('Text did not reach Compose field: '+selector+'; rendered='+await field.textContent()+'; focus='+await page.evaluate(()=>({tag:document.activeElement?.tagName,shadow:document.activeElement?.shadowRoot?.activeElement?.outerHTML})));
+    throw Error('Text did not reach Compose field: '+selector+'; expected='+value+'; rendered='+await field.textContent());
   };
   const drag=async(locator,from,to,vertical=false,whileHeld=null,minHeight=1)=>{
     await reveal(locator,minHeight);

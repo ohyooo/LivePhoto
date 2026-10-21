@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -91,6 +92,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     platform: LivePhotoUiPlatform) {
     val playback by editor.playback
     val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
     val coverFocus = remember { BringIntoViewRequester() }
     LaunchedEffect(state.coverFocusRequest) {
         if (state.coverFocusRequest > 0) { withFrameNanos { }; coverFocus.bringIntoView() }
@@ -113,6 +115,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     }
     fun run(action: CoreMediaAction) {
         if (!enabled || state.capturing) return
+        focus.clearFocus()
         state.working = true; state.cancelling = false; state.lastAction = action; onBusy(true)
         val label = when (action) {
             CoreMediaAction.Probe -> "检查"; CoreMediaAction.Remux -> "封装"; CoreMediaAction.Trim -> "裁剪"

@@ -522,23 +522,7 @@ try {
     const readKeyReport=()=>driver.report(keyReport());
     const enterKey=async value=>{
       await driver.selectTool('修改关键照片时间');
-      const field=page.locator('#key-seconds');
-      // Activating the canvas can bring its previous focus target into view.
-      // Remeasure after that first real click before typing into the field.
-      for(let focus=0;focus<2;focus++){
-        const bounds=await driver.reveal(field,56);
-        await page.mouse.click(bounds.x+Math.min(70,bounds.width/2),bounds.y+bounds.height*.65);
-        await page.waitForTimeout(200);
-      }
-      await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('Backspace');
-      await page.keyboard.type(value,{delay:60});
-      for(let attempt=0;attempt<40;attempt++){
-        if(await field.textContent()===value)break;
-        await page.waitForTimeout(50);
-      }
-      if(await field.textContent()!==value)throw Error('Real key input did not reach Compose: '+JSON.stringify({expected:value,actual:await field.textContent()}));
-      await page.keyboard.press('Tab');
-      await page.waitForTimeout(200);
+      await driver.typeField('#key-seconds',value);
     };
     let keyAnalysisPreserved=true;
     for(const {target,output} of analysisInputs.filter(p=>p.target!=='google.motionphoto.v2')) {

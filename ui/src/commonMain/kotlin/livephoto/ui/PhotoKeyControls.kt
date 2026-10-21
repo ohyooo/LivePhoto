@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -18,6 +19,7 @@ internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?,
     var failed by remember(reference, seconds) { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
     Text("修改已有动态照片的关键照片时间（秒）。选择最近画面，容差 100 毫秒；只改 metadata，不抽帧、不替换静态封面。")
     OutlinedTextField(shape = ControlShape, value = seconds, onValueChange = { seconds = it }, label = { Text("关键照片时间（秒）") },
         enabled = enabled && !working, singleLine = true, isError = parseKeySeconds(seconds) == null,
@@ -26,6 +28,8 @@ internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?,
         if (working) return@Button
         val selected = reference ?: return@Button
         val requested = parseKeySeconds(seconds) ?: return@Button
+        // End the editing session before temporarily disabling its input.
+        focus.clearFocus()
         scope.launch {
             working = true; onBusy(true); report = null; failed = false
             try {
