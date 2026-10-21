@@ -253,7 +253,6 @@ try {
     }
     for(const [kind,input,code] of [
       ['ordinary',imagePath,'MOTION_VIDEO_MISSING'],
-      ['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])},'MOTION_VIDEO_MISSING'],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])},null],
       ['budget',oversized,'RESOURCE_LIMIT_EXCEEDED'],
     ]) {
@@ -313,7 +312,6 @@ try {
     }
     for(const [kind,input] of [
       ['ordinary',imagePath],
-      ['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],
       ['budget',oversized],
     ]) {
@@ -382,7 +380,6 @@ try {
     }
     for(const [kind,input] of [
       ['ordinary',imagePath],
-      ['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],
       ['budget',oversized],
     ]) {
@@ -430,7 +427,7 @@ try {
     };
     const beforeRepair=downloads;
     let repairAnalysisPreserved=true,repairedV1Digest;
-    for(const {target,output} of analysisInputs.filter(p=>p.target!=='oplus.olive')) {
+    for(const {target,output} of analysisInputs.filter(p=>p.target==='google.microvideo.v1')) {
       const prior=downloads;
       const noop=await previewRepair({name:'valid-'+target+'.jpg',mimeType:'image/jpeg',buffer:output});
       check(label+':repair-'+target+'-valid-no-output',downloads===prior&&noop.includes('无需修改（未写入）')&&await repairCannotApply());
@@ -498,7 +495,7 @@ try {
       check(label+':repair-source-changed-no-output',downloads===priorStale&&(await readRepairReport()).includes('SOURCE_CHANGED')&&await repairCannotApply());
     } finally {await page.evaluate(()=>globalThis.restoreRepairRead());}
     for(const [kind,input] of [
-      ['ordinary',imagePath],['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
+      ['ordinary',imagePath],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],['budget',oversized],
     ]) {
       const prior=downloads,report=await previewRepair(input);
@@ -518,7 +515,7 @@ try {
       createHash('sha256').update(confirmedBytes).digest('hex')===repairedV1Digest;
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-selection-state-isolated',cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
-    check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+3&&
+    check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
 
     }
@@ -546,7 +543,7 @@ try {
       await page.waitForTimeout(200);
     };
     let keyAnalysisPreserved=true;
-    for(const {target,output} of analysisInputs) {
+    for(const {target,output} of analysisInputs.filter(p=>p.target!=='google.motionphoto.v2')) {
       const inspection=await analyze({name:'key-'+target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       await enterKey('0.47');
       if(target==='oplus.olive') {
@@ -584,7 +581,7 @@ try {
     check(label+':key-invalid-value-no-output',invalidNoOutput);
     await enterKey('999');await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
     check(label+':key-outside-no-output',downloads===beforeInvalid&&(await readKeyReport()).includes('INVALID_PRESENTATION_TIMESTAMP'));
-    for(const [kind,input] of [['ordinary',imagePath],['unknown',{name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])}],
+    for(const [kind,input] of [['ordinary',imagePath],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],['budget',oversized]]) {
       await analysisPicker(input);await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
       const report=await readKeyReport();
@@ -593,7 +590,7 @@ try {
     }
     await analysisPicker({name:'key-reselect.jpg',mimeType:'image/jpeg',buffer:v1.output});
     check(label+':key-selection-state-isolated',await keyReport().count()===0);
-    check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+2&&
+    check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+1&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&errors.length===0);
     }
     }

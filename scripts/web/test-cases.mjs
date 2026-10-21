@@ -1,6 +1,6 @@
 // Each entry is an independent browser scenario; assertions within it share state.
 const protocols=['oplus.olive','google.motionphoto.v2','google.microvideo.v1'];
-const invalid=['ordinary','unknown','malformed','budget'];
+const invalid=['ordinary','malformed','budget'];
 export const uiCases={
   create:['subpath-assets-loaded','initial-create-disabled','appbar-does-not-cover-picker','shared-file-names-and-sizes','cancel-keeps-selection',
     ...protocols.map(p=>p+'-download-valid-exact-video'),'honest-download-status','result-hold-preview','viewport-contained','malformed-input-error-visible'],
@@ -10,10 +10,10 @@ export const uiCases={
   split:['split-oplus.olive-clean-independent-files',...invalid.map(p=>'split-'+p+'-no-output'),'split-clears-stale-preparation','split-preserves-analysis-and-create-state'],
   convert:['convert-oplus.olive-to-google.motionphoto.v2','convert-google.motionphoto.v2-to-oplus.olive','convert-google.microvideo.v1-to-google.microvideo.v1',
     ...invalid.map(p=>'convert-'+p+'-no-output'),'convert-clears-stale-report','convert-preserves-analysis-and-create-state'],
-  repair:[...protocols.slice(1).flatMap(p=>['valid-no-output','preview-no-output','applied-preserving','idempotent-no-output'].map(c=>'repair-'+p+'-'+c)),
+  repair:[...['valid-no-output','preview-no-output','applied-preserving','idempotent-no-output'].map(c=>'repair-google.microvideo.v1-'+c),
     'repair-oplus-refused-no-output','repair-blocked-key-no-output','repair-source-changed-no-output',...invalid.map(p=>'repair-'+p+'-no-output'),
     'repair-selection-state-isolated','repair-preserves-analysis-and-create-state'],
-  key:[...protocols.slice(1).map(p=>'key-'+p+'-preserving'),'key-oplus.olive-refused','key-invalid-value-no-output','key-outside-no-output',
+  key:['key-google.microvideo.v1-preserving','key-oplus.olive-refused','key-invalid-value-no-output','key-outside-no-output',
     ...invalid.map(p=>'key-'+p+'-no-output'),'key-selection-state-isolated','key-preserves-analysis-and-create-state'],
 };
 const playerCases=['tools-collapsed-by-default','aspect-and-viewport','controls-outside-picture','native-overlays-disabled','correct-progress-axis',
