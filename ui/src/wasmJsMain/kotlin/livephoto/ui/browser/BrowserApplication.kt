@@ -297,8 +297,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         if (browserFileSize(photo).toLong() + browserFileSize(movie).toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
         val ctx = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u))
-        val imageSource = MemoryBinarySource(Bytes(browserBytes(photo)), SourceId("browser-image"))
-        val videoSource = MemoryBinarySource(Bytes(browserBytes(movie)), SourceId("browser-video"))
+        val imageSource = BrowserBlobSource(photo, SourceId("browser-image"))
+        val videoSource = BrowserBlobSource(movie, SourceId("browser-video"))
         val output = MemoryOutputTransaction(ctx, "browser-create")
         var created: OperationResult? = null
         try {

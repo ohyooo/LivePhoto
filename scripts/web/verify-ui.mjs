@@ -73,6 +73,28 @@ try {
     const choose = (name,path) => driver.choose(name,path);
     let downloads=0; page.on('download',()=>downloads++);
     const analysisInputs=[];
+    if (['create','analysis','extract','split','convert','key'].includes(scenario)) {
+    await page.evaluate(()=>{
+      const slice=Blob.prototype.slice;
+      globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
+      // Fail if a protocol UI path regresses to eagerly loading a selected File.
+      File.prototype.arrayBuffer=function(){
+        globalThis.analysisIo.fullReads++;
+        return Promise.reject(Error('Photo operations must read bounded Blob slices'));
+      };
+      Blob.prototype.slice=function(...args){
+        const part=slice.apply(this,args);
+        if(this instanceof File){
+          globalThis.analysisIo.slices++;
+          globalThis.analysisIo.maxSlice=Math.max(globalThis.analysisIo.maxSlice,part.size);
+          if(['unreadable.jpg','unreadable.mp4'].includes(this.name))Object.defineProperty(part,'arrayBuffer',{
+            value:()=>Promise.reject(new DOMException('Synthetic read failure','NotReadableError')),
+          });
+        }
+        return part;
+      };
+    });
+    }
     if (scenario === 'create') {
     await page.evaluate(()=>navigator.clipboard.writeText('not-automatically-copied'));
     await button('生成动态照片').waitFor({state:'attached'});
@@ -139,7 +161,9 @@ try {
         const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await extracted.blob.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
         return {valid:detected.protocol===target&&validation.success&&validation.verdict!=='Invalid'&&validation.coverage==='Complete',digest};
       },{data:Array.from(output),target});
-      check(label+':'+target+'-download-valid-exact-video',audit.valid&&audit.digest===videoHash&&download.suggestedFilename().endsWith('.jpg'));
+      const io=await page.evaluate(()=>globalThis.analysisIo);
+      check(label+':'+target+'-download-valid-exact-video',audit.valid&&audit.digest===videoHash&&download.suggestedFilename().endsWith('.jpg')&&
+        io.slices>0&&io.maxSlice<=64*1024&&io.fullReads===0);
       // The shared screen animates back to the result card after generation. Do not
       // chase moving canvas targets while that intentional scroll animation is active.
       await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
@@ -167,7 +191,19 @@ try {
     await choose('重新选择视频',{name:'broken.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,1,2,3])});
     await click('生成动态照片');
     await text(/错误码：/).waitFor({state:'visible'});
-    check(label+':malformed-input-error-visible',await text(/生成失败/).count()>0&&errors.length===0);
+    const malformedVisible=await text(/生成失败/).count()>0;
+    let ioFailuresNoOutput=true;
+    for(const kind of ['image','video']) {
+      await choose('重新选择图片',kind==='image'?{name:'unreadable.jpg',mimeType:'image/jpeg',buffer:await readFile(imagePath)}:imagePath);
+      await choose('重新选择视频',kind==='video'?{name:'unreadable.mp4',mimeType:'video/mp4',buffer:video}:videoPath);
+      const prior=downloads;
+      await click('生成动态照片');await text(/IO_READ_FAILED/).waitFor({state:'attached'});
+      const report=await driver.report(text(/生成失败/));
+      ioFailuresNoOutput&&=downloads===prior&&report.includes('阶段：Read')&&
+        report.includes('来源：browser-'+kind)&&report.includes('关联对象：'+(kind==='image'?'图片输入':'视频输入'));
+    }
+    await choose('重新选择图片',imagePath);
+    check(label+':malformed-input-error-visible',malformedVisible&&ioFailuresNoOutput&&errors.length===0);
     const beforeReset=downloads;await click('移除视频');
     const removed=await text('视频：未选择').count()===1&&await text('名称：cover.jpg').count()===1;
     await click('重置输入');await click('取消');
@@ -198,28 +234,6 @@ try {
     };
     const oversized=join(fixtures,'oversized.jpg');
     await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
-    if (['analysis','extract','split','convert','key'].includes(scenario)) {
-    await page.evaluate(()=>{
-      const slice=Blob.prototype.slice;
-      globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
-      // Fail if this UI path regresses to eagerly loading a selected File.
-      File.prototype.arrayBuffer=function(){
-        globalThis.analysisIo.fullReads++;
-        return Promise.reject(Error('Photo tools must read bounded Blob slices'));
-      };
-      Blob.prototype.slice=function(...args){
-        const part=slice.apply(this,args);
-        if(this instanceof File){
-          globalThis.analysisIo.slices++;
-          globalThis.analysisIo.maxSlice=Math.max(globalThis.analysisIo.maxSlice,part.size);
-          if(this.name==='unreadable.jpg')Object.defineProperty(part,'arrayBuffer',{
-            value:()=>Promise.reject(new DOMException('Synthetic read failure','NotReadableError')),
-          });
-        }
-        return part;
-      };
-    });
-    }
     if (scenario === 'analysis') {
     const downloadsBeforeAnalysis=downloads;
     for(const {target,output} of analysisInputs) {
