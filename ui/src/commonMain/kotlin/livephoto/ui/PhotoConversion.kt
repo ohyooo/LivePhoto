@@ -29,8 +29,23 @@ public suspend fun prepareConvertedPhoto(
         IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This screen supports only the three displayed JPEG conversion targets"))
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Conversion input exceeds 32 MiB"))
-    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-conversion"))
+    try { return prepareConvertedPhoto(core, source, target, cancellation) }
+    finally { source.close() }
+}
+
+/** Borrowed input; the same Core conversion and preservation checks serve all adapters. */
+public suspend fun prepareConvertedPhoto(
+    core: LivePhotoCore, source: BinarySource, target: ProtocolSelector, cancellation: Cancellation? = null,
+): CoreResult<PreparedConversion> {
+    if (ConversionTarget.entries.none { it.selector == target }) return CoreResult.Failure(CoreError(
+        IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This screen supports only the three displayed JPEG conversion targets"))
+    when (val size = source.size()) {
+        is CoreResult.Failure -> return size
+        is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Conversion input exceeds 32 MiB"))
+    }
+    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val output = MemoryOutputTransaction(context, "ui-conversion")
     var operation: OperationResult? = null
     try {
@@ -57,7 +72,6 @@ public suspend fun prepareConvertedPhoto(
     } finally {
         operation?.output?.assets?.forEach { it.readableSource?.close() }
         if (operation == null) output.abort()
-        source.close()
     }
 }
 

@@ -198,7 +198,7 @@ try {
     };
     const oversized=join(fixtures,'oversized.jpg');
     await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
-    if (['analysis','extract','split'].includes(scenario)) {
+    if (['analysis','extract','split','convert','key'].includes(scenario)) {
     await page.evaluate(()=>{
       const slice=Blob.prototype.slice;
       globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
@@ -423,15 +423,22 @@ try {
     ]) {
       await analysisPicker(input);
       conversionStaleCleared&&=await conversionReport().count()===0;
+      const slicesBefore=await page.evaluate(()=>globalThis.analysisIo.slices);
       const prior=downloads;
       await driver.click('转换并另存');
       await text(/转换失败/).waitFor({state:'attached'});
       const report=await driver.report(conversionReport());
+      const io=await page.evaluate(()=>globalThis.analysisIo);
       check(label+':convert-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&report.includes('阶段：')&&
-        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')));
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')&&io.slices===slicesBefore)&&
+        io.fullReads===0&&io.maxSlice<=64*1024);
     }
+    await analysisPicker({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,217])});
+    await driver.click('转换并另存');await text(/转换失败/).waitFor({state:'attached'});
+    const failedRead=await driver.report(conversionReport());
     check(label+':convert-clears-stale-report',conversionStaleCleared);
     check(label+':convert-preserves-analysis-and-create-state',conversionInspectionPreserved&&downloads===beforeConversion+2&&
+      failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&
       await driver.emptyCreateInputs()&&errors.length===0);
 
     }
@@ -606,14 +613,22 @@ try {
     check(label+':key-outside-no-output',downloads===beforeInvalid&&(await readKeyReport()).includes('INVALID_PRESENTATION_TIMESTAMP'));
     for(const [kind,input] of [['ordinary',imagePath],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],['budget',oversized]]) {
-      await analysisPicker(input);await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
+      await analysisPicker(input);
+      const slicesBefore=await page.evaluate(()=>globalThis.analysisIo.slices);
+      await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
       const report=await readKeyReport();
+      const io=await page.evaluate(()=>globalThis.analysisIo);
       check(label+':key-'+kind+'-no-output',downloads===beforeInvalid&&report.includes('关键照片修改失败')&&report.includes('错误码：')&&
-        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')));
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')&&io.slices===slicesBefore)&&
+        io.fullReads===0&&io.maxSlice<=64*1024);
     }
+    await analysisPicker({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,217])});
+    await driver.click('修改关键照片时间并另存');await keyReport().waitFor({state:'attached'});
+    const failedRead=await readKeyReport();
     await analysisPicker({name:'key-reselect.jpg',mimeType:'image/jpeg',buffer:v1.output});
     check(label+':key-selection-state-isolated',await keyReport().count()===0);
     check(label+':key-preserves-analysis-and-create-state',keyAnalysisPreserved&&downloads===beforeKey+1&&
+      failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&
       await driver.emptyCreateInputs()&&errors.length===0);
     }
     }

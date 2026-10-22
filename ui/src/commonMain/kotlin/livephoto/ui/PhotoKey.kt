@@ -22,8 +22,21 @@ public suspend fun preparePhotoKey(core: LivePhotoCore, bytes: ByteArray, reques
     cancellation: Cancellation? = null): CoreResult<PreparedPhotoKey> {
     if (requested < Time.Zero) return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Key time must be nonnegative"))
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Key input exceeds 32 MiB"))
-    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-key"))
+    try { return preparePhotoKey(core, source, requested, cancellation) }
+    finally { source.close() }
+}
+
+/** Borrowed input; changing key metadata still requires the original preservation proofs. */
+public suspend fun preparePhotoKey(core: LivePhotoCore, source: BinarySource, requested: Time,
+    cancellation: Cancellation? = null): CoreResult<PreparedPhotoKey> {
+    if (requested < Time.Zero) return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Key time must be nonnegative"))
+    when (val size = source.size()) {
+        is CoreResult.Failure -> return size
+        is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Key input exceeds 32 MiB"))
+    }
+    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val output = MemoryOutputTransaction(context, "ui-key")
     var operation: OperationResult? = null
     try {
@@ -47,7 +60,6 @@ public suspend fun preparePhotoKey(core: LivePhotoCore, bytes: ByteArray, reques
     } finally {
         operation?.output?.assets?.forEach { it.readableSource?.close() }
         if (operation == null) output.abort()
-        source.close()
     }
 }
 
