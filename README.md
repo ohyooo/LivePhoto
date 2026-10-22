@@ -676,11 +676,11 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 312 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
 
-新双页/响应式共享界面已在源码 `eee7f73` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39602762523) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归或新版网站已部署。
+新双页/响应式共享界面已在源码 `03e6597` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39724940593) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。源站已部署并通过全部静态文件的 HTTPS 哈希与类型检查，旧版本保留、原首页不变；普通域名链路仍超时，不代表客户端网络已恢复。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归。
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 
-Wasm 界面的只读“检查照片”现通过 `BinarySource` 按需读取 `Blob.slice`，不预先加载整份输入；单次读取最多 64 KiB，输入仍限 32 MiB。`4ebf20c` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39645751830) 全部 32 个 job 通过，包含两尺寸的分块读取、超限前拒绝和 IO 错误检查。其它操作及独立 JS 库仍使用原有有界内存入口；这不是总内存仅 64 KiB、任意大文件、零拷贝或 UI 后台 Worker 的承诺。
+Wasm 界面的检查照片、提取原始视频、清理拆分、协议转换和关键照片时间，现通过同一 `BinarySource` 按需读取 `Blob.slice`，不预先加载整份输入；单次读取最多 64 KiB，输入仍限 32 MiB。上述 CI 包含两尺寸的分块读取、超限前拒绝、IO 错误无输出及原有保真检查。生成、修复、独立 JS 库尚未迁移，输出仍使用原有有界内存事务；这不是总内存仅 64 KiB、任意大文件、零拷贝或 UI 后台 Worker 的承诺。
 
 已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。部分 OPPO 文件修改时间字段长度会移动未经验证的 EXIF，因此保留 `UNSAFE_METADATA_REWRITE` 拒绝，不输出、不删除 EXIF 绕过；不是全部可创建文件都能修改关键时间。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
 
