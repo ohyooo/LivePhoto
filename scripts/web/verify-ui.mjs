@@ -198,15 +198,14 @@ try {
     };
     const oversized=join(fixtures,'oversized.jpg');
     await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
-    if (scenario === 'analysis') {
-    const downloadsBeforeAnalysis=downloads;
+    if (['analysis','extract','split'].includes(scenario)) {
     await page.evaluate(()=>{
       const slice=Blob.prototype.slice;
       globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
       // Fail if this UI path regresses to eagerly loading a selected File.
       File.prototype.arrayBuffer=function(){
         globalThis.analysisIo.fullReads++;
-        return Promise.reject(Error('Analysis must read bounded Blob slices'));
+        return Promise.reject(Error('Photo tools must read bounded Blob slices'));
       };
       Blob.prototype.slice=function(...args){
         const part=slice.apply(this,args);
@@ -220,6 +219,9 @@ try {
         return part;
       };
     });
+    }
+    if (scenario === 'analysis') {
+    const downloadsBeforeAnalysis=downloads;
     for(const {target,output} of analysisInputs) {
       const report=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
       check(label+':analysis-live-'+target,report.includes('识别结果：Live')&&report.includes('首选协议：'+target)&&
@@ -280,15 +282,22 @@ try {
     ]) {
       await analysisPicker(input);
       staleExportCleared&&=await text(/已提取并发起视频下载/).count()===0;
+      const slicesBefore=await page.evaluate(()=>globalThis.analysisIo.slices);
       const prior=downloads;
       await driver.click('提取原始视频');
       await text(/提取失败/).waitFor({state:'attached'});
       const report=await driver.report(text(/提取失败/));
+      const io=await page.evaluate(()=>globalThis.analysisIo);
       check(label+':extract-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&
-        report.includes('阶段：')&&(!code||report.includes(code)));
+        report.includes('阶段：')&&(!code||report.includes(code))&&
+        (kind!=='budget'||io.slices===slicesBefore)&&io.fullReads===0&&io.maxSlice<=64*1024);
     }
+    await analysisPicker({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,217])});
+    await driver.click('提取原始视频');await text(/提取失败/).waitFor({state:'attached'});
+    const failedRead=await driver.report(text(/提取失败/));
     check(label+':extract-clears-stale-report',staleExportCleared);
     check(label+':extract-preserves-analysis-and-create-state',inspectionPreserved&&downloads===beforeExtraction+1&&
+      failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&
       await driver.emptyCreateInputs()&&errors.length===0);
 
     }
@@ -339,15 +348,22 @@ try {
     ]) {
       await analysisPicker(input);
       splitStaleCleared&&=await text(/清理拆分已准备/).count()===0&&await button('保存拆分图片').count()===0&&await button('保存拆分视频').count()===0;
+      const slicesBefore=await page.evaluate(()=>globalThis.analysisIo.slices);
       const prior=downloads;
       await driver.click('准备清理拆分');
       await text(/清理拆分失败/).waitFor({state:'attached'});
       const report=await driver.report(text(/清理拆分失败/));
+      const io=await page.evaluate(()=>globalThis.analysisIo);
       check(label+':split-'+kind+'-no-output',downloads===prior&&report.includes('错误码：')&&report.includes('阶段：')&&
-        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&await button('保存拆分图片').count()===0);
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')&&io.slices===slicesBefore)&&
+        io.fullReads===0&&io.maxSlice<=64*1024&&await button('保存拆分图片').count()===0);
     }
+    await analysisPicker({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,217])});
+    await driver.click('准备清理拆分');await text(/清理拆分失败/).waitFor({state:'attached'});
+    const failedRead=await driver.report(text(/清理拆分失败/));
     check(label+':split-clears-stale-preparation',splitStaleCleared);
     check(label+':split-preserves-analysis-and-create-state',splitInspectionPreserved&&downloads===beforeSplit+2&&
+      failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&await button('保存拆分图片').count()===0&&
       await driver.emptyCreateInputs()&&errors.length===0);
 
     }

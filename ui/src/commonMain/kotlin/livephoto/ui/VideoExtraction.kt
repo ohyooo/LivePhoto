@@ -21,8 +21,21 @@ public suspend fun prepareExtractedVideo(
 ): CoreResult<PreparedVideo> {
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
-    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-video-extraction"))
+    try { return prepareExtractedVideo(core, source, cancellation) }
+    finally { source.close() }
+}
+
+/** Borrowed input; output verification and staging are identical for all adapters. */
+public suspend fun prepareExtractedVideo(
+    core: LivePhotoCore, source: BinarySource, cancellation: Cancellation? = null,
+): CoreResult<PreparedVideo> {
+    when (val size = source.size()) {
+        is CoreResult.Failure -> return size
+        is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
+    }
+    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val output = MemoryOutputTransaction(context, "ui-video-extraction")
     var operation: OperationResult? = null
     try {
@@ -54,7 +67,6 @@ public suspend fun prepareExtractedVideo(
     } finally {
         operation?.output?.assets?.forEach { it.readableSource?.close() }
         if (operation == null) output.abort()
-        source.close()
     }
 }
 

@@ -24,8 +24,21 @@ public suspend fun prepareCleanSplit(
 ): CoreResult<PreparedCleanSplit> {
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
-    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-clean-split"))
+    try { return prepareCleanSplit(core, source, cancellation) }
+    finally { source.close() }
+}
+
+/** Borrowed input; preparing outputs still does not publish either file. */
+public suspend fun prepareCleanSplit(
+    core: LivePhotoCore, source: BinarySource, cancellation: Cancellation? = null,
+): CoreResult<PreparedCleanSplit> {
+    when (val size = source.size()) {
+        is CoreResult.Failure -> return size
+        is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
+            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
+    }
+    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val output = MemoryOutputTransaction(context, "ui-clean-split")
     var operation: OperationResult? = null
     fun failure(code: String, message: String) = CoreResult.Failure(CoreError(IssueCode(code), Stage.Verify, message))
@@ -60,7 +73,6 @@ public suspend fun prepareCleanSplit(
     } finally {
         operation?.output?.assets?.forEach { it.readableSource?.close() }
         if (operation == null) output.abort()
-        source.close()
     }
 }
 

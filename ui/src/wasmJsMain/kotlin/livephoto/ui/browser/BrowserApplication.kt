@@ -198,7 +198,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
         val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        return when (val result = prepareExtractedVideo(DefaultLivePhotoCore(), browserBytes(file), Cancellation { job?.isActive == false })) {
+        val source = BrowserBlobSource(file, SourceId("browser-extract:$reference"))
+        val result = try {
+            prepareExtractedVideo(DefaultLivePhotoCore(), source, Cancellation { job?.isActive == false })
+        } finally { source.close() }
+        return when (result) {
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 val prepared = result.value
@@ -213,7 +217,10 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
         val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        return prepareCleanSplit(DefaultLivePhotoCore(), browserBytes(file), Cancellation { job?.isActive == false })
+        val source = BrowserBlobSource(file, SourceId("browser-split:$reference"))
+        try {
+            return prepareCleanSplit(DefaultLivePhotoCore(), source, Cancellation { job?.isActive == false })
+        } finally { source.close() }
     }
 
     override suspend fun saveSplitFile(file: SplitFile): String {
