@@ -8,7 +8,7 @@
 
 已按新设计接入“新建 / 照片工具”双页、800/1280 响应式列布局、三态主题、紧凑文件行和移除/重置确认、独立裁剪草稿与封面预览、折叠报告及显式复制。窗口变化、切页和主题切换应保留素材及编辑状态；待应用选段和失效封面阻止生成。未扩展协议、音频编码或媒体后端。
 
-最新源码 `03e6597` 的 [Web CI 39724940593](https://github.com/ohyooo/LivePhoto/actions/runs/39724940593) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 809 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。新增检查覆盖布局变更、裁剪草稿阻止生成和重置确认。已由服务器直接下载产物并部署源站，保留旧版本；全部静态文件经 HTTPS 校验字节哈希、类型及证书，原首页保持不变。普通域名链路仍连接超时，源站验证不代表客户端网络已恢复，也不代表所有浏览器/手机相册兼容。
+最新源码 `4b9e6cb` 的 [Web CI 39731208590](https://github.com/ohyooo/LivePhoto/actions/runs/39731208590) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 809 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。新增检查覆盖布局变更、裁剪草稿阻止生成和重置确认。已由服务器直接下载产物并部署，保留旧版本；正常域名访问已恢复，全部静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，原首页保持不变。这不代表所有浏览器/手机相册兼容。
 
 用户已明确允许预发布版以修复 Popup/Dialog 关闭后无障碍 DOM 停止同步的问题（[CMP-9368](https://youtrack.jetbrains.com/issue/CMP-9368) / [CMP-10623](https://youtrack.jetbrains.com/issue/CMP-10623)）。Compose 与共享 Material3 对齐 [1.13.0-alpha02](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.13.0-alpha02)，保留现有 Kotlin、Gradle 和 SDK；已删除点击标题、额外 Tab 和动画延时的无效绕行。弹层关闭后节点自行移除、真实交互、下载与诊断已在上述 CI 验证；不关闭无障碍、不删除测试。输入测试在全选与键入之间等待框架动画帧检查点，重选后等待旧报告节点移除，不把原生视频就绪当成 Compose 报告同步完成。Alpha 仍是预发布依赖，本轮不宣称 Android/Native 回归完成。
 
@@ -41,7 +41,7 @@
 
 - [ ] 不移动 EXIF 的固定长度 XMP 槽位优化及独立保留证明。当前 Core 对 XMP 调整会移动未验证 EXIF 的布局返回 `UNSAFE_METADATA_REWRITE`，Web 保留此拒绝，不删除 EXIF 或增加丢失授权。新建 OPPO 文件转 Google 的两个方向受此限制；同目标原样复制与无此布局依赖的转换分开验证。
 - [ ] 独立核验 OPPO 显式次级 `Padding="0"` 的修复边界。当前默认新建布局含此字段，现有 Core Repair 刻意不接受；Web 返回 `REPAIR_AMBIGUOUS` 且无输出，不能把可创建误写为可修复，也不在适配层移除字段绕过。
-- [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。Wasm 界面的检查照片、提取原始视频、清理拆分、协议转换、关键照片时间五个入口已通过同一 `BinarySource` 按需读取 `Blob.slice`，单次切片最多 64 KiB，不预先加载整份输入；32 MiB 输入限额和原有保真/安全拒绝不变。最新 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39724940593) 两尺寸真实浏览器验证零整文件读取、超预算零切片、结构化读取错误及失败无输出；仍有原始视频哈希、图片解码、转换/时间与状态隔离检查。ByteArray 调用只包装输入并复用相同应用编排，不维护两套协议逻辑。64 KiB 仅是单次读取上限，不是 Core 总内存；输出仍是有界内存事务。生成、修复、独立 JS 功能库及 UI 后台 Worker 尚未迁移，不能称任意大文件流式或零拷贝实现。
+- [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。Wasm 界面的生成、检查照片、提取原始视频、清理拆分、协议转换、关键照片时间六个入口已通过同一 `BinarySource` 按需读取 `Blob.slice`，单次切片最多 64 KiB，不预先加载整份输入；32 MiB 输入限额和原有保真/安全拒绝不变。最新 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39731208590) 两尺寸真实浏览器验证零整文件读取、超预算零切片、结构化读取错误及失败无输出；生成另验证图片/视频分别读取失败时的来源与关联对象。原始视频哈希、图片解码、转换/时间与状态隔离检查保留。ByteArray 调用只包装输入并复用相同应用编排，不维护两套协议逻辑。64 KiB 仅是单次读取上限，不是 Core 总内存；输出仍是有界内存事务。修复、独立 JS 功能库及 UI 后台 Worker 尚未迁移；修复迁移还须保留审阅输入摘要与 SOURCE_CHANGED 拒绝，不能称任意大文件流式或零拷贝实现。
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。
