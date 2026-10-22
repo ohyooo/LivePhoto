@@ -198,7 +198,8 @@ try {
       await choose('重新选择视频',kind==='video'?{name:'unreadable.mp4',mimeType:'video/mp4',buffer:video}:videoPath);
       const prior=downloads;
       await click('生成动态照片');await text(/IO_READ_FAILED/).waitFor({state:'attached'});
-      const report=await driver.report(text(/生成失败/));
+      await page.getByText('本次结果',{exact:true}).waitFor({state:'attached'});
+      const report=await driver.report(page.locator('#status'));
       ioFailuresNoOutput&&=downloads===prior&&report.includes('阶段：Read')&&
         report.includes('来源：browser-'+kind)&&report.includes('关联对象：'+(kind==='image'?'图片输入':'视频输入'));
     }
