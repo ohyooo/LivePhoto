@@ -123,10 +123,10 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 在 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 成功运行中下载 `LivePhoto-web-ui-<run>-<attempt>`，解压后将 `web-ui/` 中全部文件放到 HTTP(S) 静态服务，访问 `index.html`。不能只复制入口 JS，也不建议通过 `file://` 打开。功能库 artifact 仍单独提供，不依赖此界面。
 
 ```sh
-./gradlew -Plivephoto.web=true -Plivephoto.webUi=true :verifyWebBuild :ui:wasmJsBrowserDistribution
+./gradlew -Plivephoto.web=true -Plivephoto.webUi=true :verifyWebBuild :ui:wasmJsBrowserDistribution :ui:worker:wasmJsBrowserDistribution
 ```
 
-原始静态网页产物位于 `ui/build/dist/wasmJs/productionExecutable/`。应用的公共 Core 和 Compose UI 编译为 Kotlin/Wasm；JS 仅用于入口加载和浏览器媒体、文件适配。需要支持 WasmGC 的现代浏览器。打包清单单独标识 Kotlin 应用 Wasm，CI 不会把 Skiko 或 FFmpeg 的 Wasm 当成应用迁移证据。界面保持自适应布局；选择 JPEG 和 MP4 后生成下载，协议和输入限制不变。浏览器只能确认已发起下载，不保证用户最终保存；刷新后需要重新选择输入。当前迁移的实际验证状态见 Web 路线文档。
+原始界面产物位于 `ui/build/dist/wasmJs/productionExecutable/`，后台程序位于 `ui/worker/build/dist/wasmJs/productionExecutable/`。使用 `scripts/package-web-ui.ps1` 合并为完整网站，包含 `worker/`、媒体适配、字体及哈希清单；部署时使用完整打包产物。Compose UI 和后台 Core 均编译为 Kotlin/Wasm；JS 仅承担加载、消息传递及浏览器 IO/媒体适配。需要支持 WasmGC 和 Web Worker 的现代浏览器。清单分别标识应用和后台 Wasm，CI 不把 Skiko 或 FFmpeg 当成 Kotlin 应用。浏览器只能确认已发起下载，不保证用户最终保存；刷新后需要重新选择输入。实际验收与部署状态见 Web 路线文档。
 
 网页视频编辑入口及新版交互的验收状态见 [Web 路线](docs/web-roadmap.md)：
 
@@ -676,11 +676,13 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 312 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
 
-新双页/响应式共享界面已在源码 `4b9e6cb` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39731208590) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。网站已部署并通过全部静态文件的正常域名 HTTPS 哈希与类型检查，旧版本保留、原首页不变，客户端域名访问已恢复。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归。
+当前界面与后台 Worker 已在源码 `57edf96` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39969395659) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。网站已部署并通过全部 28 个静态文件的正常域名 HTTPS 哈希与类型检查，旧版本保留、原首页不变。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归。
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 
-Wasm 界面的生成、检查照片、提取原始视频、清理拆分、协议转换和关键照片时间，现通过同一 `BinarySource` 按需读取 `Blob.slice`，不预先加载整份输入；单次读取最多 64 KiB，输入仍限 32 MiB。上述 CI 包含两尺寸的分块读取、超限前拒绝、IO 错误无输出及原有保真检查；生成还分别验证图片和视频读取失败的定位。修复、独立 JS 库尚未迁移，输出仍使用原有有界内存事务；这不是总内存仅 64 KiB、任意大文件、零拷贝或 UI 后台 Worker 的承诺。
+Wasm 界面的生成、检查、提取、拆分、转换、修复、关键照片时间七个入口使用随机访问输入，单次 `Blob.slice` 最多 64 KiB，输入仍限 32 MiB。修复预览与应用独立分块计算 SHA-256，再核对审阅方案；内容变化保留 `SOURCE_CHANGED` 拒绝，不信任文件名、大小或提供方自报摘要。修复分块版已通过 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39953499068) 并上线。
+
+后台 Worker 已验收并部署：七个协议入口及五个媒体操作的 Core 编排在独立 Kotlin/Wasm Worker 运行，主线程提供有界读取和已验证输出的下载。处理时可点击“取消处理”，媒体编辑仍使用“取消媒体处理”；加载和执行期间均可取消，迟到结果被丢弃，修复须重新预览。已发起的浏览器下载不可撤回。单次任务限 120 秒，超时终止后台任务。输出仍是有界内存事务，FFmpeg 仍需私有内存文件系统；64 KiB 不是总内存上限。独立 JS 功能库的分块 IO、任意大文件和流式输出仍在 TODO，不宣称零拷贝。
 
 已有照片也可在共享界面的“关键照片时间（秒）”中输入位置并另存，只修改 metadata、不替换静态封面。最近画面容差明确为 100ms，显示请求与实际时间；整数微秒量化会返回 `KEY_TIMESTAMP_QUANTIZED`。输入变化清旧报告、原片不变。部分 OPPO 文件修改时间字段长度会移动未经验证的 EXIF，因此保留 `UNSAFE_METADATA_REWRITE` 拒绝，不输出、不删除 EXIF 绕过；不是全部可创建文件都能修改关键时间。更广的 key/媒体格式仍以 Core 能力与安全拒绝为准。
 

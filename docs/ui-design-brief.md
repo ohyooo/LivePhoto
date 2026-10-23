@@ -9,7 +9,7 @@
 ```text
 共享 Compose UI（ui/commonMain）
     → LivePhotoUiPlatform / VideoEditor
-    → 浏览器 Kotlin/Wasm 适配
+    → 浏览器 Kotlin/Wasm 任务适配与后台 Worker
     → shared 的统一 Application / Core API
     → 协议代码 / 可选 FFmpeg Wasm 媒体后端
 ```
@@ -20,7 +20,7 @@
 
 ## 当前功能和信息架构
 
-当前为“新建 / 照片工具”两页，共享 Kotlin Compose 实现。宽度小于 800 为单列、800～1279 为双列、1280 起为三列，主体最大宽度 1800。源码 `4b9e6cb` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39731208590) 已通过全部 32 个 job，产物与 32 张合成截图已核验；已部署并通过正常域名 HTTPS 文件校验，客户端域名访问已恢复。依赖经用户批准的 Compose/Material3 1.13.0-alpha02，不代表稳定版、所有浏览器或 Android 验收。
+当前为“新建 / 照片工具”两页，共享 Kotlin Compose 实现。宽度小于 800 为单列、800～1279 为双列、1280 起为三列，主体最大宽度 1800。源码 `57edf96` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39969395659) 已通过全部 32 个 job，产物与 32 张合成截图已核验；含后台 Worker 的网站已部署并通过正常域名 HTTPS 文件校验。依赖经用户批准的 Compose/Material3 1.13.0-alpha02，不代表稳定版、所有浏览器或 Android 验收。
 
 新建页依次为视频与图片输入、视频预览、裁剪、更多视频处理、封面位置、输出设置、结果。裁剪、媒体处理、封面分别折叠，折叠不清空草稿；待应用裁剪与失效封面会阻止生成。输入可更换、移除，重置需确认。结果在操作后出现，输入或目标改变后标为旧结果。照片工具有独立输入与工具选择，只显示当前工具参数。
 
@@ -89,6 +89,8 @@
 |---|---|
 | `rememberPicker(kind, onResult)` | Compose 文件选择器；`MediaKind.Image / Video / LivePhoto`；取消返回 null |
 | `describe(reference)` | `SelectedMediaInfo(displayName, sizeBytes)` |
+| `runTask(task)` | 当前共享 UI 的操作入口：`UiTaskKind` 区分七种操作；`UiTaskResult` 返回报告、失败状态、可选另存动作和修复应用动作 |
+| `cancelTask()` / `supportsTaskCancellation` | 后台操作取消；仅支持的平台显示按钮；未发布的结果不得下载 |
 | `create(image, video, target)` | `CoreResult<CreatedPhoto>`，包含 `OperationResult`；浏览器适配负责发起下载 |
 | `analyze(reference)` | `CoreResult<AnalysisResult>` |
 | `extractVideo(reference)` | `CoreResult<ExtractedVideo>`；适配负责导出 |
@@ -101,6 +103,8 @@
 | `ImagePreview` / `ResultPreview` | Compose 平台媒体预览插槽，不在 UI 重写解码 |
 
 平台还提供 `supportsAnalysis`、`supportsVideoEditing` 等功能开关，以及输出位置、结果预览可用性和成功说明。设计应允许不可用能力隐藏或明确禁用，不推断所有平台都有功能。
+
+共享控件现在调用 `runTask`，不再直接展开 Core 对象。上表原有 typed 方法保留给既有宿主适配，默认桥接继续复用同一报告格式；Web 覆盖任务入口，在 Kotlin/Wasm Worker 中调用原应用 helpers 和 Core，不经过独立 JS 功能库。`UiTaskResult.saves` 是清理拆分的逐文件显式保存动作；`applyRepair` 仅在预览有安全方案时存在。不要自行构造它、绕过预览，或将取消/失败当作成功保存。
 
 `VideoEditor` 是唯一媒体编辑接口：
 
@@ -153,15 +157,15 @@ repairLivePhoto(input, { dryRun?, allowedIssueCodes? })
 
 ## UI TODO
 
-以下为待设计或待实施项，不是已经存在的新功能。可以出设计稿，但必须区分纯界面调整和需要 Core 能力的项目。
+下表同时保留已完成项和待实施项，具体以状态列为准。可以出设计稿，但必须区分纯界面调整和需要 Core 能力的项目。
 
 | TODO | 设计需要覆盖 | 实施依赖与状态 |
 |---|---|---|
 | 本次整体视觉与信息架构重设计 | 两页、响应式列布局、紧凑输入和唯一生成栏 | 已实现并验收，已部署并通过正常域名 HTTPS 校验 |
 | 封面流程的信息表达 | 预览、已确认、需要重选及实际位置分别显示 | 已实现并通过媒体 UI、真实生成下载检查；没有第二套抽帧实现 |
 | 统一报告展示 | 摘要、折叠诊断、失败原因和显式复制 | 已实现并通过回归；结构化报告保留，显式复制前不操作剪贴板 |
-| 大文件与后台处理体验 | 预算提示、页面可交互、处理/取消/结果状态 | 生成、检查、提取、拆分、转换、关键时间六个入口已通过 Blob 分块读取验收；32 MiB 限额不变，输出仍有界内存；修复、JS 库及 UI 后台 Worker 尚未迁移 |
-| 完整取消与任务状态一致性 | 区分取消请求、已取消、已完成、保存状态不确定 | 当前仅媒体处理有明确取消入口，扩展到全部任务需要 API 支持 |
+| 大文件与后台处理体验 | 预算提示、页面可交互、处理/取消/结果状态 | 七个协议入口已完成分块读取，含修复摘要与 SOURCE_CHANGED；UI Worker 已验收并部署。32 MiB 限额不变，输出仍有界内存；独立 JS 库的分块 IO 与流式输出待实现 |
+| 取消与任务状态一致性 | 区分已取消、已完成及保存状态 | 协议与媒体任务已提供取消；模块加载和运行中取消、迟到结果丢弃、重新操作已通过真实 UI 验收。修复取消后需重新预览；已发起的浏览器下载不可撤回 |
 | 更完整的视频格式能力提示 | 选择后说明可预览、可处理、为何不能写出 | 必须使用真实能力与错误；单/多声道 AAC 保留能力待实现，不能以 UI 放行代替 |
 | OPPO 转换与修复受限状态 | 显示具体限制和无输出，不能误提示已修复 | 固定长度 XMP 槽位、Padding 边界与保留证明是 Core TODO，不是加按钮即可实现 |
 | 播放器透明孔洞或残影 | 保留观察记录 | 用户暂时搁置，不要求本次重设计修复，也不标记为已解决 |

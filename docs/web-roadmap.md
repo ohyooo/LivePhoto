@@ -8,7 +8,7 @@
 
 已按新设计接入“新建 / 照片工具”双页、800/1280 响应式列布局、三态主题、紧凑文件行和移除/重置确认、独立裁剪草稿与封面预览、折叠报告及显式复制。窗口变化、切页和主题切换应保留素材及编辑状态；待应用选段和失效封面阻止生成。未扩展协议、音频编码或媒体后端。
 
-最新源码 `4b9e6cb` 的 [Web CI 39731208590](https://github.com/ohyooo/LivePhoto/actions/runs/39731208590) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 809 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。新增检查覆盖布局变更、裁剪草稿阻止生成和重置确认。已由服务器直接下载产物并部署，保留旧版本；正常域名访问已恢复，全部静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，原首页保持不变。这不代表所有浏览器/手机相册兼容。
+当前已验收源码 `57edf96` 的 [Web CI 39969395659](https://github.com/ohyooo/LivePhoto/actions/runs/39969395659) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 809 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。真实 UI 检查还覆盖 Worker 启动、分块读取、模块加载与执行期间取消、迟到结果丢弃和重新操作。已由服务器直接下载产物并部署，保留旧版本；含独立 Worker Wasm 的全部 28 个静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，客户端返回 HTTP 200，原首页保持不变。这不代表所有浏览器/手机相册兼容。
 
 用户已明确允许预发布版以修复 Popup/Dialog 关闭后无障碍 DOM 停止同步的问题（[CMP-9368](https://youtrack.jetbrains.com/issue/CMP-9368) / [CMP-10623](https://youtrack.jetbrains.com/issue/CMP-10623)）。Compose 与共享 Material3 对齐 [1.13.0-alpha02](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.13.0-alpha02)，保留现有 Kotlin、Gradle 和 SDK；已删除点击标题、额外 Tab 和动画延时的无效绕行。弹层关闭后节点自行移除、真实交互、下载与诊断已在上述 CI 验证；不关闭无障碍、不删除测试。输入测试在全选与键入之间等待框架动画帧检查点，重选后等待旧报告节点移除，不把原生视频就绪当成 Compose 报告同步完成。Alpha 仍是预发布依赖，本轮不宣称 Android/Native 回归完成。
 
@@ -37,11 +37,17 @@
 - [x] 共享 Compose 有限协议转换 UI：独立目标选择和另存入口，三个既有 JPEG 目标；复用 Core Convert，同目标 PreserveAsIs，不将普通照片变成 Create、不自动修复/转码、不授权 metadata 损失，保留 OPPO→Google 的 EXIF 安全拒绝。输入/目标变更清旧报告，具体两端验收以对应提交 CI 为准，不能拿上轮拆分结果代替。
 - [x] 共享 Compose 有限 Repair UI：默认只读预览、存在安全方案才允许显式另存；应用前核对已审阅输入摘要与完整方案，保留 no-op/blocked/OPPO 模糊布局的无输出行为。仅 SafeMetadataOnly，不 remux/转码/编码音频、不改原片；单一 JPEG 导出，报告不展开私人 metadata 值。新提交实际两端验收以 CI 为准，不能拿上轮转换结果代替。
 
-## 后续、尚未实现
+### 本轮完成：修复分块读取与 UI 后台 Worker
+
+本轮用户选择修复分块读取和 UI 后台 Worker。修复分块版 `e3cdc26` 已在 [Web CI 39953499068](https://github.com/ohyooo/LivePhoto/actions/runs/39953499068) 全部 32 个 job 通过并部署，公共 JS/Wasm 各 809 项、外围 312 项及既有 Worker/媒体专项保留，四份产物与正常域名全部静态文件哈希核验成功。
+
+UI 后台实现已在 `57edf96` 完成上述整轮验收、产物审计与部署：独立 Kotlin/Wasm 编译单元复用原应用 helpers 与 shared Core，七个协议入口及五个媒体操作通过同一任务适配运行。IO 每次最多 64 KiB，通过 transferable ArrayBuffer 传递；UI 只发起请求、展示报告及发布已验证结果。修复审阅摘要和完整方案留在 Worker，随机授权标记绑定输入引用；应用时仍重新核对实际内容，取消后需要重新预览。加载和执行均可取消，Worker 终止后拒绝迟到结果，120 秒超时覆盖启动与执行；已发起的浏览器下载不可撤回。没有保留旧的主线程协议/媒体执行路径。
+
+## 后续任务与相关完成项
 
 - [ ] 不移动 EXIF 的固定长度 XMP 槽位优化及独立保留证明。当前 Core 对 XMP 调整会移动未验证 EXIF 的布局返回 `UNSAFE_METADATA_REWRITE`，Web 保留此拒绝，不删除 EXIF 或增加丢失授权。新建 OPPO 文件转 Google 的两个方向受此限制；同目标原样复制与无此布局依赖的转换分开验证。
 - [ ] 独立核验 OPPO 显式次级 `Padding="0"` 的修复边界。当前默认新建布局含此字段，现有 Core Repair 刻意不接受；Web 返回 `REPAIR_AMBIGUOUS` 且无输出，不能把可创建误写为可修复，也不在适配层移除字段绕过。
-- [ ] 大文件随机访问、减少内存副本、UI 后台 Worker 和明确的取消语义。Wasm 界面的生成、检查照片、提取原始视频、清理拆分、协议转换、关键照片时间六个入口已通过同一 `BinarySource` 按需读取 `Blob.slice`，单次切片最多 64 KiB，不预先加载整份输入；32 MiB 输入限额和原有保真/安全拒绝不变。最新 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39731208590) 两尺寸真实浏览器验证零整文件读取、超预算零切片、结构化读取错误及失败无输出；生成另验证图片/视频分别读取失败时的来源与关联对象。原始视频哈希、图片解码、转换/时间与状态隔离检查保留。ByteArray 调用只包装输入并复用相同应用编排，不维护两套协议逻辑。64 KiB 仅是单次读取上限，不是 Core 总内存；输出仍是有界内存事务。修复、独立 JS 功能库及 UI 后台 Worker 尚未迁移；修复迁移还须保留审阅输入摘要与 SOURCE_CHANGED 拒绝，不能称任意大文件流式或零拷贝实现。
+- [ ] 独立 JS 功能库的分块 IO、放大输入预算与流式输出。Wasm UI 七个协议入口已经按需读取 Blob，每次最多 64 KiB；修复还独立计算完整内容摘要、核对审阅方案并保留 SOURCE_CHANGED。原有保真、超预算零读取、来源定位和 IO 错误无输出检查保留。UI Worker 与取消的当前验收状态见上文，不能将旧 JS Worker 专项当作 UI 后台迁移证明。输入仍限 32 MiB、输出仍为 48 MiB 有界内存事务；FFmpeg 的私有内存输入仍需完整暂存，不宣称任意大文件流式、零拷贝或 64 KiB 总内存。
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。
@@ -54,7 +60,7 @@
 
 Apple 新写入仍暂停，移动端系统媒体后端仍是单独 TODO。输入不上传服务器；仓库和 CI 不增加手机/reference 原片或其衍生成品。测试用独立合成素材，报告不附带媒体。
 
-## 本轮状态
+## 历史阶段验收（当前状态以上文为准）
 
 深浅色跟随浏览器及右上角太阳/月亮切换已在 [Web CI 39135176016](https://github.com/ohyooo/LivePhoto/actions/runs/39135176016) 的 `26c8790` 验证并部署：70 项协议、38 项 UI、11 项媒体、91 项播放器、12 项主题，共 222 项。真实指针切换、浏览器偏好变更、手动覆盖、媒体保留和刷新恢复跟随均有独立证据；透明孔洞仍是已知 TODO。
 
@@ -76,4 +82,4 @@ CI 已拆分为一次生产构建、四个并行测试 job（协议、媒体、�
 
 只读检查/分析/关键照片读取、Clean Split、Convert 的 JS 适配和 TypeScript 声明已实现；当前全部公开接口已另有 42 项 Worker 专项。接口可用不表示任意容器变体均受支持，也不表示已在共享 UI 开放操作按钮或自动后台执行。
 
-上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作均保留在后续检查中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** 剩余包括 Wasm 媒体适配独立执行验收、旧播放器流程统一、后台 UI 与大文件优化，分项见上方 TODO；有限接口不代表任意媒体均受支持。
+上一阶段的 50 项功能库检查（结构化检查、Clean Split、有限 Convert、安全拒绝及 Worker 基础）和 20 项 UI 操作的行为覆盖保留在后续检查中。**测试是否通过，以对应提交的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/workflows/web.yml) 为准，不能用旧结果代替新代码验证。** Wasm 媒体验收、播放器流程统一和 UI Worker 后续均已完成；剩余包括独立 JS 库分块 IO、输入预算与流式输出等上方未勾选项。有限接口不代表任意媒体均受支持。
