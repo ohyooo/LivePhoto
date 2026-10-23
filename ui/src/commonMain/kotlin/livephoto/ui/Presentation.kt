@@ -2,6 +2,19 @@ package livephoto.ui
 
 import livephoto.core.CoreError
 import livephoto.core.Value
+import livephoto.core.OperationResult
+
+public fun formatCreatedPhoto(operation: OperationResult, publication: String): String = buildString {
+    val issues = (operation.issues + operation.validation.issues).distinct()
+    append("$publication\n")
+    append("Core 验证：${operation.validation.verdict}；覆盖：${operation.validation.coverage}；问题报告：${issues.size} 项。\n")
+    operation.output.assets.forEach { append("${it.recommendedName ?: it.mime}；${it.byteLength} bytes；SHA-256：${it.digest.value}\n") }
+    if (issues.isNotEmpty()) append("报告代码：${issues.take(16).joinToString { it.code.value }}\n")
+    operation.keyPhoto?.let { append("关键照片：${it.position}；来源：${it.source}\n") }
+    operation.preservation.records.forEach { append("${it.guarantee}: ${it.outcome}\n") }
+    operation.preservation.changes.forEach { append("变化：${it.selector}\n") }
+    append("默认 BestEffortWithReport，不保证全部 metadata 无损。生成成功不等于手机相册兼容。")
+}
 
 public fun formatMediaSize(bytes: Long?): String {
     if (bytes == null || bytes < 0) return "未知（文件提供方未返回大小）"

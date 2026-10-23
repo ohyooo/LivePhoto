@@ -32,22 +32,10 @@ import kotlin.js.JsAny
 import kotlin.js.Promise
 import kotlin.math.roundToLong
 import livephoto.core.*
-import livephoto.core.memory.*
 import livephoto.ui.*
 
 /** Normalize native JS Promise errors before they cross shared Kotlin UI handlers. */
 private suspend fun <T : JsAny> browserAwait(promise: Promise<T>): T = promise.await()
-
-private suspend fun browserBytes(file: Blob): ByteArray {
-    val values = Int8Array(browserFileBytes(file).await())
-    return ByteArray(values.length) { browserByte(values, it) }
-}
-
-private fun outputBlob(bytes: ByteArray, mime: String): Blob {
-    val values = Int8Array(bytes.size)
-    bytes.forEachIndexed { index, byte -> browserSetByte(values, index, byte) }
-    return browserBlob(values, mime)
-}
 
 private fun downloadBlob(blob: Blob, name: String) {
     val url = browserObjectUrl(blob)
@@ -92,7 +80,6 @@ public fun main() {
 }
 
 private class BrowserPlatform : LivePhotoUiPlatform {
-    private val core = browserMediaCore()
     private val files = mutableMapOf<String, File>()
     lateinit var media: BrowserMedia
     private data class Timeline(val root: String, val origin: Double)
@@ -182,151 +169,54 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         return SelectedMediaInfo(file.name, browserFileSize(file).toLong())
     }
 
-    override suspend fun analyze(reference: String): CoreResult<AnalysisResult> {
-        val file = files[reference] ?: error("请重新选择待检查照片")
-        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Photo analysis input exceeds 32 MiB"))
-        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        val source = BrowserBlobSource(file, SourceId("browser-analysis:$reference"))
-        try {
-            return analyzeSelectedPhoto(core, source, Cancellation { job?.isActive == false })
-        } finally { source.close() }
-    }
+    private val tasks = BrowserTasks()
+    override val supportsTaskCancellation = true
+    override fun cancelTask() { tasks.cancel() }
 
-    override suspend fun extractVideo(reference: String): CoreResult<ExtractedVideo> {
-        val file = files[reference] ?: error("请重新选择待检查照片")
-        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
-        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        val source = BrowserBlobSource(file, SourceId("browser-extract:$reference"))
-        val result = try {
-            prepareExtractedVideo(DefaultLivePhotoCore(), source, Cancellation { job?.isActive == false })
-        } finally { source.close() }
-        return when (result) {
-            is CoreResult.Failure -> result
-            is CoreResult.Success -> {
-                val prepared = result.value
-                downloadBlob(outputBlob(prepared.bytes.toByteArray(), prepared.report.mime), "LivePhoto-video.${prepared.report.extension}")
-                CoreResult.Success(prepared.report)
-            }
+    override suspend fun runTask(task: UiTask): UiTaskResult = runBrowserTask(task, "")
+
+    private suspend fun runBrowserTask(task: UiTask, review: String): UiTaskResult {
+        val file = files[task.input] ?: error("请重新选择文件")
+        val movie = task.video?.let { files[it] ?: error("请重新选择视频") }
+        if (task.kind == UiTaskKind.Create && coverWarning(task.input, task.video) != null)
+            return UiTaskResult("生成失败\n视频已变化，请重新选择封面。", true)
+        val key = if (task.kind == UiTaskKind.Create) coverPosition(task.input, task.video) else task.time
+        val publication = when (task.kind) {
+            UiTaskKind.Create -> successMessage
+            UiTaskKind.Extract -> videoExportSuccessMessage
+            UiTaskKind.Convert -> conversionSuccessMessage
+            UiTaskKind.Repair -> repairSuccessMessage
+            UiTaskKind.Key -> keySuccessMessage
+            else -> ""
         }
-    }
-
-    override suspend fun cleanSplit(reference: String): CoreResult<PreparedCleanSplit> {
-        val file = files[reference] ?: error("请重新选择待检查照片")
-        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
-        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        val source = BrowserBlobSource(file, SourceId("browser-split:$reference"))
-        try {
-            return prepareCleanSplit(DefaultLivePhotoCore(), source, Cancellation { job?.isActive == false })
-        } finally { source.close() }
-    }
-
-    override suspend fun saveSplitFile(file: SplitFile): String {
+        val response = tasks.run(taskOptions(task.kind.name, task.input,
+            task.target?.protocol?.value ?: "", task.target?.profile?.value ?: "",
+            key?.value?.toString() ?: "", key?.timescale?.toString() ?: "", review = review,
+            imageName = task.imageName ?: "", videoName = task.videoName ?: "", publication = publication), file, movie)
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        downloadBlob(outputBlob(file.bytes.toByteArray(), file.mime), "LivePhoto-clean.${file.extension}")
-        return "${file.mime}：已发起下载，请检查下载记录；另一文件需单独保存。"
-    }
-
-    override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<ConvertedPhoto> {
-        val file = files[reference] ?: error("请重新选择待检查照片")
-        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Conversion input exceeds 32 MiB"))
-        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        val source = BrowserBlobSource(file, SourceId("browser-convert:$reference"))
-        val result = try {
-            prepareConvertedPhoto(DefaultLivePhotoCore(), source, target, Cancellation { job?.isActive == false })
-        } finally { source.close() }
-        return when (result) {
-            is CoreResult.Failure -> result
-            is CoreResult.Success -> {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                downloadBlob(outputBlob(result.value.bytes.toByteArray(), "image/jpeg"), "LivePhoto-converted-${target.protocol.value}.jpg")
-                CoreResult.Success(result.value.report)
-            }
-        }
-    }
-
-    override suspend fun setPhotoKey(reference: String, requested: Time): CoreResult<PhotoKeyReport> {
-        val file = files[reference] ?: error("请重新选择待检查照片")
-        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Key input exceeds 32 MiB"))
-        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        val source = BrowserBlobSource(file, SourceId("browser-key:$reference"))
-        val result = try {
-            preparePhotoKey(DefaultLivePhotoCore(), source, requested, Cancellation { job?.isActive == false })
-        } finally { source.close() }
-        return when (result) {
-            is CoreResult.Failure -> result
-            is CoreResult.Success -> {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                downloadBlob(outputBlob(result.value.bytes.toByteArray(), "image/jpeg"), "LivePhoto-key.jpg")
-                CoreResult.Success(result.value.report)
-            }
-        }
-    }
-
-    override suspend fun repairPhoto(reference: String, review: RepairReview?): CoreResult<PhotoRepairReport> {
-        val file = files[reference] ?: error("请重新选择待检查照片")
-        if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Repair input exceeds 32 MiB"))
-        val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        val source = BrowserBlobSource(file, SourceId("browser-repair:$reference"))
-        val result = try {
-            preparePhotoRepair(DefaultLivePhotoCore(), source, review, Cancellation { job?.isActive == false })
-        } finally { source.close() }
-        return when (result) {
-            is CoreResult.Failure -> result
-            is CoreResult.Success -> {
-                result.value.bytes?.let { repaired ->
+        if (response.failed) return UiTaskResult(response.report, true)
+        val blob = response.bytes?.let { taskBlob(it, checkNotNull(response.mime)) }
+        if (task.kind == UiTaskKind.Split) {
+            val image = checkNotNull(blob)
+            val video = taskBlob(checkNotNull(response.second), checkNotNull(response.secondMime))
+            return UiTaskResult(response.report, saves = listOf(
+                UiSaveAction("image") {
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                    downloadBlob(outputBlob(repaired.toByteArray(), "image/jpeg"), "LivePhoto-repaired.jpg")
-                }
-                CoreResult.Success(result.value.report)
-            }
+                    downloadBlob(image, checkNotNull(response.name))
+                    "${response.mime}：已发起下载，请检查下载记录；另一文件需单独保存。"
+                },
+                UiSaveAction("video") {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    downloadBlob(video, checkNotNull(response.secondName))
+                    "${response.secondMime}：已发起下载，请检查下载记录；另一文件需单独保存。"
+                }))
         }
-    }
-
-    override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> {
-        val photo = files[image] ?: error("Select the image again")
-        val movie = files[video] ?: error("Select the video again")
-        val frame = selectedFrame?.takeIf { it.image == image }
-        val timeline = timelines[video]
-        if (frame != null && (timeline == null || frame.root != timeline.root || frame.sourceTime < timeline.origin))
-            return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan,
-                "视频范围或编码已改变，请在当前视频上重新选择封面；不会猜测旧封面的时间。"))
-        val key = frame?.let { CoverPosition.Timestamp(Time(((it.sourceTime - timeline!!.origin) * 1_000_000).roundToLong(), 1_000_000u),
-            Selection.Nearest, Time(1, 1u)) }
-        if (browserFileSize(photo).toLong() + browserFileSize(movie).toLong() > 32L * 1024 * 1024) return CoreResult.Failure(CoreError(
-            IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Combined browser inputs exceed 32 MiB"))
-        val ctx = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u))
-        val imageSource = BrowserBlobSource(photo, SourceId("browser-image"))
-        val videoSource = BrowserBlobSource(movie, SourceId("browser-video"))
-        val output = MemoryOutputTransaction(ctx, "browser-create")
-        var created: OperationResult? = null
-        try {
-            val policy = if (target.protocol == ProtocolIds.Oplus) MutationPolicy(loss = LossPolicy.AllowListed,
-                allowedLosses = listOf(MetadataLoss.OplusCameraUserComment, MetadataLoss.OplusAsciiCameraUserComment)) else MutationPolicy()
-            return when (val result = DefaultLivePhotoCore().create(CreateRequest(imageSource, videoSource, target,
-                edits = key?.let { EditSpec(keyPosition = it) }, policy = policy, output = output, context = ctx))) {
-                is CoreResult.Failure -> result
-                is CoreResult.Success -> {
-                    created = result.value
-                    val asset = result.value.output.assets.single()
-                    val blob = outputBlob(output.committedAssets().getValue(asset.id).toByteArray(), asset.mime)
-                    lastResult = blob to movie
-                    val outputName = "LivePhoto-${target.protocol.value}.jpg"
-                    downloadBlob(blob, outputName)
-                    val operation = result.value.copy(output = MediaOutput(
-                        listOf(asset.copy(recommendedName = outputName, readableSource = null, accessReference = "browser-download:${asset.id.value}")), result.value.output.receipt))
-                    CoreResult.Success(CreatedPhoto(operation))
-                }
-            }
-        } finally {
-            created?.output?.assets?.forEach { it.readableSource?.close() }
-            imageSource.close(); videoSource.close()
+        if (blob != null) {
+            if (task.kind == UiTaskKind.Create) lastResult = blob to checkNotNull(movie)
+            downloadBlob(blob, checkNotNull(response.name))
         }
+        return UiTaskResult(response.report, name = response.name,
+            applyRepair = response.review?.takeIf { it.isNotEmpty() }?.let { token -> { runBrowserTask(task, token) } })
     }
 
     @Composable
@@ -438,26 +328,24 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             try {
                 check(browserFileSize(file) <= ANALYSIS_INPUT_LIMIT) { "Core 媒体输入超过 32 MiB" }
                 check(state.value.duration.isFinite() && state.value.duration > 0 && state.value.duration <= 60) { "Core 媒体工具仅限 60 秒内视频" }
-                val currentJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-                val result = prepareCoreMedia(browserMediaCore(), browserBytes(file), action, start, end,
-                    Cancellation { disposed || coreCancelled || currentJob?.isActive == false })
+                val prepared = tasks.run(taskOptions(action.name, timeline.root, time = start.value.toString(), scale = start.timescale.toString(),
+                    end = end.value.toString(), endScale = end.timescale.toString()), file)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 check(!disposed && !coreCancelled) { "媒体操作已取消；输入未替换" }
-                val prepared = when (result) {
-                    is CoreResult.Failure -> error("${result.error.code.value} / ${result.error.stage}：${result.error.message.take(1600)}")
-                    is CoreResult.Success -> result.value
-                }
-                val bytes = prepared.bytes ?: return CoreMediaEdit(prepared.summary)
+                check(!prepared.failed) { prepared.report }
+                val bytes = prepared.bytes ?: return CoreMediaEdit(prepared.report)
                 val mime = checkNotNull(prepared.mime)
                 val name = if (action == CoreMediaAction.ExtractFrame) "core-frame.jpg" else "core-${action.name.lowercase()}.mp4"
-                val output = browserFile(outputBlob(bytes.toByteArray(), mime), name, mime)
+                val output = browserFile(taskBlob(bytes, mime), name, mime)
                 return if (action == CoreMediaAction.ExtractFrame) {
-                    val actual = checkNotNull(prepared.actualTime)
+                    val actual = Time(checkNotNull(prepared.time).toLong(), checkNotNull(prepared.scale).toUInt())
                     val reference = register(MediaKind.Image, output)
                     selectedFrame = Frame(reference, timeline.root, timeline.origin + actual.value.toDouble() / actual.timescale.toDouble())
-                    CoreMediaEdit(prepared.summary, imageReference = reference)
+                    CoreMediaEdit(prepared.report, imageReference = reference)
                 } else {
-                    val window = prepared.retainedVideoWindow
+                    val window = prepared.windowScale?.takeIf { it.isNotEmpty() }?.let { scale ->
+                        TimeRange(Time(checkNotNull(prepared.start).toLong(), scale.toUInt()), Time(checkNotNull(prepared.end).toLong(), scale.toUInt()))
+                    }
                     val mapped = window?.let {
                         val frame = selectedFrame?.takeIf { selected -> selected.root == timeline.root }
                         if (frame != null) {
@@ -468,11 +356,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     }
                     // No validated unit-rate video map: keep rejecting stale covers.
                     val reference = register(MediaKind.Video, output, mapped)
-                    CoreMediaEdit(prepared.summary, video = EditedVideo(reference, prepared.summary))
+                    CoreMediaEdit(prepared.report, video = EditedVideo(reference, prepared.report))
                 }
             } finally { coreBusy = false }
         }
-        override fun cancel() { coreCancelled = true }
+        override fun cancel() { coreCancelled = true; if (coreBusy) tasks.cancel() }
         fun dispose() {
             disposed = true; cancel(); previewReference?.let { files.remove(it) }
             thumbnailReferences.forEach { files.remove(it) }; thumbnailReferences.clear()

@@ -30,7 +30,6 @@ public data class VideoPlayback(
     val paused: Boolean = true, val volume: Double = 1.0, val muted: Boolean = false,
     val rate: Double = 1.0, val fullscreen: Boolean = false,
 )
-public data class EditedVideo(val reference: String, val summary: String)
 
 public interface VideoEditor {
     public val playback: State<VideoPlayback>

@@ -55,13 +55,8 @@ internal fun browserMediaReady(): Promise<BrowserMedia> =
     js("window.livePhotoMediaReady.then(player => ({player}))")
 internal fun browserFont(): Promise<ArrayBuffer> =
     js("fetch('fonts/NotoSansSC-Regular.otf').then(response => { if (!response.ok) throw new Error('Bundled font unavailable'); return response.arrayBuffer(); })")
-internal fun browserFileBytes(file: Blob): Promise<ArrayBuffer> = js("file.arrayBuffer()")
-internal fun browserFileRangeBytes(file: Blob, start: Double, end: Double): Promise<ArrayBuffer> =
-    js("file.slice(start, end).arrayBuffer()")
 internal fun browserFileSize(file: Blob): Double = js("file.size")
 internal fun browserByte(values: Int8Array, index: Int): Byte = js("values[index]")
-internal fun browserSetByte(values: Int8Array, index: Int, value: Byte): Unit = js("{ values[index] = value; }")
-internal fun browserBlob(values: Int8Array, mime: String): Blob = js("new Blob([values], {type: mime})")
 internal fun browserFile(blob: Blob, name: String, mime: String): File = js("new File([blob], name, {type: mime})")
 internal fun browserObjectUrl(blob: Blob): String = js("URL.createObjectURL(blob)")
 internal fun browserRevokeUrl(url: String): Unit = js("{ URL.revokeObjectURL(url); }")

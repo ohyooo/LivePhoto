@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew :verifyWebBuild :shared:jsBrowserProductionLibraryDistribution :ui:wasmJsBrowserDistribution --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-build.log ci-output/web-ui-build.log
+          ./gradlew :verifyWebBuild :shared:jsBrowserProductionLibraryDistribution :ui:wasmJsBrowserDistribution :ui:worker:wasmJsBrowserDistribution --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | tee ci-output/web-build.log ci-output/web-ui-build.log
 
       - name: Cache packaging dependencies
         uses: actions/cache@v6

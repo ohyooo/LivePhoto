@@ -31,10 +31,8 @@ internal fun ConversionControls(platform: LivePhotoUiPlatform, reference: String
         scope.launch {
             working = true; onBusy(true); report = null; failed = false
             try {
-                report = when (val result = platform.convertPhoto(selected, selectedTarget)) {
-                    is CoreResult.Success -> formatConvertedPhoto(result.value, platform.conversionSuccessMessage)
-                    is CoreResult.Failure -> { failed = true; formatConversionFailure(result.error) }
-                }
+                val result = platform.runTask(UiTask(UiTaskKind.Convert, selected, target = selectedTarget))
+                report = result.report; failed = result.failed
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 failed = true

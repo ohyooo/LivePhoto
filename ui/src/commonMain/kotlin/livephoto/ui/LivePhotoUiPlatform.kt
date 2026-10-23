@@ -34,7 +34,11 @@ public interface LivePhotoUiPlatform {
     public fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit
     public suspend fun describe(reference: String): SelectedMediaInfo
     public fun release(reference: String) {}
-    public suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto>
+    public suspend fun runTask(task: UiTask): UiTaskResult = runHostTask(task)
+    public val supportsTaskCancellation: Boolean get() = false
+    public fun cancelTask() {}
+    public suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> = CoreResult.Failure(
+        CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "Use the adapter task entry"))
     public suspend fun analyze(reference: String): CoreResult<AnalysisResult> = CoreResult.Failure(
         CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Inspect, "Photo analysis is not available in this adapter"))
     public suspend fun extractVideo(reference: String): CoreResult<ExtractedVideo> = CoreResult.Failure(

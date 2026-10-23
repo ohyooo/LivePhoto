@@ -6,6 +6,11 @@ $destination = 'ci-output/web-ui'
 if (Test-Path $destination) { throw 'Use a fresh Web UI output directory.' }
 New-Item -ItemType Directory -Path $destination | Out-Null
 Copy-Item "$source/*" $destination -Recurse
+$worker = 'ui/worker/build/dist/wasmJs/productionExecutable'
+if (-not (Test-Path "$worker/livephoto-worker.js")) { throw 'Missing Kotlin/Wasm UI worker.' }
+New-Item -ItemType Directory -Path "$destination/worker" | Out-Null
+Copy-Item "$worker/*" "$destination/worker" -Recurse
+Copy-Item scripts/web/ui-task-runtime.mjs $destination
 $media = Join-Path $destination 'media'
 New-Item -ItemType Directory -Path $media -Force | Out-Null
 Copy-Item scripts/web/media/*.mjs $media

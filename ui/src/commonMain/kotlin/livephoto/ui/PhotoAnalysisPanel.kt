@@ -87,10 +87,8 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                     scope.launch {
                         working = true; onBusy(true); report = null; failed = false
                         try {
-                            report = when (val result = platform.analyze(selected)) {
-                                is CoreResult.Success -> formatPhotoAnalysis(result.value)
-                                is CoreResult.Failure -> { failed = true; formatPhotoAnalysisFailure(result.error) }
-                            }
+                            val result = platform.runTask(UiTask(UiTaskKind.Analyze, selected))
+                            report = result.report; failed = result.failed
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) {
                             failed = true
@@ -109,10 +107,8 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                         scope.launch {
                             working = true; extracting = true; onBusy(true); exportReport = null; exportFailed = false
                             try {
-                                exportReport = when (val result = platform.extractVideo(selected)) {
-                                    is CoreResult.Success -> formatExtractedVideo(result.value, platform.videoExportSuccessMessage)
-                                    is CoreResult.Failure -> { exportFailed = true; formatVideoExtractionFailure(result.error) }
-                                }
+                                val result = platform.runTask(UiTask(UiTaskKind.Extract, selected))
+                                exportReport = result.report; exportFailed = result.failed
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (error: Exception) {
                                 exportFailed = true
@@ -158,6 +154,8 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                 report?.let { text ->
                     ReportPanel(text, failed, "analysis-report", "检查", platform)
                 }
+                if (working && platform.supportsTaskCancellation)
+                    OutlinedButton(onClick = platform::cancelTask, modifier = Modifier.testTag("cancel-task")) { Text("取消处理") }
             }
         }
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(if (wide) 24.dp else 16.dp),

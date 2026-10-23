@@ -96,23 +96,9 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
         scope.launch {
             busy = true
             result = try {
-                when (val response = platform.create(snapshot.image!!, snapshot.video!!, target)) {
-                    is CoreResult.Success -> {
-                        val operation = response.value.operation
-                        val issues = (operation.issues + operation.validation.issues).distinct()
-                        CreationReport(snapshot, buildString {
-                            append("${platform.successMessage}\n")
-                            append("Core 验证：${operation.validation.verdict}；覆盖：${operation.validation.coverage}；问题报告：${issues.size} 项。\n")
-                            operation.output.assets.forEach { append("${it.recommendedName ?: it.mime}；${it.byteLength} bytes；SHA-256：${it.digest.value}\n") }
-                            if (issues.isNotEmpty()) append("报告代码：${issues.take(16).joinToString { it.code.value }}\n")
-                            operation.keyPhoto?.let { append("关键照片：${it.position}；来源：${it.source}\n") }
-                            operation.preservation.records.forEach { append("${it.guarantee}: ${it.outcome}\n") }
-                            operation.preservation.changes.forEach { append("变化：${it.selector}\n") }
-                            append("默认 BestEffortWithReport，不保证全部 metadata 无损。生成成功不等于手机相册兼容。")
-                        }, false, operation.output.assets.singleOrNull()?.recommendedName)
-                    }
-                    is CoreResult.Failure -> CreationReport(snapshot, formatCoreFailure(response.error, imageName, videoName), true)
-                }
+                val response = platform.runTask(UiTask(UiTaskKind.Create, snapshot.image!!, snapshot.video!!, target,
+                    imageName = imageName, videoName = videoName))
+                CreationReport(snapshot, response.report, response.failed, response.name)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { CreationReport(snapshot, platform.formatFailure(error, imageName, videoName), true) }
             finally { busy = false }
@@ -153,6 +139,8 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                         TextButton(onClick = { if (image != null || video != null) resetDialog = true }, enabled = !locked) { Text("重置输入") }
                     }
                     Text("本地处理 · 不上传文件", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (busy && platform.supportsTaskCancellation)
+                        OutlinedButton(onClick = platform::cancelTask, modifier = Modifier.testTag("cancel-task")) { Text("取消处理") }
                 }
             }
         }

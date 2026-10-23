@@ -13,21 +13,19 @@ import livephoto.core.CoreResult
 
 @Composable
 internal fun RepairControls(platform: LivePhotoUiPlatform, reference: String?, enabled: Boolean, onBusy: (Boolean) -> Unit) {
-    var result by remember(reference, platform) { mutableStateOf<PhotoRepairReport?>(null) }
+    var result by remember(reference, platform) { mutableStateOf<UiTaskResult?>(null) }
     var report by remember(reference, platform) { mutableStateOf<String?>(null) }
     var failed by remember(reference, platform) { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    fun runRepair(review: RepairReview?) {
+    fun runRepair(apply: (suspend () -> UiTaskResult)?) {
         if (working) return
         val selected = reference ?: return
         scope.launch {
             working = true; onBusy(true); result = null; report = null; failed = false
             try {
-                when (val response = platform.repairPhoto(selected, review)) {
-                    is CoreResult.Success -> { result = response.value; report = formatPhotoRepair(response.value, platform.repairSuccessMessage) }
-                    is CoreResult.Failure -> { failed = true; report = formatRepairFailure(response.error) }
-                }
+                val response = apply?.invoke() ?: platform.runTask(UiTask(UiTaskKind.Repair, selected))
+                result = response; report = response.report; failed = response.failed
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 failed = true
@@ -38,9 +36,9 @@ internal fun RepairControls(platform: LivePhotoUiPlatform, reference: String?, e
     Text("有限安全修复：先只读预览，再显式应用并另存 JPEG。仅修复 Core 可证明的 metadata 问题；OPPO 等不明确布局会拒绝，不猜测或删除检查。")
     OutlinedButton(shape = ControlShape, onClick = { runRepair(null) }, enabled = enabled && !working && reference != null,
         modifier = Modifier.fillMaxWidth().testTag("preview-repair")) { Text("预览安全修复（只读）") }
-    Button(shape = ControlShape, onClick = { result?.review?.let(::runRepair) }, enabled = enabled && !working && result?.review != null,
+    Button(shape = ControlShape, onClick = { result?.applyRepair?.let(::runRepair) }, enabled = enabled && !working && result?.applyRepair != null,
         modifier = Modifier.fillMaxWidth().testTag("apply-repair")) { Text(if (working) "正在处理修复…" else "应用修复并另存") }
     report?.let { text ->
-        ReportPanel(text, failed || result?.blocked?.isNotEmpty() == true, "repair-report", "修复", platform)
+        ReportPanel(text, failed, "repair-report", "修复", platform)
     }
 }

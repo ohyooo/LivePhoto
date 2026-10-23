@@ -53,7 +53,7 @@ if (webEnabled) {
     project(":shared").buildFileName = "build-web.gradle.kts"
     if (webUiEnabled) {
         rootProject.buildFileName = "build-web-ui.gradle.kts"
-        include(":ui")
+        include(":ui", ":ui:worker")
         project(":ui").buildFileName = "build-web.gradle.kts"
     }
 } else if (androidEnabled) {

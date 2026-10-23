@@ -77,6 +77,14 @@ try {
     await page.evaluate(()=>{
       const slice=Blob.prototype.slice;
       globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
+      globalThis.taskWorkers={started:0,runs:0,terminated:0};
+      globalThis.releaseTaskReads=[];
+      const NativeWorker=globalThis.Worker;
+      globalThis.Worker=class extends NativeWorker {
+        constructor(url,options){super(url,options);this.taskWorker=String(url).endsWith('/worker/livephoto-worker.js');if(this.taskWorker)globalThis.taskWorkers.started++;}
+        postMessage(data,...rest){if(this.taskWorker&&data.type==='run')globalThis.taskWorkers.runs++;return super.postMessage(data,...rest);}
+        terminate(){if(this.taskWorker)globalThis.taskWorkers.terminated++;return super.terminate();}
+      };
       // Fail if a protocol UI path regresses to eagerly loading a selected File.
       File.prototype.arrayBuffer=function(){
         globalThis.analysisIo.fullReads++;
@@ -90,6 +98,10 @@ try {
           if(['unreadable.jpg','unreadable.mp4'].includes(this.name))Object.defineProperty(part,'arrayBuffer',{
             value:()=>Promise.reject(new DOMException('Synthetic read failure','NotReadableError')),
           });
+          if(this.name==='cancel-task.jpg'&&globalThis.holdTaskReads){
+            const read=part.arrayBuffer.bind(part);
+            Object.defineProperty(part,'arrayBuffer',{value:()=>new Promise(resolve=>globalThis.releaseTaskReads.push(()=>resolve(read())))});
+          }
         }
         return part;
       };
@@ -263,7 +275,17 @@ try {
       io.slices===slicesBeforeBudget&&io.slices>0&&io.maxSlice<=64*1024&&io.fullReads===0);
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
     check(label+':analysis-cancel-keeps-report',await driver.report(text(/检查失败/))===budget&&await text('待检查文件：oversized.jpg').count()===1);
+    await analysisPicker({name:'cancel-task.jpg',mimeType:'image/jpeg',buffer:await readFile(imagePath)});
+    await page.evaluate(()=>{globalThis.holdTaskReads=true;});
+    await click('开始检查（只读）');
+    await page.waitForFunction(()=>globalThis.releaseTaskReads.length>0);
+    await click('取消处理');await text(/已取消处理/).waitFor({state:'attached'});
+    const cancelledAnalysis=(await driver.report(text(/检查失败/))).includes('CANCELLED');
+    await page.evaluate(()=>{globalThis.holdTaskReads=false;globalThis.releaseTaskReads.splice(0).forEach(release=>release());});
+    const recovered=await analyze(imagePath,/只读检查完成/);
+    const workers=await page.evaluate(()=>globalThis.taskWorkers);
     check(label+':analysis-does-not-alter-create-state',downloads===downloadsBeforeAnalysis&&
+      cancelledAnalysis&&workers.terminated===1&&workers.started===2&&recovered.includes('识别结果：NonLive')&&
       await driver.emptyCreateInputs()&&
       errors.length===0);
 
@@ -570,6 +592,13 @@ try {
         io.fullReads===0&&io.maxSlice<=65536&&
         (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')&&io.slices===slicesBefore)&&await repairCannotApply());
     }
+    await previewRepair({name:'cancel-task.jpg',mimeType:'image/jpeg',buffer:damagedV1});
+    await page.evaluate(()=>{globalThis.holdTaskReads=true;});
+    await driver.click('应用修复并另存');
+    await page.waitForFunction(()=>globalThis.releaseTaskReads.length>0);
+    await driver.click('取消处理');await text(/已取消处理/).waitFor({state:'attached'});
+    const cancelledRepair=(await readRepairReport()).includes('CANCELLED')&&await repairCannotApply();
+    await page.evaluate(()=>{globalThis.holdTaskReads=false;globalThis.releaseTaskReads.splice(0).forEach(release=>release());});
     const selectionPreview=await previewRepair({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
     const cancelKept=await readRepairReport()===selectionPreview;
@@ -582,7 +611,7 @@ try {
     const cancelApplied=confirmedDownload.suggestedFilename()==='LivePhoto-repaired.jpg'&&
       createHash('sha256').update(confirmedBytes).digest('hex')===repairedV1Digest;
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
-    check(label+':repair-selection-state-isolated',cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
+    check(label+':repair-selection-state-isolated',cancelledRepair&&cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
     const failedRead=await previewRepair({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&
       failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&await repairCannotApply()&&
@@ -657,6 +686,9 @@ try {
       await driver.emptyCreateInputs()&&errors.length===0);
     }
     }
+    const workerIo=await page.evaluate(()=>({workers:globalThis.taskWorkers,io:globalThis.analysisIo}));
+    if(!workerIo.workers?.runs||!workerIo.workers.started||workerIo.io.fullReads!==0||workerIo.io.maxSlice>65536)
+      throw Error('UI must execute in Kotlin/Wasm Worker with bounded input reads');
     await context.close();
   }
   const expected = viewports.length * uiCases[scenario].length;

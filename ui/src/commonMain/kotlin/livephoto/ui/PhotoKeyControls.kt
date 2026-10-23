@@ -33,10 +33,8 @@ internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?,
         scope.launch {
             working = true; onBusy(true); report = null; failed = false
             try {
-                when (val result = platform.setPhotoKey(selected, requested)) {
-                    is CoreResult.Success -> report = formatPhotoKey(result.value, platform.keySuccessMessage)
-                    is CoreResult.Failure -> { failed = true; report = formatPhotoKeyFailure(result.error) }
-                }
+                val result = platform.runTask(UiTask(UiTaskKind.Key, selected, time = requested))
+                report = result.report; failed = result.failed
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { failed = true; report = "关键照片修改或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查下载记录或相册，避免重复保存。" }
             finally { working = false; onBusy(false) }
