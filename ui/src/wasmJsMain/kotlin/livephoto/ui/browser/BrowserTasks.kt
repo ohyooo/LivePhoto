@@ -29,8 +29,9 @@ internal external interface TaskRunner : JsAny {
     fun cancel()
     fun dispose()
 }
-private fun loadRunner(): Promise<TaskRunner> =
-    js("import(/* webpackIgnore: true */ new URL('./ui-task-runtime.mjs', document.baseURI).href).then(module => module.createTaskRunner())")
+private external interface TaskModule : JsAny { fun createTaskRunner(): TaskRunner }
+private fun loadRunner(): Promise<TaskModule> =
+    js("import(/* webpackIgnore: true */ new URL('./ui-task-runtime.mjs', document.baseURI).href)")
 internal fun taskOptions(kind: String, reference: String, protocol: String = "", profile: String = "", time: String = "", scale: String = "",
     end: String = "", endScale: String = "", review: String = "", imageName: String = "", videoName: String = "", publication: String = ""): JsAny =
     js("({kind,reference,protocol,profile,time,scale,end,endScale,review,imageName,videoName,publication})")
@@ -48,7 +49,7 @@ internal class BrowserTasks {
         cancelled = false
         val work = async {
             withTimeout(120_000) {
-                val active = runner ?: loadRunner().await().also { runner = it }
+                val active = runner ?: loadRunner().await().createTaskRunner().also { runner = it }
                 currentCoroutineContext().ensureActive()
                 active.run(options, taskFiles(first, second)).await()
             }
