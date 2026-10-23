@@ -194,7 +194,9 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             key?.value?.toString() ?: "", key?.timescale?.toString() ?: "", review = review,
             imageName = task.imageName ?: "", videoName = task.videoName ?: "", publication = publication), file, movie)
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        if (response.failed) return UiTaskResult(response.report, true)
+        if (files[task.input] !== file || task.video != null && files[task.video] !== movie)
+            return UiTaskResult("已取消处理：所选输入已改变。未发布旧任务输出。", true)
+        if (response.failed) return UiTaskResult(taskFailure(task.kind.name, response), true)
         val blob = response.bytes?.let { taskBlob(it, checkNotNull(response.mime)) }
         if (task.kind == UiTaskKind.Split) {
             val image = checkNotNull(blob)
@@ -332,7 +334,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                     end = end.value.toString(), endScale = end.timescale.toString()), file)
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 check(!disposed && !coreCancelled) { "媒体操作已取消；输入未替换" }
-                check(!prepared.failed) { prepared.report }
+                check(!prepared.failed) { taskFailure(action.name, prepared) }
                 val bytes = prepared.bytes ?: return CoreMediaEdit(prepared.report)
                 val mime = checkNotNull(prepared.mime)
                 val name = if (action == CoreMediaAction.ExtractFrame) "core-frame.jpg" else "core-${action.name.lowercase()}.mp4"

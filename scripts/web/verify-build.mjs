@@ -14,6 +14,8 @@ for(const [directory,document,scope] of [
   const seen=new Set();
   if(directory==='web-ui'&&(manifest.kotlinRuntime!=='wasmJs'||!manifest.applicationWasm?.length||
     manifest.applicationWasm.some(name=>!/^livephoto-ui\.[0-9a-f]+\.wasm$/.test(name)||!manifest.files.some(file=>file.path===name))))throw Error('Missing Kotlin/Wasm Compose application');
+  if(directory==='web-ui'&&(!manifest.workerWasm?.length||manifest.workerWasm.some(name=>
+    !/^worker\/livephoto-worker\.[0-9a-f]+\.wasm$/.test(name)||!manifest.files.some(file=>file.path===name))))throw Error('Missing Kotlin/Wasm UI background worker');
   for(const file of manifest.files) {
     const path=resolve(base,file.path);
     if(isAbsolute(file.path)||!path.startsWith(base+sep)||seen.has(file.path)||/\.(?:jpe?g|mp4|mov|heic|heif|apk|klib)$/i.test(file.path))throw Error('Unsafe/duplicate/media build asset');

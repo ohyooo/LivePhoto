@@ -8,8 +8,7 @@ export function createTaskRunner() {
   };
   const stop=code=>{
     worker?.terminate();worker=null;ready=false;
-    const label={Create:'生成',Analyze:'检查',Extract:'提取',Split:'清理拆分',Convert:'转换',Repair:'修复',Key:'关键照片修改'}[pending?.options.kind]??'后台处理';
-    finish(null,{report:`${label}失败\n${code==='CANCELLED'?'已取消处理':'后台处理未完成'}\n错误码：${code}\n原片未修改，未发起新的下载；修复需要重新预览。`,failed:true});
+    finish(null,{report:'',failed:true,code});
   };
   const start=()=>{
     if(worker)return worker;
@@ -48,8 +47,7 @@ export function createTaskRunner() {
       if(pending)return Promise.reject(Error('A task is already running'));
       if(!Array.isArray(files)||files.length<1||files.length>2||files.some(f=>!(f instanceof Blob)))return Promise.reject(Error('Invalid files'));
       if(files.reduce((n,f)=>n+f.size,0)>32*1024*1024){
-        const label={Create:'生成',Analyze:'检查',Extract:'提取',Split:'清理拆分',Convert:'转换',Repair:'修复',Key:'关键照片修改'}[options.kind]??'后台处理';
-        return Promise.resolve({report:`${label}失败\n错误码：RESOURCE_LIMIT_EXCEEDED\n阶段：Read\n输入超过 32 MiB，未读取文件。`,failed:true});
+        return Promise.resolve({report:'',failed:true,code:'RESOURCE_LIMIT_EXCEEDED'});
       }
       return new Promise((resolve,reject)=>{
         const id=++next;

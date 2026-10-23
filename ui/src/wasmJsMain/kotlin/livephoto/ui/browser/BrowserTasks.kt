@@ -10,6 +10,7 @@ import org.w3c.files.Blob
 internal external interface TaskReply : JsAny {
     val report: String
     val failed: Boolean
+    val code: String?
     val bytes: ArrayBuffer?
     val mime: String?
     val name: String?
@@ -35,6 +36,7 @@ internal fun taskOptions(kind: String, reference: String, protocol: String = "",
     js("({kind,reference,protocol,profile,time,scale,end,endScale,review,imageName,videoName,publication})")
 private fun taskFiles(first: Blob, second: Blob?): JsAny = js("second ? [first,second] : [first]")
 internal fun taskBlob(bytes: ArrayBuffer, mime: String): Blob = js("new Blob([bytes],{type:mime})")
+private fun cancelledReply(): TaskReply = js("({report:'',failed:true,code:'CANCELLED'})")
 
 internal class BrowserTasks {
     private var runner: TaskRunner? = null
@@ -51,5 +53,19 @@ internal class BrowserTasks {
         } catch (cancelled: CancellationException) { runner?.cancel(); throw cancelled }
     }
     fun cancel() { cancelled = true; runner?.cancel() }
-    private fun cancelledReply(): TaskReply = js("({report:'已取消处理\\n错误码：CANCELLED\\n原片未修改，未发起新的下载；修复需要重新预览。',failed:true})")
+}
+
+internal fun taskFailure(kind: String, response: TaskReply): String {
+    val code = response.code ?: return response.report
+    val label = when (kind) {
+        "Create" -> "生成"; "Analyze" -> "检查"; "Extract" -> "提取"; "Split" -> "清理拆分"
+        "Convert" -> "转换"; "Repair" -> "修复"; "Key" -> "关键照片修改"; else -> "媒体处理"
+    }
+    val reason = when (code) {
+        "CANCELLED" -> "已取消处理；修复需要重新预览。"
+        "RESOURCE_LIMIT_EXCEEDED" -> "输入超过 32 MiB，未读取文件。"
+        "TIMEOUT" -> "处理超过 120 秒，后台任务已终止。"
+        else -> "无法完成后台任务，请重试。"
+    }
+    return "${label}失败\n错误码：$code\n阶段：Read\n$reason\n原片未修改，未发起新的下载。"
 }

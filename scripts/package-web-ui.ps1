@@ -44,6 +44,8 @@ foreach ($name in @('index.html', 'livephoto-ui.js')) {
 $files = @(Get-ChildItem $destination -Recurse -File)
 $applicationWasm = @($files | Where-Object { $_.DirectoryName -eq (Resolve-Path $destination).Path -and $_.Name -match '^livephoto-ui\.[0-9a-f]+\.wasm$' })
 if ($applicationWasm.Count -eq 0) { throw 'Missing Kotlin/Wasm application binary (Skiko/FFmpeg alone are not sufficient).' }
+$workerWasm = @($files | Where-Object { $_.Name -match '^livephoto-worker\.[0-9a-f]+\.wasm$' })
+if ($workerWasm.Count -eq 0) { throw 'Missing Kotlin/Wasm background computation binary.' }
 if ($files | Where-Object { $_.Extension -match '^\.(jpg|jpeg|mp4|mov|heic|heif|apk|klib)$' }) { throw 'Web UI package contains media/test inputs.' }
 [ordered]@{
     commit = $env:GITHUB_SHA
@@ -51,6 +53,7 @@ if ($files | Where-Object { $_.Extension -match '^\.(jpg|jpeg|mp4|mov|heic|heif|
     scope = 'shared-compose-screen-browser-picker-local-core-download-no-server-processing'
     kotlinRuntime = 'wasmJs'
     applicationWasm = @($applicationWasm.Name)
+    workerWasm = @($workerWasm | ForEach-Object { 'worker/' + $_.Name })
     files = @($files | ForEach-Object {
         [ordered]@{
             path = [IO.Path]::GetRelativePath((Resolve-Path $destination).Path, $_.FullName).Replace('\', '/')
