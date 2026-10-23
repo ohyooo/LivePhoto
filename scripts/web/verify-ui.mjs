@@ -156,6 +156,18 @@ try {
     await click('重置选段');await click('裁剪范围');
     check(label+':pending-trim-and-reset-draft',pendingBlocked&&keptDraft&&downloads===beforeDraft&&
       (await page.locator('#input-readiness').textContent()).includes('素材已准备好'));
+    // Cancel even while the transport module is still loading, then recover via the real create flow.
+    let releaseRuntime, runtimeRequested;
+    const runtimeHold=new Promise(resolve=>{releaseRuntime=resolve;});
+    const runtimeSeen=new Promise(resolve=>{runtimeRequested=resolve;});
+    await page.route('**/ui-task-runtime.mjs',async route=>{runtimeRequested();await runtimeHold;await route.continue();});
+    const beforeLoading=downloads;
+    try {
+      await click('生成动态照片');await runtimeSeen;
+      await click('取消处理');await text(/已取消处理/).waitFor({state:'attached'});
+      const report=await driver.report(page.locator('#status'));
+      if(downloads!==beforeLoading||!report.includes('CANCELLED'))throw Error('Runtime loading cancellation published output or lost its report');
+    } finally {releaseRuntime();await page.unroute('**/ui-task-runtime.mjs');}
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await driver.selectProtocol(name.source.includes('OPPO')?'OPPO / OnePlus':name.source.includes('V2')?'Google Motion Photo V2':'Google MicroVideo V1');
       const pending=page.waitForEvent('download');
