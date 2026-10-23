@@ -198,7 +198,11 @@ private suspend fun media(request: Request, source: BinarySource): Reply {
     while (offset < size) {
         when (val part = source.readAt(offset.toULong(), minOf(65536, size - offset).toUInt())) {
             is CoreResult.Failure -> return failure(options.kind, part.error, options)
-            is CoreResult.Success -> { check(part.value.size > 0); part.value.copyInto(bytes, offset); offset += part.value.size }
+            is CoreResult.Success -> {
+                check(part.value.size > 0)
+                for (index in 0 until part.value.size) bytes[offset + index] = part.value[index]
+                offset += part.value.size
+            }
         }
     }
     val start = Time(options.time.toLong(), options.scale.toUInt())

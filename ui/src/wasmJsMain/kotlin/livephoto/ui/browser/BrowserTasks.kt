@@ -37,22 +37,34 @@ internal fun taskOptions(kind: String, reference: String, protocol: String = "",
 private fun taskFiles(first: Blob, second: Blob?): JsAny = js("second ? [first,second] : [first]")
 internal fun taskBlob(bytes: ArrayBuffer, mime: String): Blob = js("new Blob([bytes],{type:mime})")
 private fun cancelledReply(): TaskReply = js("({report:'',failed:true,code:'CANCELLED'})")
+private fun timeoutReply(): TaskReply = js("({report:'',failed:true,code:'TIMEOUT'})")
 
 internal class BrowserTasks {
     private var runner: TaskRunner? = null
     private var cancelled = false
-    suspend fun run(options: JsAny, first: Blob, second: Blob? = null): TaskReply {
+    private var operation: Deferred<TaskReply>? = null
+    suspend fun run(options: JsAny, first: Blob, second: Blob? = null): TaskReply = coroutineScope {
+        check(operation == null) { "已有后台任务" }
         cancelled = false
+        val work = async {
+            withTimeout(120_000) {
+                val active = runner ?: loadRunner().await().also { runner = it }
+                currentCoroutineContext().ensureActive()
+                active.run(options, taskFiles(first, second)).await()
+            }
+        }
+        operation = work
         try {
-            val active = runner ?: loadRunner().await().also { runner = it }
+            val result = work.await()
             currentCoroutineContext().ensureActive()
-            if (cancelled) return cancelledReply()
-            val result = active.run(options, taskFiles(first, second)).await()
+            if (cancelled) cancelledReply() else result
+        } catch (error: CancellationException) {
+            runner?.cancel()
             currentCoroutineContext().ensureActive()
-            return if (cancelled) cancelledReply() else result
-        } catch (cancelled: CancellationException) { runner?.cancel(); throw cancelled }
+            when { cancelled -> cancelledReply(); error is TimeoutCancellationException -> timeoutReply(); else -> throw error }
+        } finally { operation = null }
     }
-    fun cancel() { cancelled = true; runner?.cancel() }
+    fun cancel() { cancelled = true; runner?.cancel(); operation?.cancel() }
 }
 
 internal fun taskFailure(kind: String, response: TaskReply): String {
