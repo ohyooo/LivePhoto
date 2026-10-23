@@ -272,7 +272,11 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         if (browserFileSize(file) > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Repair input exceeds 32 MiB"))
         val job = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
-        return when (val result = preparePhotoRepair(DefaultLivePhotoCore(), browserBytes(file), review, Cancellation { job?.isActive == false })) {
+        val source = BrowserBlobSource(file, SourceId("browser-repair:$reference"))
+        val result = try {
+            preparePhotoRepair(DefaultLivePhotoCore(), source, review, Cancellation { job?.isActive == false })
+        } finally { source.close() }
+        return when (result) {
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 result.value.bytes?.let { repaired ->

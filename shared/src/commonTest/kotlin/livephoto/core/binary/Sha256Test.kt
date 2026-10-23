@@ -36,6 +36,12 @@ class Sha256Test {
         assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", result.value)
         assertFalse(source.closed)
         assertEquals(3, source.readCalls)
+        val borrowed = TestSource("abc".encodeToByteArray(), maxChunk = 1)
+        // A provider's declared digest is not the independently reviewed content.
+        borrowed.currentIdentity = borrowed.currentIdentity.copy(digest = Digest("0".repeat(64)))
+        assertEquals(result, value(sourceDigest(borrowed, context)))
+        assertEquals(3, borrowed.readCalls)
+        assertFalse(borrowed.closed)
     }
 
     @Test
@@ -46,6 +52,11 @@ class Sha256Test {
         val fresh = TestSource("abc".encodeToByteArray())
         assertFailure("OFFSET_OUT_OF_BOUNDS", sha256Range(BinaryReader(fresh, context), ByteRange(2uL, 2uL)))
         assertEquals(0, fresh.readCalls)
+        assertFailure("RESOURCE_LIMIT_EXCEEDED", sourceDigest(fresh, context.copy(limits = Limits(2u, 0u))))
+        assertEquals(0, fresh.readCalls)
+        val changed = TestSource("abc".encodeToByteArray(), maxChunk = 1)
+        changed.onRead = { changed.currentIdentity = changed.currentIdentity.copy(generation = GenerationToken("changed")) }
+        assertFailure("SOURCE_CHANGED", sourceDigest(changed, context))
     }
 
     @Test
@@ -53,6 +64,8 @@ class Sha256Test {
         val source = TestSource("abc".encodeToByteArray())
         val cancelled = context.copy(cancellation = Cancellation { true })
         assertFailure("CANCELLED", sha256Range(BinaryReader(source, cancelled), ByteRange(0uL, 3uL)))
+        assertEquals(0, source.readCalls)
+        assertFailure("CANCELLED", sourceDigest(source, cancelled))
         assertEquals(0, source.readCalls)
     }
 

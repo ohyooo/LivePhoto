@@ -73,7 +73,7 @@ try {
     const choose = (name,path) => driver.choose(name,path);
     let downloads=0; page.on('download',()=>downloads++);
     const analysisInputs=[];
-    if (['create','analysis','extract','split','convert','key'].includes(scenario)) {
+    if (['create','analysis','extract','split','convert','key','repair'].includes(scenario)) {
     await page.evaluate(()=>{
       const slice=Blob.prototype.slice;
       globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
@@ -541,13 +541,18 @@ try {
     // Simulate a changing IO provider only, not an app/semantic handler. Real UI
     // preview and apply must reject different bytes before any external download.
     await page.evaluate(()=>{
-      const previous=Object.getOwnPropertyDescriptor(File.prototype,'arrayBuffer'),read=File.prototype.arrayBuffer;
-      Object.defineProperty(File.prototype,'arrayBuffer',{configurable:true,writable:true,value:async function(){
-        const data=await read.call(this);
-        if(this.name==='changed-after-preview.jpg'){const bytes=new Uint8Array(data);bytes[bytes.length-1]^=1;}
-        return data;
-      }});
-      globalThis.restoreRepairRead=()=>{if(previous)Object.defineProperty(File.prototype,'arrayBuffer',previous);else delete File.prototype.arrayBuffer;delete globalThis.restoreRepairRead;};
+      const slice=Blob.prototype.slice;
+      Blob.prototype.slice=function(...args){
+        const part=slice.apply(this,args);
+        if(this instanceof File&&this.name==='changed-after-preview.jpg'&&Number(args[1])===this.size){
+          const read=part.arrayBuffer.bind(part);
+          Object.defineProperty(part,'arrayBuffer',{value:async()=>{
+            const data=await read();const bytes=new Uint8Array(data);bytes[bytes.length-1]^=1;return data;
+          }});
+        }
+        return part;
+      };
+      globalThis.restoreRepairRead=()=>{Blob.prototype.slice=slice;delete globalThis.restoreRepairRead;};
     });
     const priorStale=downloads;
     try {
@@ -558,9 +563,12 @@ try {
       ['ordinary',imagePath],
       ['malformed',{name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])}],['budget',oversized],
     ]) {
+      const slicesBefore=await page.evaluate(()=>globalThis.analysisIo.slices);
       const prior=downloads,report=await previewRepair(input);
+      const io=await page.evaluate(()=>globalThis.analysisIo);
       check(label+':repair-'+kind+'-no-output',downloads===prior&&report.includes('修复失败')&&report.includes('错误码：')&&
-        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED'))&&await repairCannotApply());
+        io.fullReads===0&&io.maxSlice<=65536&&
+        (kind!=='budget'||report.includes('RESOURCE_LIMIT_EXCEEDED')&&io.slices===slicesBefore)&&await repairCannotApply());
     }
     const selectionPreview=await previewRepair({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     await page.locator('#livephoto-analysis-input').setInputFiles([]);
@@ -575,7 +583,9 @@ try {
       createHash('sha256').update(confirmedBytes).digest('hex')===repairedV1Digest;
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-selection-state-isolated',cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
+    const failedRead=await previewRepair({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&
+      failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&await repairCannotApply()&&
       await driver.emptyCreateInputs()&&errors.length===0);
 
     }

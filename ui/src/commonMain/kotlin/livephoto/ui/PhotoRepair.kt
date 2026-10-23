@@ -29,17 +29,24 @@ public suspend fun preparePhotoRepair(
 ): CoreResult<PreparedPhotoRepair> {
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Repair input exceeds 32 MiB"))
-    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-repair"))
+    try { return preparePhotoRepair(core, source, review, cancellation) }
+    finally { source.close() }
+}
+
+/** Borrowed input; both preview and apply independently hash all bytes using bounded reads. */
+public suspend fun preparePhotoRepair(
+    core: LivePhotoCore, source: BinarySource, review: RepairReview? = null, cancellation: Cancellation? = null,
+): CoreResult<PreparedPhotoRepair> {
+    val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     var output: MemoryOutputTransaction? = null
     var operation: OperationResult? = null
     fun failure(code: String, stage: Stage, message: String) = CoreResult.Failure(CoreError(IssueCode(code), stage, message))
     try {
-        val identity = when (val result = source.identity()) {
+        val digest = when (val result = sourceDigest(source, context)) {
             is CoreResult.Failure -> return result
             is CoreResult.Success -> result.value
         }
-        val digest = identity.digest ?: return failure("PRESERVATION_REQUIREMENT_FAILED", Stage.Read, "Input identity has no digest")
         if (review != null && review.sourceDigest != digest)
             return failure("SOURCE_CHANGED", Stage.Read, "Selected input differs from the reviewed bytes; preview it again")
         val preview = when (val result = core.repair(RepairRequest(SourceSet.Single(source), mode = RepairMode.SafeMetadataOnly, dryRun = true, context = context))) {
@@ -85,7 +92,6 @@ public suspend fun preparePhotoRepair(
     } finally {
         operation?.output?.assets?.forEach { it.readableSource?.close() }
         if (operation == null) output?.abort()
-        source.close()
     }
 }
 
