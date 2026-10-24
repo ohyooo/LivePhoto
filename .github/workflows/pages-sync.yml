@@ -1,0 +1,71 @@
+name: Sync tested website to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pages-sync.yml
+      - scripts/sync-pages.py
+      - scripts/test_sync_pages.py
+  workflow_run:
+    workflows: [Web Library]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Successful main-branch Web Library run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: sync-tested-pages
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       contains(fromJSON('["push","workflow_dispatch"]'), github.event.workflow_run.event))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check artifact identity and unsafe archive refusal
+        run: python3 -m unittest discover -s scripts -p test_sync_pages.py
+
+      - name: Configure site-only deployment key
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PAGES_DEPLOY_KEY"
+          install -d -m 700 "$RUNNER_TEMP/pages-ssh"
+          umask 077
+          printf '%s\n' "$PAGES_DEPLOY_KEY" > "$RUNNER_TEMP/pages-ssh/key"
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/pages-ssh/known_hosts"
+          echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/pages-ssh/key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/pages-ssh/known_hosts" >> "$GITHUB_ENV"
+
+      - name: Verify, synchronize and await public-site browser checks
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run || github.event.workflow_run.id }}
+        run: python3 scripts/sync-pages.py
+
+      - name: Remove temporary deployment key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/pages-ssh/key" "$RUNNER_TEMP/pages-ssh/known_hosts"
