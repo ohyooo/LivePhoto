@@ -37,7 +37,10 @@ export function composeDriver(page,viewport) {
     const overlay=typeof name==='string'&&(['新建','照片工具','主题模式','更多菜单','生成动态照片','重置输入'].includes(name)||/^(工具|协议|主题)：/.test(name));
     const locator=find(name);await reveal(locator,1,overlay);
     await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
-    const b=await locator.boundingBox({timeout:1000});if(!b)throw Error('Missing shared control: '+name);
+    // Compose may replace its accessibility node after the layout checkpoint.
+    // Reacquire before the pointer action; never retry a click that already ran.
+    const b=await locator.boundingBox({timeout:1000}).catch(()=>null)??await reveal(locator,1,overlay);
+    if(!b)throw Error('Missing shared control: '+name);
     console.log('UI_POINTER',String(name),b);
     await page.mouse.click(b.x+b.width/2,b.y+b.height/2);await page.waitForTimeout(150);
     if(typeof name==='string'&&(/^(工具|协议|主题)：/.test(name)||['确认重置','取消','知道了'].includes(name))){
