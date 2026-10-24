@@ -82,7 +82,7 @@ const originalVideoBlob = extracted.blob;
 
 创建只开放 `oplus.olive`（JPEG 无尾部 profile）、`google.motionphoto.v2`、`google.microvideo.v1` 三个已有目标；浏览器 API 不扩展协议/编码支持。`replaceCameraComment: true` 只允许前文明确列出的两种相机注释替换，默认不授权。失败返回结构化 `success/code/stage/message` 且不返回输出 Blob；参数类型、提前大小检查失败则 Promise 拒绝。
 
-`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。默认协议接口不加载媒体引擎；需要抽帧、裁剪、转码时，使用下方可选媒体后端，与网页播放器复用同一 Kotlin Core，不提供系统相册导入。输入合计上限 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件。
+`validateLivePhoto` 仅检查 Structure/Protocol；调用成功不等于 `verdict` 有效，更不代表解码、相册兼容或播放验收。默认协议接口不加载媒体引擎；需要抽帧、裁剪、转码时，使用下方可选媒体后端，与网页播放器复用同一 Kotlin Core，不提供系统相册导入。生成输入合计必须小于 32 MiB，单个已有载体/输出上限 48 MiB；内存暂存和副本会使实际占用高于文件大小。建议在调用方的 module Worker 中处理，避免占用界面线程；本阶段不承诺任意大文件。
 
 协议接口还提供 `inspectLivePhoto`、`analyzeLivePhoto`、`getKeyPhotoPosition`、`convertLivePhoto(input, { target })`、`splitLivePhoto`。检查结果位于 `result.report`：包含多重检测、资源范围、媒体/metadata、关键照片原始字段、检查明细及带条件的能力；Analyze 不把缺媒体后端说成可抽帧。64 位 offset/length、时间分子和任意精度 metadata 数字用十进制字符串，未知值保留 `null`。
 
@@ -137,7 +137,7 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 播放器的卡片、按钮、进度条、横竖布局、区间手柄和封面时间轴均位于 Kotlin `ui/commonMain`，不是独立 JS/CSS 控制栏。Web 适配仅提供 Video/Canvas 播放与截图等平台操作；Android 可复用这些控件，但尚无移动媒体编辑后端，不表示 Android 已能执行编辑。
 
-裁剪、显式转码按需加载随站点分发的单线程 ffmpeg.wasm，无 CDN 运行时依赖，不调用桌面 FFmpeg。首次编辑需加载较大的 Wasm。原视频允许超过 32 MiB，Web 预处理限 256 MiB、60 秒内输入；点击“应用裁剪”后，以图片与当前视频的实际大小合计检查，必须小于 32 MiB 才能生成。媒体中间输出上限 48 MiB、总处理超时 120 秒，并提供取消；MEMFS 暂存使实际内存占用高于文件大小。新预算正在验收，实际上线以 Web 路线记录为准。截图不保证原 HDR、色彩或 metadata，编辑也不承诺完整保留普通 metadata。FFmpeg 依赖、许可证与对应源码/构建说明随 `media/` 分发；Android 的媒体后端状态另行记录。
+裁剪、显式转码按需加载随站点分发的单线程 ffmpeg.wasm，无 CDN 运行时依赖，不调用桌面 FFmpeg。首次编辑需加载较大的 Wasm。原视频允许超过 32 MiB，Web 预处理限 256 MiB、60 秒内输入；点击“应用裁剪”后，以图片与当前视频的实际大小合计检查，必须小于 32 MiB 才能生成。媒体中间输出上限 48 MiB、总处理超时 120 秒，并提供取消；MEMFS 暂存使实际内存占用高于文件大小。新预算已通过整轮 Web CI 并部署，详见 Web 路线记录。截图不保证原 HDR、色彩或 metadata，编辑也不承诺完整保留普通 metadata。FFmpeg 依赖、许可证与对应源码/构建说明随 `media/` 分发；Android 的媒体后端状态另行记录。
 
 CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性、错误展示、三个协议实际下载，并独立解析下载结果及核对视频字节。报告截图只使用临时合成素材，不上传媒体原片或生成成品。
 
@@ -676,11 +676,11 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 312 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
 
-当前界面与后台 Worker 已在源码 `57edf96` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39969395659) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。网站已部署并通过全部 28 个静态文件的正常域名 HTTPS 哈希与类型检查，旧版本保留、原首页不变。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归。
+当前界面与后台 Worker 已在源码 `1ce5764` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/40074145573) 全部 32 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 809 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。网站已部署并通过全部 28 个静态文件的正常域名 HTTPS 哈希与类型检查，旧版本保留、原首页不变。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归。
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 
-Wasm 界面的生成、检查、提取、拆分、转换、修复、关键照片时间七个入口使用随机访问输入，单次 `Blob.slice` 最多 64 KiB，输入仍限 32 MiB。修复预览与应用独立分块计算 SHA-256，再核对审阅方案；内容变化保留 `SOURCE_CHANGED` 拒绝，不信任文件名、大小或提供方自报摘要。修复分块版已通过 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39953499068) 并上线。
+Wasm 界面的生成、检查、提取、拆分、转换、修复、关键照片时间七个入口使用随机访问输入，单次 `Blob.slice` 最多 64 KiB，生成输入合计小于 32 MiB，已有照片单文件仍限 32 MiB；媒体预处理原视频最高 256 MiB。修复预览与应用独立分块计算 SHA-256，再核对审阅方案；内容变化保留 `SOURCE_CHANGED` 拒绝，不信任文件名、大小或提供方自报摘要。修复分块版已通过 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/39953499068) 并上线。
 
 后台 Worker 已验收并部署：七个协议入口及五个媒体操作的 Core 编排在独立 Kotlin/Wasm Worker 运行，主线程提供有界读取和已验证输出的下载。处理时可点击“取消处理”，媒体编辑仍使用“取消媒体处理”；加载和执行期间均可取消，迟到结果被丢弃，修复须重新预览。已发起的浏览器下载不可撤回。单次任务限 120 秒，超时终止后台任务。输出仍是有界内存事务，FFmpeg 仍需私有内存文件系统；64 KiB 不是总内存上限。独立 JS 功能库的分块 IO、任意大文件和流式输出仍在 TODO，不宣称零拷贝。
 
