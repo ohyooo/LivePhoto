@@ -46,7 +46,9 @@ export function createTaskRunner() {
     run(options,files){
       if(pending)return Promise.reject(Error('A task is already running'));
       if(!Array.isArray(files)||files.length<1||files.length>2||files.some(f=>!(f instanceof Blob)))return Promise.reject(Error('Invalid files'));
-      if(files.reduce((n,f)=>n+f.size,0)>32*1024*1024){
+      const inputLimit=['Probe','Remux','Trim','ExtractFrame','Transcode'].includes(options?.kind)?256*1024*1024:32*1024*1024;
+      const inputSize=files.reduce((n,f)=>n+f.size,0);
+      if(inputSize>inputLimit||(options?.kind==='Create'&&inputSize===inputLimit)){
         return Promise.resolve({report:'',failed:true,code:'RESOURCE_LIMIT_EXCEEDED'});
       }
       return new Promise((resolve,reject)=>{

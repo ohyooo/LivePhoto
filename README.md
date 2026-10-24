@@ -137,7 +137,7 @@ Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件�
 
 播放器的卡片、按钮、进度条、横竖布局、区间手柄和封面时间轴均位于 Kotlin `ui/commonMain`，不是独立 JS/CSS 控制栏。Web 适配仅提供 Video/Canvas 播放与截图等平台操作；Android 可复用这些控件，但尚无移动媒体编辑后端，不表示 Android 已能执行编辑。
 
-裁剪、显式转码按需加载随站点分发的单线程 ffmpeg.wasm，无 CDN 运行时依赖，不调用桌面 FFmpeg。首次编辑需加载较大的 Wasm。编辑限 32 MiB、60 秒内输入，输出上限 48 MiB、总处理超时 120 秒，并提供取消；实际内存占用高于文件大小。截图不保证原 HDR、色彩或 metadata，编辑也不承诺完整保留普通 metadata。FFmpeg 依赖、许可证与对应源码/构建说明随 `media/` 分发；这不是正式 Core MediaBackend 或独立协议 JS API 的媒体能力声明，也不改变 Android 的后端状态。
+裁剪、显式转码按需加载随站点分发的单线程 ffmpeg.wasm，无 CDN 运行时依赖，不调用桌面 FFmpeg。首次编辑需加载较大的 Wasm。原视频允许超过 32 MiB，Web 预处理限 256 MiB、60 秒内输入；点击“应用裁剪”后，以图片与当前视频的实际大小合计检查，必须小于 32 MiB 才能生成。媒体中间输出上限 48 MiB、总处理超时 120 秒，并提供取消；MEMFS 暂存使实际内存占用高于文件大小。新预算正在验收，实际上线以 Web 路线记录为准。截图不保证原 HDR、色彩或 metadata，编辑也不承诺完整保留普通 metadata。FFmpeg 依赖、许可证与对应源码/构建说明随 `media/` 分发；Android 的媒体后端状态另行记录。
 
 CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性、错误展示、三个协议实际下载，并独立解析下载结果及核对视频字节。报告截图只使用临时合成素材，不上传媒体原片或生成成品。
 
@@ -651,7 +651,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 
 ### 浏览器可选 Core 媒体后端
 
-`createMediaBackend({ runtimeUrl, signal })` 返回 `probe`、`remux`、`trim`、`extractFrame`、`transcode`，调用统一 Core `MediaBackend` 和已有 FFmpeg 验证代码。`runtimeUrl` 指向同源网站部署中的 `media/core-runtime.mjs`，其相邻 vendor 资源须完整部署；JS 功能库不自动下载或捆绑 FFmpeg。输入最多 32 MiB、输出最多 48 MiB，单次执行超时 120 秒。后端为有限 Experimental profile，遇到未知轨道、metadata、HDR/变换或无法证明的时间线会拒绝，不默认丢弃或降级。
+`createMediaBackend({ runtimeUrl, signal })` 返回 `probe`、`remux`、`trim`、`extractFrame`、`transcode`，调用统一 Core `MediaBackend` 和已有 FFmpeg 验证代码。`runtimeUrl` 指向同源网站部署中的 `media/core-runtime.mjs`，其相邻 vendor 资源须完整部署；JS 功能库不自动下载或捆绑 FFmpeg。媒体输入最多 256 MiB、输出最多 48 MiB，单次执行超时 120 秒；后续 `createLivePhoto` 仍要求图片与处理后视频合计小于 32 MiB。后端为有限 Experimental profile，遇到未知轨道、metadata、HDR/变换或无法证明的时间线会拒绝，不默认丢弃或降级。
 
 ```javascript
 const media = createMediaBackend({ runtimeUrl: '/livephoto/media/core-runtime.mjs' });

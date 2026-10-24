@@ -45,6 +45,10 @@ const emptyEncoderSource=join(directory,'core-empty-encoder.mp4');
 generateCore(['-i',coreSource,'-map','0','-c','copy','-use_editlist','0','-map_metadata','0',
   '-metadata:s:v','encoder=','-fflags','+bitexact','-write_btrt','0',emptyEncoderSource]);
 const coreInput=await readFile(coreSource);
+// A valid top-level free box raises file size without changing any encoded packets.
+const largeSource=join(directory,'core-large.mp4'),padding=Buffer.alloc(33*1024*1024);
+padding.writeUInt32BE(padding.length,0);padding.write('free',4,'ascii');
+await writeFile(largeSource,Buffer.concat([coreInput,padding]));
 const monoInput=await readFile(monoSource);
 const shiftedInput=await readFile(shiftedSource);
 const emptyEncoderInput=await readFile(emptyEncoderSource);
@@ -115,7 +119,9 @@ try {
     const interrupted=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:running.signal}).probe(file);
     const stop=setTimeout(()=>running.abort(),100);
     let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
-    let budget=false;try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch{budget=true;}
+    const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:256*1024*1024+1});
+    oversized.arrayBuffer=()=>{throw Error('Over-budget input was read');};
+    let budget=false;try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
     return {results,capabilities,invalidRange,forbidden,malformed,mono,fractional,unknownColor,encoderChange,cancelled,stopped,budget,immutable:before===await hash(file)};
   });
   check('invalid-range-rejected',!coreResults.invalidRange.success&&!coreResults.invalidRange.blob);
@@ -217,7 +223,7 @@ try {
   worker={success:true,tests:9,failures:0,checks:workerResult.checks,inputSha256:workerResult.inputSha256,outputs:workerOutputs,
     scope:'module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'};
   }
-  if(['mobile','wide'].includes(part))wasmUi=await verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe,viewport:part});
+  if(['mobile','wide'].includes(part))wasmUi=await verifyCoreUi({browser,origin,coreSource,largeSource,monoSource,imagePath,directory,probe,viewport:part});
   const expected=part==='main'?9:0;
   if(checks.length!==expected||new Set(checks).size!==expected)throw Error('Incomplete media evidence');
   await writeFile(`ci-output/web-media-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,

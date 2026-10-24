@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {composeDriver} from './ui-interaction.mjs';
 
 /** Real Compose/Wasm UI -> typed adapter -> Core -> Worker. JS Core is used only to audit downloads. */
-export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePath,directory,probe,viewport:onlyViewport}){
+export async function verifyCoreUi({browser,origin,coreSource,largeSource,monoSource,imagePath,directory,probe,viewport:onlyViewport}){
   const checks=[],outputs=[];
   const original=probe(coreSource),sourceHash=createHash('sha256').update(await readFile(coreSource)).digest('hex');
   const check=(name,valid)=>{if(!valid)throw Error(name);checks.push(name);};
@@ -80,7 +80,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
       check(size+':core-probe-real-decode',engines>0&&downloads===0);
       await page.screenshot({path:`ci-output/web-ui-core-media-${size}.png`});
       for(const [action,button] of [['remux','重新封装'],['trim','应用裁剪'],['transcode','转为 H.264']]){
-        if(action!=='remux')await choose(coreSource);
+        if(action!=='remux')await choose(action==='trim'?largeSource:coreSource);
         if(action==='transcode'){
           await driver.click('裁剪范围');await driver.dragRange('end',.80);
           // Compose paints/disables the canvas control; the accessibility
@@ -95,6 +95,10 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
           await seek();await driver.click('使用当前画面作为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
         }
         if(action==='trim'){
+          const beforeDownloads=downloads,beforeEngines=engines;
+          await page.locator('#input-readiness').filter({hasText:/合计达到或超过 32 MiB.*裁剪/}).waitFor({state:'attached'});
+          await driver.click('生成动态照片');await page.waitForTimeout(200);
+          if(downloads!==beforeDownloads||engines!==beforeEngines)throw Error('Oversized original was processed as a final photo');
           await seek(1.2);await driver.click('使用当前画面作为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
           await driver.click('裁剪范围');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
         }
@@ -116,6 +120,7 @@ export async function verifyCoreUi({browser,origin,coreSource,monoSource,imagePa
         if(action==='trim'){
           const key=result.audited.key;
           if(!key||!(result.origin>0)||Math.abs(Number(key.value)/Number(key.timescale)-(1.2-result.origin))>.05)throw Error('Core trim did not retain and rebase the selected cover');
+          if(!outputs.at(-1)||outputs.at(-1).bytes>32*1024*1024)throw Error('Trimmed photo still exceeded the final budget');
         }
         check(size+':core-'+action+'-independent-packets',action!=='remux'||result.hash===sourceHash);
       }

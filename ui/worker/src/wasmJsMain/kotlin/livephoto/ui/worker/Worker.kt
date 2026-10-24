@@ -60,7 +60,10 @@ private fun buffer(bytes: Bytes): ArrayBuffer {
 }
 
 private class Source(private val request: Request, private val index: Int, id: String) : BinarySource {
-    private val length = number(request.sizes, index).also { require(it.isFinite() && it >= 0 && it <= ANALYSIS_INPUT_LIMIT) }.toULong()
+    private val length = number(request.sizes, index).also {
+        val limit = if (CoreMediaAction.entries.any { action -> action.name == request.options.kind }) BROWSER_MEDIA_INPUT_LIMIT else ANALYSIS_INPUT_LIMIT
+        require(it.isFinite() && it >= 0 && it <= limit)
+    }.toULong()
     private val identity = SourceIdentity(SourceId(id), GenerationToken("immutable-browser-blob-v1"), length)
     override suspend fun identity(): CoreResult<SourceIdentity> = CoreResult.Success(identity)
     override suspend fun size(): CoreResult<ULong> = CoreResult.Success(length)
@@ -207,7 +210,7 @@ private suspend fun media(request: Request, source: BinarySource): Reply {
     }
     val start = Time(options.time.toLong(), options.scale.toUInt())
     val end = Time(options.end.toLong(), options.endScale.toUInt())
-    return when (val result = prepareCoreMedia(backend, bytes, action, start, end)) {
+    return when (val result = prepareCoreMedia(backend, bytes, action, start, end, inputLimit = BROWSER_MEDIA_INPUT_LIMIT)) {
         is CoreResult.Failure -> failure(options.kind, result.error, options)
         is CoreResult.Success -> {
             val value = result.value

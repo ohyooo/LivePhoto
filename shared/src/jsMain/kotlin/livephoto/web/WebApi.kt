@@ -64,7 +64,7 @@ internal fun operation(result: OperationResult, output: MemoryOutputTransaction,
 /** Three already-supported profiles only; default does not authorize metadata loss. */
 @JsExport
 public fun createLivePhoto(image: ByteArray, video: ByteArray, target: String = "oplus.olive", replaceCameraComment: Boolean = false): Promise<WebResult> = promise {
-    if (image.size.toLong() + video.size > INPUT_LIMIT) return@promise invalid("RESOURCE_LIMIT_EXCEEDED", "Combined inputs exceed 32 MiB")
+    if (image.size.toLong() + video.size >= INPUT_LIMIT) return@promise invalid("RESOURCE_LIMIT_EXCEEDED", "Combined inputs must be smaller than 32 MiB")
     val selector = selector(target) ?: return@promise invalid("CAPABILITY_UNSUPPORTED", "This Web entry supports only the three documented JPEG profiles")
     val ctx = context()
     val photo = MemoryBinarySource(Bytes(image), SourceId("web-image"))

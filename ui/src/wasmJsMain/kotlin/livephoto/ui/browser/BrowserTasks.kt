@@ -76,7 +76,9 @@ internal fun taskFailure(kind: String, response: TaskReply): String {
     }
     val reason = when (code) {
         "CANCELLED" -> "已取消处理；修复需要重新预览。"
-        "RESOURCE_LIMIT_EXCEEDED" -> "输入超过 32 MiB，未读取文件。"
+        "RESOURCE_LIMIT_EXCEEDED" -> if (kind in setOf("Probe", "Remux", "Trim", "ExtractFrame", "Transcode"))
+            "媒体预处理输入超过 256 MiB，未读取文件。" else if (kind == "Create")
+            "图片与当前视频合计须小于 32 MiB；请先裁剪视频。未读取文件。" else "输入超过 32 MiB，未读取文件。"
         "TIMEOUT" -> "处理超过 120 秒，后台任务已终止。"
         else -> "无法完成后台任务，请重试。"
     }

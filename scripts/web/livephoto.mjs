@@ -29,7 +29,7 @@ function result(value) {
 
 export async function createLivePhoto(image, video, { target = 'oplus.olive', replaceCameraComment = false } = {}) {
   if (!(image instanceof Blob) || !(video instanceof Blob)) throw new TypeError('Expected image and video File/Blob inputs');
-  if (image.size + video.size > INPUT_LIMIT) throw new RangeError('Combined inputs exceed 32 MiB');
+  if (image.size + video.size >= INPUT_LIMIT) throw new RangeError('Combined inputs must be smaller than 32 MiB');
   if (typeof target !== 'string' || typeof replaceCameraComment !== 'boolean') throw new TypeError('Invalid Web options');
   const [photo, movie] = await Promise.all([bytes(image, INPUT_LIMIT), bytes(video, INPUT_LIMIT)]);
   return result(await core.createLivePhoto(photo, movie, target, replaceCameraComment));
@@ -47,7 +47,7 @@ export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs
   if(runtime.origin!==globalThis.location.origin)throw new TypeError('Media runtime must be same-origin');
   const run=async(input,action,{start=0,end=0,authorizeTranscode=false}={})=>{
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<0||start>60||end>60||typeof authorizeTranscode!=='boolean')throw new TypeError('Invalid media range or authorization');
-    const data=await bytes(input,INPUT_LIMIT);
+    const data=await bytes(input,256*1024*1024);
     const executor=async(...args)=>{
       const response=await(await import(runtime.href)).executeCoreFfmpeg(...args);
       // Explicit opt-in only: decoder diagnostics can include private metadata.

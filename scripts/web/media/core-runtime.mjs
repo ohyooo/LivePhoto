@@ -3,7 +3,7 @@ const base=new URL('./',import.meta.url);
 export async function executeCoreFfmpeg(argsJson,input,previousOutput,outputName,timeoutMillis,isCancelled=()=>false) {
   const args=JSON.parse(argsJson),limit=48*1024*1024;
   if(!Array.isArray(args)||args.length>256||!args.every(a=>typeof a==='string'&&a.length<=4096)||
-    !['output.bin','frame.jpg'].includes(outputName)||input.byteLength>32*1024*1024||
+    !['output.bin','frame.jpg'].includes(outputName)||input.byteLength>256*1024*1024||
     (previousOutput?.byteLength??0)>limit)throw Error('Invalid private memory job');
   let engine,timer,poll,stopped=false;
   const result={code:null,output:'',outputLimited:false,cancelled:false,timedOut:false,ioFailed:false,bytes:null};

@@ -31,7 +31,9 @@ onmessage=async({data:{input}})=>{
     const timer=setTimeout(()=>running.abort(),100);
     let interrupted;try{interrupted=await pending;}finally{clearTimeout(timer);}
     let budget=false;
-    try{await backend.remux(new Blob([new Uint8Array(32*1024*1024+1)]));}catch(error){budget=error instanceof RangeError;}
+    const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:256*1024*1024+1});
+    oversized.arrayBuffer=()=>{throw Error('Over-budget input was read');};
+    try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
     check('worker-cancellation-and-budget',!cancelled.success&&cancelled.code==='CANCELLED'&&cancelled.blob===null&&
       !interrupted.success&&interrupted.code==='CANCELLED'&&interrupted.blob===null&&budget);
     check('worker-input-immutable',await digest(input)===inputSha256);

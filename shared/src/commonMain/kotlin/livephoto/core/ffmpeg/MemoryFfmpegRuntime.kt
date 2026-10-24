@@ -5,6 +5,9 @@ import livephoto.core.binary.*
 import livephoto.core.bmff.BmffVideoProbe
 import livephoto.core.memory.MemoryBinarySource
 
+// MEMFS materializes input; keep preprocessing bounded independently of the final photo budget.
+public const val BROWSER_MEDIA_INPUT_LIMIT: Int = 256 * 1024 * 1024
+
 /** Worker adapter only. Commands and all media verification remain in the existing backend. */
 public fun interface MemoryFfmpegExecutor {
     public suspend fun execute(arguments: List<String>, input: Bytes, previousOutput: Bytes?, outputName: String,
@@ -37,10 +40,16 @@ public class MemoryFfmpegRuntime(private val executor: MemoryFfmpegExecutor) : F
         try {
             val reader = BinaryReader(source, context)
             val identity = reader.identity().orThrow()
-            if (identity.size > minOf(context.limits.maxSpoolBytes, 32uL * 1024u * 1024u)) fail("RESOURCE_LIMIT_EXCEEDED", "Browser media input exceeds memory budget", Stage.Read)
-            val data = reader.readExactly(0uL, identity.size.toUInt()).orThrow()
+            if (identity.size > minOf(context.limits.maxSpoolBytes, BROWSER_MEDIA_INPUT_LIMIT.toULong())) fail("RESOURCE_LIMIT_EXCEEDED", "Browser media input exceeds memory budget", Stage.Read)
+            val data = ByteArray(identity.size.toInt())
+            var offset = 0
+            while (offset < data.size) {
+                val part = reader.readBuffer(offset.toULong(), minOf(65536, data.size - offset).toUInt()).orThrow()
+                part.copyInto(data, offset)
+                offset += part.size
+            }
             reader.validateIdentity().orThrow()
-            Workspace(data, outputName, minOf(context.limits.maxOutputBytes, 48uL * 1024u * 1024u)).also { active = it }
+            Workspace(Bytes(data), outputName, minOf(context.limits.maxOutputBytes, 48uL * 1024u * 1024u)).also { active = it }
         } finally { opening = false }
     }
 
@@ -72,7 +81,7 @@ public class BrowserFfmpegBackend(executor: MemoryFfmpegExecutor) : MediaBackend
     private val delegate = FfmpegMediaBackend("ffmpeg", MemoryFfmpegRuntime(executor))
     override fun capabilities(): MediaCapabilities = delegate.capabilities().let { it.copy(backendIds = listOf("ffmpeg-wasm"),
         operations = it.operations.map { entry -> entry.copy(conditions = entry.conditions + listOf(Condition(ConditionOperator.Equals,
-            "runtimeProfile", Value.Text("private-worker-input32MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
+            "runtimeProfile", Value.Text("private-worker-input256MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
             if (entry.operation in setOf(Operation.Trim, Operation.Remux, Operation.Transcode)) listOf(Condition(ConditionOperator.Equals,
                 "wasmAudioProfile", Value.Text("absent-or-AAC-LC-stereo-with-original-channelcount2-no-mono-header-normalization"))) else emptyList()) }) }.let { caps ->
         caps.copy(operations = caps.operations.map { entry -> if (entry.operation == Operation.Transcode) entry.copy(conditions = entry.conditions +

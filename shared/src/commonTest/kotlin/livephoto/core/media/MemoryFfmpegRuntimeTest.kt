@@ -31,11 +31,22 @@ class MemoryFfmpegRuntimeTest {
     @Test fun budgetAndConcurrentWorkspacesAreRejectedBeforeExecutor(): Unit = runImmediate {
         val runtime = MemoryFfmpegRuntime { _, _, _, _, _, _ -> error("Must not execute") }
         assertIs<CoreResult.Failure>(runtime.openFiles(MemoryBinarySource(Bytes(ByteArray(1025)), SourceId("large")), context, "output.bin", true))
+        val oversized = object : BinarySource {
+            private val identity = SourceIdentity(SourceId("over-memory-budget"), GenerationToken("fixed"), BROWSER_MEDIA_INPUT_LIMIT.toULong() + 1u)
+            override suspend fun identity(): CoreResult<SourceIdentity> = CoreResult.Success(identity)
+            override suspend fun size(): CoreResult<ULong> = CoreResult.Success(identity.size)
+            override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> = error("Must reject before reading")
+            override suspend fun close() {}
+        }
+        assertEquals("RESOURCE_LIMIT_EXCEEDED", assertIs<CoreResult.Failure>(runtime.openFiles(oversized,
+            Context(Limits(512uL * 1024u * 1024u, 1024u)), "output.bin", true)).error.code.value)
         val source = MemoryBinarySource(Bytes(byteArrayOf(1)), SourceId("small"))
         val files = value(runtime.openFiles(source, context, "output.bin", true))
         assertIs<CoreResult.Failure>(runtime.openFiles(source, context, "output.bin", true))
         assertTrue(runtime.execute(listOf("ffmpeg", "-i", "https://example.invalid/input", "output.bin"), 1000, context).ioFailed)
         value(files.close()); value(value(runtime.openFiles(source, context, "output.bin", true)).close())
+        val media = MemoryBinarySource(Bytes(byteArrayOf(1, 2, 3)), SourceId("media-not-metadata"))
+        value(value(runtime.openFiles(media, context.copy(limits = context.limits.copy(maxMetadataBytes = 1u)), "output.bin", true)).close())
     }
     @Test fun cancellationAndOversizedOutputNeverExposeAFile(): Unit = runImmediate {
         var calls = 0

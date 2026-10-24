@@ -77,7 +77,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
         image == null -> "已选择视频，还需选择图片或确认封面"
         coverWarning != null -> coverWarning
         editing.pendingTrim -> "请先应用裁剪或重置选段"
-        totalSize != null && totalSize!! > 32L * 1024 * 1024 -> "输入合计超过 32 MiB，请更换素材"
+        totalSize != null && totalSize!! >= 32L * 1024 * 1024 -> "图片与当前视频合计达到或超过 32 MiB，请先裁剪视频或缩短选段"
         else -> null
     }
     fun reset() {
@@ -293,7 +293,7 @@ private fun OutputSettings(profile: Int, onSelect: (Int) -> Unit, enabled: Boole
         }
         Disclosure("格式说明", "JPEG 输出 · 不自动转码", formats, { formats = !formats }) {
             Text("OPPO / OnePlus、Google V2、Google V1。不是所有容器或 metadata 组合都支持；不会忽略安全错误。")
-            Text("媒体编辑：输入 32 MiB / 60 秒，输出 48 MiB。当前写视频仅无音频或符合条件的立体声 AAC；音频始终 copy。HDR、ICC 和 metadata 的保留以报告为准。")
+            Text("媒体编辑：原视频可超过 32 MiB，预处理上限 256 MiB / 60 秒，输出 48 MiB；生成前图片与处理后视频合计须小于 32 MiB。当前写视频仅无音频或符合条件的立体声 AAC；音频始终 copy。HDR、ICC 和 metadata 的保留以报告为准。")
         }
         Disclosure("更多能力", "规划占位，不会启动任务", planned, { planned = !planned }) {
             Text("Apple 写入：暂停\n批量处理：未实现\n更多画面调整：规划占位", color = MaterialTheme.colorScheme.onSurfaceVariant)

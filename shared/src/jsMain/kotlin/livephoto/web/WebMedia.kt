@@ -30,12 +30,12 @@ public fun browserMediaCapabilities(): String {
 @JsExport
 public fun processMedia(input: ByteArray, action: String, executor: dynamic, startUs: Double = 0.0,
     endUs: Double = 0.0, authorizeTranscode: Boolean = false, cancelled: () -> Boolean = { false }): Promise<WebResult> = promise {
-    if (input.size > 32 * 1024 * 1024) return@promise WebResult(false, "RESOURCE_LIMIT_EXCEEDED", "Read", "Media input exceeds 32 MiB")
+    if (input.size > BROWSER_MEDIA_INPUT_LIMIT) return@promise WebResult(false, "RESOURCE_LIMIT_EXCEEDED", "Read", "Media input exceeds 256 MiB")
     if (!startUs.isFinite() || !endUs.isFinite() || startUs < 0 || endUs < 0 || startUs > 60_000_000 || endUs > 60_000_000 ||
         startUs % 1 != 0.0 || endUs % 1 != 0.0 || action !in setOf("probe", "remux", "trim", "transcode", "frame"))
         return@promise WebResult(false, "INVALID_ARGUMENT", "Plan", "Unknown action or invalid integer microsecond range (maximum 60 seconds)")
     if (action == "trim" && endUs <= startUs) return@promise WebResult(false, "INVALID_ARGUMENT", "Plan", "Trim range must be nonempty")
-    val ctx = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u), cancellation = Cancellation(cancelled))
+    val ctx = Context(Limits(BROWSER_MEDIA_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = Cancellation(cancelled))
     val backend = BrowserFfmpegBackend(MemoryFfmpegExecutor { args, data, previous, name, timeout, context ->
         val response = awaitMedia(executor(JSON.stringify(args.toTypedArray()), data.toByteArray(), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
         MemoryFfmpegResult(FfmpegProcessResult((response.code as? Int), response.output as String,

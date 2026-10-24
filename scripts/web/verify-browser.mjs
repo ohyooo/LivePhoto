@@ -208,7 +208,11 @@ try {
     check('truncated-video-no-output', !malformed.success && malformed.blob === null);
     let oversized = false;
     try { await api.createLivePhoto(new Blob([new Uint8Array(32 * 1024 * 1024)]), video); } catch (e) { oversized = e instanceof RangeError; }
-    check('budget-rejected-before-reading', oversized);
+    const exactImage=new Blob([new Uint8Array([0])]),exactVideo=new Blob([new Uint8Array([0])]);
+    Object.defineProperty(exactImage,'size',{value:20*1024*1024});Object.defineProperty(exactVideo,'size',{value:12*1024*1024});
+    exactImage.arrayBuffer=exactVideo.arrayBuffer=()=>{throw Error('Exact-limit inputs were read');};
+    let exactRejected=false;try{await api.createLivePhoto(exactImage,exactVideo);}catch(error){exactRejected=error instanceof RangeError;}
+    check('budget-rejected-before-reading', oversized&&exactRejected);
     let badType = false;
     try { await api.createLivePhoto('not a File', video); } catch (e) { badType = e instanceof TypeError; }
     check('invalid-js-input-rejected', badType);

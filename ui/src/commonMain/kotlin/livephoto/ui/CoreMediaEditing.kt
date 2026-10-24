@@ -1,6 +1,7 @@
 package livephoto.ui
 
 import livephoto.core.*
+import livephoto.core.ffmpeg.BROWSER_MEDIA_INPUT_LIMIT
 import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.memory.MemoryOutputTransaction
 
@@ -25,11 +26,13 @@ public fun retainedCoreVideoWindow(start: Time, end: Time, mapping: List<Timelin
 
 /** Bounded application orchestration only. Commands, media proofs and publication stay in Core. */
 public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, action: CoreMediaAction,
-    start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null): CoreResult<PreparedCoreMedia> {
-    if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds 32 MiB"))
+    start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null,
+    inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia> {
+    if (inputLimit !in 1..BROWSER_MEDIA_INPUT_LIMIT || bytes.size > inputLimit)
+        return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds its memory budget"))
     if (start < Time.Zero || end < Time.Zero || start > Time(60, 1u) || end > Time(60, 1u) || action == CoreMediaAction.Trim && end <= start)
         return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Invalid media range; maximum 60 seconds"))
-    val ctx = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u), cancellation = cancellation)
+    val ctx = Context(Limits(inputLimit.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-core-media"))
     val input = ResourceRef(SourceSet.Single(source))
     val output = MemoryOutputTransaction(ctx, "ui-core-media")
