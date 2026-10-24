@@ -121,11 +121,15 @@ def main():
         site = root / 'repository'
         subprocess.run(['git', 'clone', '--depth=1', '--branch=main', f'git@github.com:{SITE}.git', str(site)], check=True)
         current = json.loads((site / 'web-ui-package-evidence.json').read_text(encoding='utf-8-sig'))
+        # Reuse the site's validator before either replacing or trusting its generated files.
+        subprocess.run(['python3', 'scripts/verify-package.py'], cwd=site, check=True)
         if int(current['run']) >= int(run):
             if str(current['run']) == run and current['commit'] != source['head_sha']:
                 raise RuntimeError('Published source identity disagrees with this run')
             if str(current['run']) == run:
-                await_pages(git(site, 'rev-parse', 'HEAD'))
+                # Documentation-only commits may skip Pages; await the actual asset revision.
+                revisions = api(f'{SITE}/commits?path=web-ui-package-evidence.json&sha=main&per_page=1')
+                await_pages(revisions[0]['sha'])
             print('PAGES_SYNC=UNCHANGED: same or newer source is already in the site repository')
             return
         name = f'LivePhoto-web-ui-{run}-{source["run_attempt"]}'
@@ -138,8 +142,6 @@ def main():
         stage(archive, staged, source)
         if git(site, 'status', '--porcelain'):
             raise RuntimeError('Refusing to replace an edited website checkout')
-        # Reuse the site's validation instead of maintaining another hash/manifest validator.
-        subprocess.run(['python3', 'scripts/verify-package.py'], cwd=site, check=True)
         shutil.rmtree(site / 'site')
         shutil.copytree(staged / 'site', site / 'site')
         shutil.copy2(staged / 'web-ui-package-evidence.json', site / 'web-ui-package-evidence.json')
