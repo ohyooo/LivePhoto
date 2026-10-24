@@ -63,12 +63,12 @@ internal fun operation(result: OperationResult, output: MemoryOutputTransaction,
 
 /** Three already-supported profiles only; default does not authorize metadata loss. */
 @JsExport
-public fun createLivePhoto(image: ByteArray, video: ByteArray, target: String = "oplus.olive", replaceCameraComment: Boolean = false): Promise<WebResult> = promise {
-    if (image.size.toLong() + video.size >= INPUT_LIMIT) return@promise invalid("RESOURCE_LIMIT_EXCEEDED", "Combined inputs must be smaller than 32 MiB")
+public fun createLivePhoto(image: dynamic, video: dynamic, target: String = "oplus.olive", replaceCameraComment: Boolean = false): Promise<WebResult> = promise {
+    if (webInputSize(image).toLong() + webInputSize(video) >= INPUT_LIMIT) return@promise invalid("RESOURCE_LIMIT_EXCEEDED", "Combined inputs must be smaller than 32 MiB")
     val selector = selector(target) ?: return@promise invalid("CAPABILITY_UNSUPPORTED", "This Web entry supports only the three documented JPEG profiles")
     val ctx = context()
-    val photo = MemoryBinarySource(Bytes(image), SourceId("web-image"))
-    val movie = MemoryBinarySource(Bytes(video), SourceId("web-video"))
+    val photo = webSource(image, SourceId("web-image"))
+    val movie = webSource(video, SourceId("web-video"))
     val output = MemoryOutputTransaction(ctx, "web-create")
     var created: OperationResult? = null
     try {
@@ -88,7 +88,7 @@ public fun createLivePhoto(image: ByteArray, video: ByteArray, target: String = 
 }
 
 @JsExport
-public fun detectLivePhoto(input: ByteArray): Promise<WebResult> = read(input) { source, ctx ->
+public fun detectLivePhoto(input: dynamic): Promise<WebResult> = read(input) { source, ctx ->
     when (val result = DefaultLivePhotoCore().detect(ReadRequest(SourceSet.Single(source), ctx))) {
         is CoreResult.Failure -> failure(result.error)
         is CoreResult.Success -> WebResult(true, protocol = result.value.primaryProtocol?.protocol?.value.orEmpty(),
@@ -99,7 +99,7 @@ public fun detectLivePhoto(input: ByteArray): Promise<WebResult> = read(input) {
 
 /** Structure and protocol only, not a decoder or gallery/device certification. */
 @JsExport
-public fun validateLivePhoto(input: ByteArray): Promise<WebResult> = read(input) { source, ctx ->
+public fun validateLivePhoto(input: dynamic): Promise<WebResult> = read(input) { source, ctx ->
     when (val result = DefaultLivePhotoCore().validate(ValidationRequest(SourceSet.Single(source),
         layers = listOf(Layer.Structure, Layer.Protocol), context = ctx))) {
         is CoreResult.Failure -> failure(result.error)
@@ -110,7 +110,7 @@ public fun validateLivePhoto(input: ByteArray): Promise<WebResult> = read(input)
 }
 
 @JsExport
-public fun inspectLivePhoto(input: ByteArray): Promise<WebResult> = read(input) { source, ctx ->
+public fun inspectLivePhoto(input: dynamic): Promise<WebResult> = read(input) { source, ctx ->
     when (val result = DefaultLivePhotoCore().inspect(ReadRequest(SourceSet.Single(source), ctx))) {
         is CoreResult.Failure -> failure(result.error)
         is CoreResult.Success -> WebResult(true, protocol = result.value.detection.primaryProtocol?.protocol?.value.orEmpty(),
@@ -120,7 +120,7 @@ public fun inspectLivePhoto(input: ByteArray): Promise<WebResult> = read(input) 
 }
 
 @JsExport
-public fun analyzeLivePhoto(input: ByteArray): Promise<WebResult> = read(input) { source, ctx ->
+public fun analyzeLivePhoto(input: dynamic): Promise<WebResult> = read(input) { source, ctx ->
     when (val result = DefaultLivePhotoCore().analyze(AnalyzeRequest(SourceSet.Single(source), listOf(Layer.Structure, Layer.Protocol), ctx))) {
         is CoreResult.Failure -> failure(result.error)
         is CoreResult.Success -> WebResult(true, protocol = result.value.inspection.detection.primaryProtocol?.protocol?.value.orEmpty(),
@@ -132,7 +132,7 @@ public fun analyzeLivePhoto(input: ByteArray): Promise<WebResult> = read(input) 
 }
 
 @JsExport
-public fun getKeyPhotoPosition(input: ByteArray): Promise<WebResult> = read(input) { source, ctx ->
+public fun getKeyPhotoPosition(input: dynamic): Promise<WebResult> = read(input) { source, ctx ->
     when (val result = DefaultLivePhotoCore().getKeyPhotoPosition(ReadRequest(SourceSet.Single(source), ctx))) {
         is CoreResult.Failure -> failure(result.error)
         is CoreResult.Success -> WebResult(true, reportJson = reportJson(key(result.value)),
@@ -141,7 +141,7 @@ public fun getKeyPhotoPosition(input: ByteArray): Promise<WebResult> = read(inpu
 }
 
 @JsExport
-public fun convertLivePhoto(input: ByteArray, target: String): Promise<WebResult> = mutate(input, "convert", target) { source, ctx, output ->
+public fun convertLivePhoto(input: dynamic, target: String): Promise<WebResult> = mutate(input, "convert", target) { source, ctx, output ->
     val selected = selector(target) ?: return@mutate CoreResult.Failure(CoreError(IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan,
         "This Web entry supports only the three documented JPEG profiles"))
     DefaultLivePhotoCore().convert(ConvertRequest(SourceSet.Single(source), selected, output = output, context = ctx))
@@ -149,13 +149,13 @@ public fun convertLivePhoto(input: ByteArray, target: String): Promise<WebResult
 
 /** Clean split is not raw video extraction. All returned assets are committed together in memory. */
 @JsExport
-public fun splitLivePhoto(input: ByteArray): Promise<WebResult> = mutate(input, "split") { source, ctx, output ->
+public fun splitLivePhoto(input: dynamic): Promise<WebResult> = mutate(input, "split") { source, ctx, output ->
     DefaultLivePhotoCore().split(SplitRequest(SourceSet.Single(source), output = output, context = ctx))
 }
 
 /** Safe metadata only. A successful report may be blocked or a no-op, with no output. */
 @JsExport
-public fun repairLivePhoto(input: ByteArray, dryRun: Boolean = true,
+public fun repairLivePhoto(input: dynamic, dryRun: Boolean = true,
     allowedIssueCodes: Array<String> = emptyArray()): Promise<WebResult> = read(input) { source, ctx ->
     val output = if (dryRun) null else MemoryOutputTransaction(ctx, "web-repair")
     var applied: OperationResult? = null
@@ -176,7 +176,7 @@ public fun repairLivePhoto(input: ByteArray, dryRun: Boolean = true,
     } finally { applied?.output?.assets?.forEach { it.readableSource?.close() } }
 }
 
-private fun mutate(input: ByteArray, name: String, protocol: String = "",
+private fun mutate(input: dynamic, name: String, protocol: String = "",
     block: suspend (BinarySource, Context, MemoryOutputTransaction) -> CoreResult<OperationResult>,
 ): Promise<WebResult> = read(input) { source, ctx ->
     val output = MemoryOutputTransaction(ctx, "web-$name")
@@ -190,7 +190,7 @@ private fun mutate(input: ByteArray, name: String, protocol: String = "",
 }
 
 @JsExport
-public fun extractVideo(input: ByteArray): Promise<WebResult> = read(input) { source, ctx ->
+public fun extractVideo(input: dynamic): Promise<WebResult> = read(input) { source, ctx ->
     val output = MemoryOutputTransaction(ctx, "web-extract")
     var extracted: OperationResult? = null
     try {
@@ -211,8 +211,8 @@ public fun extractVideo(input: ByteArray): Promise<WebResult> = read(input) { so
     } finally { extracted?.output?.assets?.forEach { it.readableSource?.close() } }
 }
 
-private fun read(input: ByteArray, block: suspend (BinarySource, Context) -> WebResult): Promise<WebResult> = promise {
-    if (input.size > OUTPUT_LIMIT) return@promise invalid("RESOURCE_LIMIT_EXCEEDED", "Input exceeds 48 MiB")
-    val source = MemoryBinarySource(Bytes(input), SourceId("web-input"))
+private fun read(input: dynamic, block: suspend (BinarySource, Context) -> WebResult): Promise<WebResult> = promise {
+    if (webInputSize(input) > OUTPUT_LIMIT) return@promise invalid("RESOURCE_LIMIT_EXCEEDED", "Input exceeds 48 MiB")
+    val source = webSource(input, SourceId("web-input"))
     try { block(source, context(OUTPUT_LIMIT)) } finally { source.close() }
 }

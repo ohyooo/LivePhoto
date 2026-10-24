@@ -32,6 +32,11 @@ if(process.argv.includes('--tests')) {
     if(proof.commit!==process.env.GITHUB_SHA||String(proof.run)!==process.env.GITHUB_RUN_ID||proof.tests!==count||proof.failures!==0||proof.checks?.length!==count||new Set(proof.checks).size!==count)throw Error('Incomplete/wrong-source test evidence: '+file);
   }
   const browser=await json('web-browser-evidence.json'),worker=browser.worker;
+  for(const proof of [browser,worker]){
+    const io=proof?.inputIo;
+    if(!io||!Number.isSafeInteger(io.slices)||io.slices<=0||io.maxSlice>65536||io.wholeReads!==0)
+      throw Error('Missing public JS protocol chunked input proof');
+  }
   const media=await json('web-media-evidence.json'),mediaWorker=media.worker;
   const wasmUi=media.wasmUi;
   const wasmChecks=['mobile','wide'].flatMap(size=>['wasm-runtime-and-engine-lazy','core-probe-real-decode',

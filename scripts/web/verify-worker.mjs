@@ -1,7 +1,9 @@
 // CI-only module Worker: exercise the production library, not a second parser.
-import * as api from '/livephoto.mjs';
+import * as module from '/livephoto.mjs';
+import {guardProtocolInputs} from '/source-io-guard.mjs';
 
 onmessage = async ({data: {image, video}}) => {
+  const {api,io}=guardProtocolInputs(module);
   const checks = [];
   const check = (name, valid, detail) => {
     if (!valid) throw Error(name + ': ' + JSON.stringify(detail));
@@ -74,7 +76,10 @@ onmessage = async ({data: {image, video}}) => {
         await digest(created.blob) === carrierHash);
     }
     const malformed = await api.inspectLivePhoto(new Blob([new Uint8Array([255,216,255,225,0,16,0,0])]));
-    check('malformed-structured-error', !malformed.success && malformed.report.kind === 'Error' && malformed.assets.length === 0 && malformed.blob === null, malformed);
+    const unreadable=image.slice();unreadable.slice=()=>{throw new DOMException('Unavailable input','NotReadableError');};
+    const readFailure=await api.inspectLivePhoto(unreadable);
+    check('malformed-structured-error', !malformed.success && malformed.report.kind === 'Error' && malformed.assets.length === 0 && malformed.blob === null &&
+      !readFailure.success&&readFailure.code==='IO_READ_FAILED'&&readFailure.blob===null&&readFailure.assets.length===0, malformed);
     const unsupported = await api.createLivePhoto(image, video, {target: 'not-a-protocol'});
     check('unsupported-no-output', !unsupported.success && unsupported.code === 'CAPABILITY_UNSUPPORTED' && unsupported.blob === null, unsupported);
     const ordinary = await api.convertLivePhoto(image, {target: 'google.motionphoto.v2'});
@@ -89,7 +94,8 @@ onmessage = async ({data: {image, video}}) => {
       check(name, rejected);
     }
     if (checks.length !== 42 || new Set(checks).size !== 42) throw Error('Incomplete Worker checks');
+    if(!io.slices||io.maxSlice>65536||io.wholeReads)throw Error('Incomplete Worker chunked source IO proof');
     postMessage({success: true, tests: checks.length, failures: 0, checks,
-      imageSha256: imageHash, videoSha256: videoHash, returnedVideo});
+      imageSha256: imageHash, videoSha256: videoHash, returnedVideo,inputIo:io});
   } catch (error) { postMessage({success: false, message: String(error), checks}); }
 };

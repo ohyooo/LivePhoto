@@ -21,12 +21,14 @@ generate(['-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=25', '-t', '1', '-an', 
   '-metadata:s:v', 'encoder=', '-fflags', '+bitexact', '-flags:v', '+bitexact', '-write_btrt', '0', videoPath]);
 const image = await readFile(imagePath), video = await readFile(videoPath);
 const worker = await readFile('scripts/web/verify-worker.mjs', 'utf8');
+const sourceGuard = await readFile('scripts/web/verify-source-io.mjs', 'utf8');
 const server = createServer(async (request, response) => {
   try {
     const name = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
     if (name === '/') { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><title>Headless protocol validation</title>'); return; }
     if (name === '/fixture-image' || name === '/fixture-video') { response.end(name === '/fixture-image' ? image : video); return; }
     if (name === '/worker.mjs') { response.setHeader('Content-Type', 'text/javascript'); response.end(worker); return; }
+    if (name === '/source-io-guard.mjs') { response.setHeader('Content-Type', 'text/javascript'); response.end(sourceGuard); return; }
     const file = resolve(root, '.' + name);
     if (!file.startsWith(root + sep)) { response.writeHead(403).end(); return; }
     response.setHeader('Content-Type', ['.mjs', '.js'].includes(extname(file)) ? 'text/javascript' : 'application/octet-stream');
@@ -42,8 +44,9 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(120000);
   await page.goto(origin);
-  const {checks, workerProof} = await page.evaluate(async part => {
-    const api = await import('/livephoto.mjs');
+  const {checks, workerProof, inputIo} = await page.evaluate(async part => {
+    const {guardProtocolInputs}=await import('/source-io-guard.mjs');
+    const {api,io}=guardProtocolInputs(await import('/livephoto.mjs'));
     const image = new File([await (await fetch('/fixture-image')).blob()], 'misleading.mp4', { type: 'application/octet-stream' });
     const video = new File([await (await fetch('/fixture-video')).blob()], 'misleading.jpg', { type: 'application/octet-stream' });
     const digest = async blob => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))).map(v => v.toString(16).padStart(2, '0')).join('');
@@ -205,14 +208,18 @@ try {
     const swapped = await api.createLivePhoto(video, image);
     check('swapped-content-rejected', !swapped.success && swapped.code.length > 0 && swapped.stage.length > 0 && swapped.message.length > 0 && swapped.blob === null);
     const malformed = await api.createLivePhoto(image, video.slice(0, 20));
-    check('truncated-video-no-output', !malformed.success && malformed.blob === null);
+    const unreadable=video.slice();unreadable.slice=()=>{throw new DOMException('Unavailable input','NotReadableError');};
+    const readFailure=await api.createLivePhoto(image,unreadable);
+    check('truncated-video-no-output', !malformed.success && malformed.blob === null &&
+      !readFailure.success&&readFailure.code==='IO_READ_FAILED'&&readFailure.blob===null&&readFailure.assets.length===0);
+    const beforeBudget=io.slices;
     let oversized = false;
     try { await api.createLivePhoto(new Blob([new Uint8Array(32 * 1024 * 1024)]), video); } catch (e) { oversized = e instanceof RangeError; }
     const exactImage=new Blob([new Uint8Array([0])]),exactVideo=new Blob([new Uint8Array([0])]);
     Object.defineProperty(exactImage,'size',{value:20*1024*1024});Object.defineProperty(exactVideo,'size',{value:12*1024*1024});
     exactImage.arrayBuffer=exactVideo.arrayBuffer=()=>{throw Error('Exact-limit inputs were read');};
     let exactRejected=false;try{await api.createLivePhoto(exactImage,exactVideo);}catch(error){exactRejected=error instanceof RangeError;}
-    check('budget-rejected-before-reading', oversized&&exactRejected);
+    check('budget-rejected-before-reading', oversized&&exactRejected&&io.slices===beforeBudget);
     let badType = false;
     try { await api.createLivePhoto('not a File', video); } catch (e) { badType = e instanceof TypeError; }
     check('invalid-js-input-rejected', badType);
@@ -246,13 +253,14 @@ try {
       workerResult.imageSha256 === beforeImage && workerResult.videoSha256 === beforeVideo, workerResult.message);
     const {returnedVideo, ...proof} = workerResult; workerProof=proof;
     }
-    return {checks, workerProof};
+    if(part==='main'&&(!io.slices||io.maxSlice>65536||io.wholeReads))throw Error('Incomplete chunked source IO proof');
+    return {checks, workerProof,inputIo:io};
   },part);
   if (checks.length !== (part==='main'?69:1) || new Set(checks).size !== checks.length) throw new Error('Incomplete browser check count');
   const evidence = {
     commit: process.env.GITHUB_SHA, run: process.env.GITHUB_RUN_ID,
     part, browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,
-    worker: workerProof,
+    worker: workerProof,inputIo,
     imageSha256: createHash('sha256').update(image).digest('hex'),
     videoSha256: createHash('sha256').update(video).digest('hex'),
     scope: 'real-browser-production-js-library-synthetic-media-no-decoder-no-device-proof-no-ui',

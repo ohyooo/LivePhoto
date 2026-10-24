@@ -5,6 +5,12 @@ const core = compiled.livephoto?.web ?? compiled;
 const INPUT_LIMIT = 32 * 1024 * 1024;
 const CARRIER_LIMIT = 48 * 1024 * 1024;
 
+function source(blob, limit) {
+  if (!(blob instanceof Blob)) throw new TypeError('Expected a File or Blob');
+  if (blob.size > limit) throw new RangeError('Input exceeds the documented memory budget');
+  return {size:blob.size,readAt:async(offset,length)=>new Int8Array(await blob.slice(offset,offset+length).arrayBuffer())};
+}
+
 async function bytes(blob, limit) {
   if (!(blob instanceof Blob)) throw new TypeError('Expected a File or Blob');
   if (blob.size > limit) throw new RangeError('Input exceeds the documented memory budget');
@@ -31,16 +37,16 @@ export async function createLivePhoto(image, video, { target = 'oplus.olive', re
   if (!(image instanceof Blob) || !(video instanceof Blob)) throw new TypeError('Expected image and video File/Blob inputs');
   if (image.size + video.size >= INPUT_LIMIT) throw new RangeError('Combined inputs must be smaller than 32 MiB');
   if (typeof target !== 'string' || typeof replaceCameraComment !== 'boolean') throw new TypeError('Invalid Web options');
-  const [photo, movie] = await Promise.all([bytes(image, INPUT_LIMIT), bytes(video, INPUT_LIMIT)]);
+  const photo=source(image,INPUT_LIMIT),movie=source(video,INPUT_LIMIT);
   return result(await core.createLivePhoto(photo, movie, target, replaceCameraComment));
 }
 
-export async function detectLivePhoto(input) { return result(await core.detectLivePhoto(await bytes(input, CARRIER_LIMIT))); }
-export async function validateLivePhoto(input) { return result(await core.validateLivePhoto(await bytes(input, CARRIER_LIMIT))); }
-export async function extractVideo(input) { return result(await core.extractVideo(await bytes(input, CARRIER_LIMIT))); }
-export async function inspectLivePhoto(input) { return result(await core.inspectLivePhoto(await bytes(input, CARRIER_LIMIT))); }
-export async function analyzeLivePhoto(input) { return result(await core.analyzeLivePhoto(await bytes(input, CARRIER_LIMIT))); }
-export async function getKeyPhotoPosition(input) { return result(await core.getKeyPhotoPosition(await bytes(input, CARRIER_LIMIT))); }
+export async function detectLivePhoto(input) { return result(await core.detectLivePhoto(source(input, CARRIER_LIMIT))); }
+export async function validateLivePhoto(input) { return result(await core.validateLivePhoto(source(input, CARRIER_LIMIT))); }
+export async function extractVideo(input) { return result(await core.extractVideo(source(input, CARRIER_LIMIT))); }
+export async function inspectLivePhoto(input) { return result(await core.inspectLivePhoto(source(input, CARRIER_LIMIT))); }
+export async function analyzeLivePhoto(input) { return result(await core.analyzeLivePhoto(source(input, CARRIER_LIMIT))); }
+export async function getKeyPhotoPosition(input) { return result(await core.getKeyPhotoPosition(source(input, CARRIER_LIMIT))); }
 /** Optional same-origin Worker backend. Does not change existing protocol-only defaults. */
 export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs',import.meta.url),signal,onDiagnostic}={}) {
   const runtime=new URL(runtimeUrl,import.meta.url);
@@ -60,10 +66,10 @@ export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs
     trim:(input,options)=>run(input,'trim',options),extractFrame:(input,options)=>run(input,'frame',options),
     transcode:(input,options)=>run(input,'transcode',options)});
 }
-export async function splitLivePhoto(input) { return result(await core.splitLivePhoto(await bytes(input, CARRIER_LIMIT))); }
+export async function splitLivePhoto(input) { return result(await core.splitLivePhoto(source(input, CARRIER_LIMIT))); }
 export async function convertLivePhoto(input, { target } = {}) {
   if (typeof target !== 'string') throw new TypeError('Convert requires a target protocol');
-  return result(await core.convertLivePhoto(await bytes(input, CARRIER_LIMIT), target));
+  return result(await core.convertLivePhoto(source(input, CARRIER_LIMIT), target));
 }
 
 /** success means a report was obtained, not that a repair was applied. */
@@ -74,5 +80,5 @@ export async function repairLivePhoto(input, { dryRun = true, allowedIssueCodes 
   }
   // Copy the filter before awaiting the Blob so callers cannot change the request in flight.
   const codes = [...allowedIssueCodes];
-  return result(await core.repairLivePhoto(await bytes(input, CARRIER_LIMIT), dryRun, codes));
+  return result(await core.repairLivePhoto(source(input, CARRIER_LIMIT), dryRun, codes));
 }

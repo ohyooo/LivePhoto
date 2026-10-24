@@ -2,14 +2,9 @@
 package livephoto.web
 
 import kotlin.js.*
-import kotlin.coroutines.*
 import livephoto.core.*
 import livephoto.core.ffmpeg.*
 import livephoto.core.memory.*
-
-private suspend fun awaitMedia(value: Promise<dynamic>): dynamic = suspendCoroutine { continuation ->
-    value.then<Unit>({ result -> continuation.resume(result) }, { error -> continuation.resumeWithException(error) })
-}
 
 private fun timeRange(value: TimeRange): dynamic = record("start" to time(value.start), "end" to time(value.end))
 private fun timeline(values: List<TimelineSegment>): dynamic = values.map {
@@ -37,7 +32,7 @@ public fun processMedia(input: ByteArray, action: String, executor: dynamic, sta
     if (action == "trim" && endUs <= startUs) return@promise WebResult(false, "INVALID_ARGUMENT", "Plan", "Trim range must be nonempty")
     val ctx = Context(Limits(BROWSER_MEDIA_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = Cancellation(cancelled))
     val backend = BrowserFfmpegBackend(MemoryFfmpegExecutor { args, data, previous, name, timeout, context ->
-        val response = awaitMedia(executor(JSON.stringify(args.toTypedArray()), data.toByteArray(), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
+        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), data.toByteArray(), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
         MemoryFfmpegResult(FfmpegProcessResult((response.code as? Int), response.output as String,
             response.outputLimited as Boolean, response.cancelled as Boolean, response.timedOut as Boolean, response.ioFailed as Boolean),
             (response.bytes as? ByteArray)?.let(::Bytes))
