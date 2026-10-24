@@ -728,3 +728,7 @@ macOS 在解压目录使用实际入口（终端 CLI，无需应用 bundle）：
 - `upstream/`：只读参考，不是项目依赖，不包含在发行包中；不复制其业务架构。
 
 README 的信息组织参考 [Gradle](https://github.com/gradle/gradle/blob/master/README.md) 的入门/构建导航与 [scrcpy](https://github.com/Genymobile/scrcpy/blob/master/README.md) 的前提/下载/用法组织；命令、参数、平台状态和能力边界来自本仓库实际源码与验收记录。
+
+## 致谢
+
+感谢 [LengxiQwQ/live-photo-box（Live Photo Box）](https://github.com/LengxiQwQ/live-photo-box) 的作者及贡献者。该项目是本项目研究 Live Photo / Motion Photo 协议的重要参考，其源码帮助我们理解和核对不同厂商的文件结构、XMP/EXIF 字段、视频偏移与长度、关键照片时间及兼容性处理，为 Kotlin Multiplatform Core 的协议实现提供了重要依据。
