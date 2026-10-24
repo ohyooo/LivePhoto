@@ -4,6 +4,8 @@
 
 ## 已完成的基础
 
+- [x] GitHub Pages：独立 [livephoto-web](https://github.com/ohyooo/livephoto-web) 仓库托管已核验的静态产物，访问 [在线站点](https://ohyooo.github.io/livephoto-web/)。[首次发布与公开地址浏览器验收](https://github.com/ohyooo/livephoto-web/actions/runs/40091610599) 成功，28 个文件哈希、Wasm UI、后台 Worker 和合成素材真实生成下载通过。站点仓库推送后自动部署；源码 CI 产物仍需同步到站点仓库。不依赖内网站点，也不改变用户原有 GitHub Pages 首页。
+
 ### 共享界面重设计（验收通过，源站已部署）
 
 已按新设计接入“新建 / 照片工具”双页、800/1280 响应式列布局、三态主题、紧凑文件行和移除/重置确认、独立裁剪草稿与封面预览、折叠报告及显式复制。窗口变化、切页和主题切换应保留素材及编辑状态；待应用选段和失效封面阻止生成。未扩展协议、音频编码或媒体后端。
