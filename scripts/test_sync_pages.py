@@ -6,8 +6,10 @@ import unittest
 import warnings
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
-stage = runpy.run_path(str(Path(__file__).with_name('sync-pages.py')))['stage']
+module = runpy.run_path(str(Path(__file__).with_name('sync-pages.py')))
+stage = module['stage']
 
 
 class PagesArchiveTest(unittest.TestCase):
@@ -53,6 +55,17 @@ class PagesArchiveTest(unittest.TestCase):
         archive, target = self.package([(f'web-ui/{index}', '') for index in range(513)])
         with self.assertRaisesRegex(RuntimeError, 'extraction budget'):
             stage(archive, target, self.source)
+
+    def test_a_commit_alone_does_not_prove_public_deployment(self):
+        wait = module['await_pages']
+        for result in ('success', 'failure', 'cancelled'):
+            response = {'workflow_runs': [{'status': 'completed', 'conclusion': result, 'html_url': 'https://github.com/example/run'}]}
+            with patch.dict(wait.__globals__, {'api': lambda _: response}):
+                if result == 'success':
+                    wait('a' * 40)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'public browser checks failed'):
+                        wait('a' * 40)
 
 
 if __name__ == '__main__':

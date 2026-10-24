@@ -94,6 +94,19 @@ def stage(archive, directory, source):
     return manifest
 
 
+def await_pages(commit):
+    deadline = time.monotonic() + 900
+    while time.monotonic() < deadline:
+        runs = api(f'{SITE}/actions/workflows/pages.yml/runs?head_sha={commit}&event=push&per_page=10')['workflow_runs']
+        if runs and runs[0]['status'] == 'completed':
+            if runs[0]['conclusion'] != 'success':
+                raise RuntimeError('Pages deployment or public browser checks failed: ' + runs[0]['html_url'])
+            print('PAGES_SYNC=SUCCESS: ' + runs[0]['html_url'])
+            return
+        time.sleep(15)
+    raise RuntimeError('Timed out awaiting Pages deployment and public browser checks')
+
+
 def main():
     run = os.environ['SOURCE_RUN']
     if not re.fullmatch(r'[1-9][0-9]*', run):
@@ -111,7 +124,9 @@ def main():
         if int(current['run']) >= int(run):
             if str(current['run']) == run and current['commit'] != source['head_sha']:
                 raise RuntimeError('Published source identity disagrees with this run')
-            print('PAGES_SYNC=UNCHANGED: same or newer source is already published')
+            if str(current['run']) == run:
+                await_pages(git(site, 'rev-parse', 'HEAD'))
+            print('PAGES_SYNC=UNCHANGED: same or newer source is already in the site repository')
             return
         name = f'LivePhoto-web-ui-{run}-{source["run_attempt"]}'
         matches = [entry for entry in api(f'{SOURCE}/actions/runs/{run}/artifacts?per_page=100')['artifacts'] if entry['name'] == name]
@@ -135,16 +150,7 @@ def main():
         git(site, 'commit', '-m', f'Publish tested Web run {run} ({source["head_sha"][:7]})')
         commit = git(site, 'rev-parse', 'HEAD')
         git(site, 'push', 'origin', 'HEAD:main')
-        deadline = time.monotonic() + 900
-        while time.monotonic() < deadline:
-            runs = api(f'{SITE}/actions/workflows/pages.yml/runs?head_sha={commit}&event=push&per_page=10')['workflow_runs']
-            if runs and runs[0]['status'] == 'completed':
-                if runs[0]['conclusion'] != 'success':
-                    raise RuntimeError('Pages deployment or public browser checks failed: ' + runs[0]['html_url'])
-                print('PAGES_SYNC=SUCCESS: ' + runs[0]['html_url'])
-                return
-            time.sleep(15)
-        raise RuntimeError('Timed out awaiting Pages deployment and public browser checks')
+        await_pages(commit)
 
 
 if __name__ == '__main__':
