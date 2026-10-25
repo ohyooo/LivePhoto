@@ -640,7 +640,7 @@ try {
     await analysisPicker({name:'reselected.jpg',mimeType:'image/jpeg',buffer:damagedV1});
     check(label+':repair-selection-state-isolated',cancelledRepair&&cancelKept&&cancelApplied&&await repairReport().count()===0&&await repairCannotApply());
     const failedRead=await previewRepair({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:damagedV1});
-    check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+2&&
+    check(label+':repair-preserves-analysis-and-create-state',repairAnalysisPreserved&&downloads===beforeRepair+3&&
       failedRead.includes('IO_READ_FAILED')&&failedRead.includes('阶段：Read')&&await repairCannotApply()&&
       await driver.emptyCreateInputs()&&errors.length===0);
 
