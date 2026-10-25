@@ -9,7 +9,7 @@ const server=createServer(async(req,res)=>{
     if(!name.startsWith('/livephoto/'))throw Error('Outside app');
     const path=resolve(root,'.'+(name==='/livephoto/'?'/index.html':name.slice('/livephoto'.length)));
     if(!path.startsWith(root+sep))throw Error('Outside app');
-    res.setHeader('Content-Type',{'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.json':'application/json'}[extname(path)]||'application/octet-stream');
+    res.setHeader('Content-Type',{'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.json':'application/json','.otf':'font/otf'}[extname(path)]||'application/octet-stream');
     let body=await readFile(path);
     if(extname(path)==='.html')body=body.toString().replace('<head>',`<head><script>
       window.bootErrors=[];
@@ -27,22 +27,27 @@ try{
   page.setDefaultTimeout(120000);
   page.on?.('pageerror',error=>console.error('UI_PAGE_ERROR',String(error)));
   await page.goto(`http://127.0.0.1:${server.address().port}/livephoto/`);
+  await page.evaluate(()=>{window.uiElements=selector=>{
+    const found=[];
+    const scan=root=>{found.push(...root.querySelectorAll(selector));for(const element of root.querySelectorAll('*'))if(element.shadowRoot)scan(element.shadowRoot);};
+    scan(document);return found;
+  };});
   const bounds=name=>page.evaluate(name=>{
-    const element=[...document.querySelectorAll('[role="button"],button')].find(e=>e.getAttribute('aria-label')===name||e.textContent.trim()===name);
+    const element=uiElements('[role="button"],button').find(e=>e.getAttribute('aria-label')===name||e.textContent.trim()===name);
     if(!element)return null;
     const b=element.getBoundingClientRect();return b.width>0&&b.height>0?{x:b.x+b.width/2,y:b.y+b.height/2}:null;
   },name);
-  try{await page.waitForFunction(()=>!!document.querySelector('canvas'));}
-  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({errors:window.bootErrors,visibility:document.visibilityState,focus:document.hasFocus(),webgl2:!!document.createElement('canvas').getContext('webgl2'),viewport:[innerWidth,innerHeight],layout:[...document.querySelectorAll('html,body,#app,compose-component,compose-component>div')].map(e=>({tag:e.tagName,id:e.id,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})),text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
+  try{await page.waitForFunction(()=>uiElements('canvas').length>0);}
+  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({errors:window.bootErrors,visibility:document.visibilityState,focus:document.hasFocus(),webgl2:!!document.createElement('canvas').getContext('webgl2'),viewport:[innerWidth,innerHeight],layout:[...document.querySelectorAll('html,body,#app,compose-component,compose-component>div')].map(e=>({tag:e.tagName,id:e.id,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,display:getComputedStyle(e).display})),text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
   await page.keyboard.press('Tab');
-  await page.waitForFunction(()=>!!document.querySelector('#main-action'));
+  await page.waitForFunction(()=>uiElements('#main-action').length>0);
   const runtime=await page.evaluate(()=>performance.getEntriesByType('resource').some(e=>/livephoto-ui\.[a-f0-9]+\.wasm/.test(e.name)));
   if(!runtime)throw Error('Kotlin/Wasm app did not load');checks.push('wasm-compose-render');
   for(const [name,selector]of [['照片工具','#tool-selector'],['新建','#main-action']]){
-    await page.waitForFunction(name=>[...document.querySelectorAll('[role="button"],button')].some(e=>e.getAttribute('aria-label')===name||e.textContent.trim()===name),name);
+    await page.waitForFunction(name=>uiElements('[role="button"],button').some(e=>e.getAttribute('aria-label')===name||e.textContent.trim()===name),name);
     const position=await bounds(name);if(!position)throw Error('Missing canvas control '+name);
     await page.mouse.click(position.x,position.y);
-    await page.waitForFunction(selector=>!!document.querySelector(selector),selector);
+    await page.waitForFunction(selector=>uiElements(selector).length>0,selector);
     checks.push(name==='新建'?'pointer-return-to-create':'pointer-photo-tools');
   }
   await page.screenshot({path:'ci-output/web-ui-compatibility.png'});
