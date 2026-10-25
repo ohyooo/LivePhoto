@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import {launchBrowser} from './browser-runtime.mjs';
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -37,10 +37,10 @@ const server = createServer(async (request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({ headless: true });
+const browser = await launchBrowser();
 try {
   const context = await browser.newContext({ serviceWorkers: 'block' });
-  await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
+  if(context.route)await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
   const page = await context.newPage();
   page.setDefaultTimeout(120000);
   await page.goto(origin);
@@ -240,7 +240,7 @@ try {
   if (checks.length !== (part==='main'?69:1) || new Set(checks).size !== checks.length) throw new Error('Incomplete browser check count');
   const evidence = {
     commit: process.env.GITHUB_SHA, run: process.env.GITHUB_RUN_ID,
-    part, browser: 'Chromium', browserVersion: browser.version(), tests: checks.length, failures: 0, checks,
+    part, browser: {chromium:'Chromium',firefox:'Firefox',safari:'Safari'}[process.env.LIVEPHOTO_BROWSER||'chromium'], browserVersion: browser.version(), tests: checks.length, failures: 0, checks,
     worker: workerProof,inputIo,
     imageSha256: createHash('sha256').update(image).digest('hex'),
     videoSha256: createHash('sha256').update(video).digest('hex'),

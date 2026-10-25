@@ -118,6 +118,8 @@ jobs:
             ci-output/web-package-evidence.json
             ci-output/web-ui-package-evidence.json
             ci-output/web-build.log
+            ci-output/compatibility/
+            ci-output/web-compatibility-evidence.json
             ci-output/web-ui-build.log
           if-no-files-found: error
           retention-days: 1
@@ -272,10 +274,17 @@ jobs:
       viewport: ${{ matrix.viewport }}
       scenario: ${{ matrix.scenario }}
 
+  compatibility:
+    name: Cross-browser compatibility
+    needs: build
+    uses: ./.github/workflows/web-compatibility.yml
+    with:
+      artifact: ${{ needs.build.outputs.artifact }}
+
   publish:
     name: Collect reports and publish tested outputs
     if: ${{ always() && needs.build.result == 'success' && !cancelled() }}
-    needs: [build, test, common, ui]
+    needs: [build, test, common, ui, compatibility]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -295,16 +304,23 @@ jobs:
           merge-multiple: true
           path: ci-output
 
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: web-compatibility-*-${{ github.run_id }}
+          path: ci-output/compatibility
+
       - name: Merge and verify every independent scenario report
-        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
+        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && needs.compatibility.result == 'success' }}
         run: node scripts/web/merge-web-evidence.mjs
 
       - name: Verify source identity and complete independent evidence
-        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
-        run: node scripts/web/verify-build.mjs --tests
+        if: ${{ needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && needs.compatibility.result == 'success' }}
+        run: |
+          node scripts/web/verify-build.mjs --tests
+          node scripts/web/verify-compatibility.mjs
 
       - name: Publish verified browser library
-        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && needs.compatibility.result == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-web-js-${{ github.run_id }}-${{ github.run_attempt }}
@@ -315,7 +331,7 @@ jobs:
           retention-days: 14
 
       - name: Publish verified shared website
-        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && needs.compatibility.result == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: LivePhoto-web-ui-${{ github.run_id }}-${{ github.run_attempt }}
@@ -352,6 +368,8 @@ jobs:
         with:
           name: web-ui-reports-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            ci-output/compatibility/
+            ci-output/web-compatibility-evidence.json
             ci-output/web-ui-build.log
             ci-output/web-ui-browser.log
             ci-output/web-ui-package-evidence.json
@@ -372,18 +390,18 @@ jobs:
           retention-days: 14
 
       - name: Remove temporary handoff artifacts after successful collection
-        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && github.event_name != 'pull_request' && steps.protocol_reports.outcome == 'success' && steps.ui_reports.outcome == 'success' }}
+        if: ${{ success() && needs.test.result == 'success' && needs.common.result == 'success' && needs.ui.result == 'success' && needs.compatibility.result == 'success' && github.event_name != 'pull_request' && steps.protocol_reports.outcome == 'success' && steps.ui_reports.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("web-test-")) | .id' |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name | (startswith("web-test-") or startswith("web-compatibility-"))) | .id' |
           while read -r artifact_id; do
             [[ "$artifact_id" =~ ^[0-9]+$ ]]
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
           done
 
       - name: Keep failed test suites visible in the aggregate result
-        if: ${{ always() && (needs.test.result != 'success' || needs.common.result != 'success' || needs.ui.result != 'success') }}
+        if: ${{ always() && (needs.test.result != 'success' || needs.common.result != 'success' || needs.ui.result != 'success' || needs.compatibility.result != 'success') }}
         run: exit 1

@@ -1,5 +1,9 @@
 name: Set up Web test runtime
 description: Cached browser tooling and stable native fixture generator; no Gradle or JDK.
+inputs:
+  browser:
+    default: chromium
+    description: Installed test browser; Safari uses the macOS system browser.
 runs:
   using: composite
   steps:
@@ -15,7 +19,7 @@ runs:
       working-directory: scripts/web
       run: |
         npm install --ignore-scripts --no-audit --no-fund
-        npx playwright install --with-deps chromium
+        if [[ '${{ inputs.browser }}' != safari ]]; then npx playwright install --with-deps '${{ inputs.browser }}'; fi
 
     - name: Cache stable FFmpeg fixture generator
       uses: actions/cache@v6
@@ -25,4 +29,12 @@ runs:
 
     - name: Validate cached FFmpeg or download stable prebuilt tools
       shell: bash
-      run: bash scripts/prepare-web-ffmpeg.sh
+      run: |
+        if [[ "$RUNNER_OS" == macOS ]]; then
+          command -v ffmpeg >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
+          command -v ffprobe >/dev/null
+          ffmpeg -version
+          echo "LIVEPHOTO_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+        else
+          bash scripts/prepare-web-ffmpeg.sh
+        fi

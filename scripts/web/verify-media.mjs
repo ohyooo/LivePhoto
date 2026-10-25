@@ -1,4 +1,4 @@
-import {chromium} from 'playwright';
+import {launchBrowser} from './browser-runtime.mjs';
 import {createServer} from 'node:http';
 import {readFile,writeFile,mkdtemp} from 'node:fs/promises';
 import {resolve,join,sep,extname,dirname} from 'node:path';
@@ -98,12 +98,12 @@ const server=createServer(async(req,res)=>{
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin=`http://127.0.0.1:${server.address().port}`;
-const browser=await chromium.launch({headless:true});
+const browser=await launchBrowser();
 const checks=[];
 const check=(name,valid)=>{if(!valid) throw Error(name);checks.push(name);};
 try {
   const context=await browser.newContext({serviceWorkers:'block'});
-  await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort());
+  if(context.route)await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort());
   const page=await context.newPage();
   page.setDefaultTimeout(180000);
   await page.goto(origin+'/livephoto/test');
@@ -270,7 +270,7 @@ try {
   const expected=audioCase||storageCase?1:part==='main'?9:0;
   if(checks.length!==expected||new Set(checks).size!==expected)throw Error('Incomplete media evidence');
   await writeFile(`ci-output/web-media-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
-    browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(coreInput).digest('hex'),
+    browser:process.env.LIVEPHOTO_BROWSER||'chromium',browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(coreInput).digest('hex'),
     scope:'browser-video-canvas-real-single-thread-ffmpeg-wasm-native-packet-audit-synthetic-audio-no-device-proof'},null,2)+'\n');
   console.log(`WEB_MEDIA_EVIDENCE=SUCCESS ${expected} checks; ${part}`);
   if(worker)console.log('MEDIA_WORKER_EVIDENCE=SUCCESS 9 checks');

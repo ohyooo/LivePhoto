@@ -1,0 +1,58 @@
+name: Independent browser compatibility
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    name: ${{ matrix.browser }} ${{ matrix.scenario.suite }} ${{ matrix.scenario.part }}
+    runs-on: ${{ matrix.browser == 'safari' && 'macos-26' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, safari]
+        scenario:
+          - {suite: browser, part: main}
+          - {suite: browser, part: worker}
+          - {suite: media, part: main}
+          - {suite: media, part: worker}
+          - {suite: ui-boot, part: main}
+    env:
+      LIVEPHOTO_BROWSER: ${{ matrix.browser }}
+      LIVEPHOTO_TEST_PART: ${{ matrix.scenario.part }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact }}
+          path: ci-output
+      - name: Verify compiled source and assets
+        run: node scripts/web/verify-build.mjs
+      - uses: ./.github/actions/setup-web-tests
+        with:
+          browser: ${{ matrix.browser }}
+      - name: Enable Apple's Safari WebDriver
+        if: matrix.browser == 'safari'
+        run: sudo /usr/bin/safaridriver --enable
+      - name: Run actual browser scenario
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/web/verify-${{ matrix.scenario.suite }}.mjs 2>&1 | tee ci-output/web-compatibility.log
+      - name: Preserve evidence without media
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-compatibility-${{ matrix.browser }}-${{ matrix.scenario.suite }}-${{ matrix.scenario.part }}-${{ github.run_id }}
+          path: |
+            ci-output/web-*-evidence-*.json
+            ci-output/web-compatibility.log
+            ci-output/web-safaridriver.log
+            ci-output/web-ui-compatibility.png
+          retention-days: 14
+          if-no-files-found: warn
