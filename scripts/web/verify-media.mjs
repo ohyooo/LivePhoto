@@ -8,7 +8,8 @@ import {createHash} from 'node:crypto';
 import {verifyCoreUi} from './verify-core-ui.mjs';
 
 const part=process.env.LIVEPHOTO_TEST_PART;
-if(!['main','worker','mobile','wide'].includes(part))throw Error('Select media context');
+const audioCase=/^aac-(mono|surround)-(remux|trim|transcode)$/.exec(part);
+if(!audioCase&&!['main','worker','mobile','wide'].includes(part))throw Error('Select media context');
 const directory=await mkdtemp(join(tmpdir(),'livephoto-web-media-'));
 const ffmpeg=process.env.LIVEPHOTO_FFMPEG;
 if(!ffmpeg) throw Error('Existing synthetic fixture generator required');
@@ -48,9 +49,12 @@ generateCore(['-i',coreSource,'-map','0','-c','copy','-use_editlist','0','-map_m
   '-metadata:s:v','encoder=','-fflags','+bitexact','-write_btrt','0',emptyEncoderSource]);
 const coreInput=await readFile(coreSource);
 // A valid top-level free box raises file size without changing any encoded packets.
-const largeSource=join(directory,'core-large.mp4'),padding=Buffer.alloc(257*1024*1024);
-padding.writeUInt32BE(padding.length,0);padding.write('free',4,'ascii');
-await writeFile(largeSource,Buffer.concat([coreInput,padding]));
+const largeSource=join(directory,'core-large.mp4');
+if(['mobile','wide'].includes(part)){
+  const padding=Buffer.alloc(257*1024*1024);
+  padding.writeUInt32BE(padding.length,0);padding.write('free',4,'ascii');
+  await writeFile(largeSource,Buffer.concat([coreInput,padding]));
+}
 const monoInput=await readFile(monoSource);
 const surroundInput=await readFile(surroundSource);
 // Synthetic negative fixture: a legacy reserved sample-entry header cannot be
@@ -124,15 +128,6 @@ try {
     const invalidRange=await backend.trim(file,{start:2,end:1});
     const forbidden=await backend.transcode(file);
     const malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
-    const channelOutputs=[];
-    for(const channels of ['mono','surround']){
-      const input=await(await fetch('/core-'+channels+'-fixture')).blob();
-      for(const action of ['remux','trim','transcode']){
-        const value=await backend[action](input,{start:.4,end:1.6,authorizeTranscode:true});
-        if(!value.success)throw Error(channels+'/'+action+': '+value.code+' '+value.message+' '+JSON.stringify(diagnostics.slice(-2)));
-        channelOutputs.push({channels,action,report:value.report,bytes:Array.from(new Uint8Array(await value.blob.arrayBuffer()))});
-      }
-    }
     const inconsistent=await backend.remux(await(await fetch('/core-inconsistent-fixture')).blob());
     const fractional=await backend.trim(await(await fetch('/core-fractional-fixture')).blob(),{start:.4,end:1.6});
     const unknownColor=await backend.extractFrame(await(await fetch('/core-fractional-fixture')).blob(),{start:.4});
@@ -147,7 +142,7 @@ try {
     oversized.arrayBuffer=()=>{throw Error('Over-budget input was read');};
     let budget=false;try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
     io.restore();
-    return {results,capabilities,invalidRange,forbidden,malformed,channelOutputs,inconsistent,fractional,unknownColor,encoderChange,cancelled,stopped,budget,
+    return {results,capabilities,invalidRange,forbidden,malformed,inconsistent,fractional,unknownColor,encoderChange,cancelled,stopped,budget,
       inputIo:io.stats,immutable:before===await hash(file)};
   });
   check('invalid-range-rejected',!coreResults.invalidRange.success&&!coreResults.invalidRange.blob);
@@ -193,15 +188,24 @@ try {
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable&&coreResults.inputIo.mounts>=5&&
     coreResults.inputIo.wholeReads===0&&coreResults.inputIo.inputWrites===0&&coreResults.inputIo.outputParts>0);
-  for(const output of coreResults.channelOutputs){
+  }
+  if(audioCase){
+    const output=await page.evaluate(async({channels,action})=>{
+      const {createMediaBackend}=await import('/api/livephoto.mjs');
+      const backend=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs'});
+      const input=await(await fetch('/core-'+channels+'-fixture')).blob();
+      const value=await backend[action](input,{start:.4,end:1.6,authorizeTranscode:true});
+      if(!value.success)throw Error(channels+'/'+action+': '+value.code+' '+value.message);
+      if(!value.report.execution.some(item=>item.backendId==='ffmpeg-wasm'))throw Error('Missing Wasm execution evidence');
+      return {channels,action,bytes:Array.from(new Uint8Array(await value.blob.arrayBuffer()))};
+    },{channels:audioCase[1],action:audioCase[2]});
     const before=probe(output.channels==='mono'?monoSource:surroundSource),path=join(directory,output.channels+'-'+output.action+'.mp4');
     await writeFile(path,new Uint8Array(output.bytes));const after=probe(path);
     const a=before.streams.find(s=>s.codec_type==='audio'),b=after.streams.find(s=>s.codec_type==='audio');
-    if(!b||b.codec_name!=='aac'||b.channels!==a.channels||b.channel_layout!==a.channel_layout||b.sample_rate!==a.sample_rate||b.extradata_hash!==a.extradata_hash)throw Error('AAC configuration changed');
+    if(!b||a.channels!==(output.channels==='mono'?1:6)||b.codec_name!=='aac'||b.channels!==a.channels||b.channel_layout!==a.channel_layout||b.sample_rate!==a.sample_rate||!a.extradata_hash||b.extradata_hash!==a.extradata_hash)throw Error('AAC configuration changed');
     const original=before.packets.filter(p=>p.stream_index===a.index).map(p=>p.data_hash),retained=after.packets.filter(p=>p.stream_index===b.index).map(p=>p.data_hash);
     if(!retained.length||!original.some((_,i)=>retained.every((hash,j)=>hash===original[i+j]))||(output.action!=='trim'&&original.length!==retained.length))throw Error('AAC copied packet proof failed');
-  }
-  check('core-aac-channel-preservation',coreResults.channelOutputs.length===6);
+    check(part+'-channel-preservation',true);
   }
   if(part==='worker'){
   const workerResult=await page.evaluate(async()=>{
@@ -260,7 +264,7 @@ try {
     scope:'module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'};
   }
   if(['mobile','wide'].includes(part))wasmUi=await verifyCoreUi({browser,origin,coreSource,largeSource,inconsistentSource,imagePath,directory,probe,viewport:part});
-  const expected=part==='main'?10:0;
+  const expected=audioCase?1:part==='main'?9:0;
   if(checks.length!==expected||new Set(checks).size!==expected)throw Error('Incomplete media evidence');
   await writeFile(`ci-output/web-media-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
     browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(coreInput).digest('hex'),

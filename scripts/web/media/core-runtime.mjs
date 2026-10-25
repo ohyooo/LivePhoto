@@ -29,7 +29,11 @@ export async function executeCoreFfmpeg(argsJson,input,previousOutput,outputName
     // overwrite or replacement of a previous verified output.
     if(!['-',outputName].includes(args.at(-1))||
       (args.includes('-n')&&previousOutput&&args.at(-1)===outputName))throw Error('Refusing private output overwrite');
-    result.code=await engine.exec(args.filter(arg=>arg!=='-n').map(arg=>arg==='input.bin'?'/input/input.bin':arg),timeoutMillis);
+    const command=args.filter(arg=>arg!=='-n').map(arg=>arg==='input.bin'?'/input/input.bin':arg);
+    // Stop a large input from growing private MEMFS without a bound. Any
+    // truncated/over-budget output is rejected below or by Core verification.
+    if(args.at(-1)===outputName)command.splice(-1,0,'-fs',String(limit+1));
+    result.code=await engine.exec(command,timeoutMillis);
     if(result.code===0&&args.at(-1)===outputName){
       const bytes=await engine.readFile(outputName);
       if(bytes.byteLength>limit){result.outputLimited=true;return;}

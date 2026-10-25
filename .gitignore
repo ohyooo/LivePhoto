@@ -3,6 +3,7 @@ upstream
 .kotlin/
 **/build/
 .validation/
+.web-media-engine/
 .DS_Store
 local.properties
 *.jks

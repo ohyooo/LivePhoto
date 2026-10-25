@@ -232,6 +232,12 @@ jobs:
           - {suite: media, part: worker}
           - {suite: media, part: mobile}
           - {suite: media, part: wide}
+          - {suite: media, part: aac-mono-remux}
+          - {suite: media, part: aac-mono-trim}
+          - {suite: media, part: aac-mono-transcode}
+          - {suite: media, part: aac-surround-remux}
+          - {suite: media, part: aac-surround-trim}
+          - {suite: media, part: aac-surround-transcode}
           - {suite: theme, part: mobile}
           - {suite: theme, part: wide}
           - {suite: player, part: mobile-landscape}
