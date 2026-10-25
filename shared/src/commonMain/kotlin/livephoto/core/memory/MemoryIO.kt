@@ -60,14 +60,14 @@ public class MemoryOutputTransaction(private val context: Context, private val t
         checkCancelled(context)
         if (state != TransactionState.Prepared && state != TransactionState.Verified) fail("INVALID_ARGUMENT", "Staged reads require a prepared transaction", Stage.Verify)
         val sink = staging[id] ?: fail("INVALID_ARGUMENT", "Unknown staged asset", Stage.Verify)
-        MemoryBinarySource(sink.snapshot(), SourceId("staging:$token:${id.value}"), GenerationToken(token))
+        MemoryBinarySource(sink.freeze(), SourceId("staging:$token:${id.value}"), GenerationToken(token))
     }
     override suspend fun commit(): CoreResult<Receipt> = attempt {
         checkCancelled(context)
         if (state != TransactionState.Prepared && state != TransactionState.Verified) fail("INVALID_ARGUMENT", "Commit requires a prepared transaction", Stage.Publish)
         // Core calls commit only after independent readback verification; freeze before visibility.
         state = TransactionState.Verified
-        val assets = staging.mapValues { it.value.snapshot() }
+        val assets = staging.mapValues { it.value.freeze() }
         published = assets
         state = TransactionState.Committed
         receipt()
@@ -93,6 +93,7 @@ public class MemoryOutputTransaction(private val context: Context, private val t
 
     private class MemorySink(private val owner: MemoryOutputTransaction) : BinarySink {
         private var storage = ByteArray(0)
+        private var frozen: Bytes? = null
         private var length = 0
         private var position = 0
         private var closed = false
@@ -127,6 +128,10 @@ public class MemoryOutputTransaction(private val context: Context, private val t
         }
         override suspend fun flush(): CoreResult<Unit> = attempt<Unit> { writable() }
         override suspend fun close(): CoreResult<Unit> { closed = true; return CoreResult.Success(Unit) }
-        fun snapshot(): Bytes = Bytes(storage.copyOf(length))
+        fun freeze(): Bytes = frozen ?: Bytes.takeOwnership(storage, length).also {
+            // prepare() has disabled all writers; readers and commit share immutable storage.
+            frozen = it
+            storage = ByteArray(0)
+        }
     }
 }

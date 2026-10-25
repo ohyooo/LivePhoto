@@ -114,6 +114,32 @@ class MemoryIoTest {
     }
 
     @Test
+    fun frozenOutputKeepsLogicalLengthAndIndependentReadersAcrossAbort(): Unit = runImmediate {
+        val expected = ByteArray(131_075) { (it % 251).toByte() }
+        val transaction = MemoryOutputTransaction(context(output = 262_144u), "frozen-buffer")
+        val sink = value(transaction.create(spec()))
+        value(sink.sink.write(Bytes(expected.copyOfRange(0, 65_536))))
+        value(sink.sink.write(Bytes(expected.copyOfRange(65_536, expected.size))))
+        value(sink.sink.truncate((expected.size + 7).toULong()))
+        value(sink.sink.truncate(expected.size.toULong()))
+        value(transaction.prepare())
+        val first = value(transaction.openStaged(sink.id))
+        val second = value(transaction.openStaged(sink.id))
+        assertEquals(expected.size.toULong(), value(first.size()))
+        val copy = value(first.readAt(0u, UInt.MAX_VALUE)).toByteArray()
+        assertContentEquals(expected, copy)
+        copy.fill(0)
+        failure("INVALID_ARGUMENT", sink.sink.truncate(0u))
+        failure("INVALID_ARGUMENT", sink.sink.write(Bytes(byteArrayOf(9))))
+        first.close()
+        value(transaction.abort())
+        assertTrue(transaction.committedAssets().isEmpty())
+        assertContentEquals(expected, value(second.readAt(0u, UInt.MAX_VALUE)).toByteArray())
+        assertEquals(Bytes(byteArrayOf()), value(second.readAt(expected.size.toULong(), 10u)))
+        second.close()
+    }
+
+    @Test
     fun seekAndTruncatePreserveContentAndZeroNewHoles(): Unit = runImmediate {
         val transaction = MemoryOutputTransaction(context(), "seek-truncate")
         val sink = value(transaction.create(spec())).sink

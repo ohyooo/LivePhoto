@@ -3,6 +3,13 @@ package livephoto.core
 /** An immutable byte buffer. Neither the supplied array nor returned copies alias its storage. */
 public class Bytes private constructor(private val storage: ByteArray, private val start: Int, public val size: Int) {
     public constructor(value: ByteArray) : this(value.copyOf(), 0, value.size)
+    internal companion object {
+        /** The caller must relinquish its private array and never mutate it again. */
+        internal fun takeOwnership(value: ByteArray, length: Int): Bytes {
+            require(length in 0..value.size)
+            return Bytes(value, 0, length)
+        }
+    }
     public operator fun get(index: Int): Byte {
         require(index in 0 until size) { "Byte index exceeds buffer" }
         return storage[start + index]
