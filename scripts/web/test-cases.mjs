@@ -37,6 +37,6 @@ export const testPlan=[
   {suite:'browser',part:'main',checks:browserCases}, {suite:'browser',part:'worker',checks:['module-worker-round-trip']},
   ...['main','worker',...sizes].map(part=>({suite:'media',part,checks:part==='main'?['invalid-range-rejected','core-probe-decode-partial',
     'core-remux-independent-video-audio','core-trim-actual-timeline','core-transcode-explicit-audio-copy','core-extract-frame-decodes',
-    'core-policy-and-malformed-no-output','core-cancel-and-budget-no-output','core-input-bytes-immutable']:[]})),
+    'core-policy-and-malformed-no-output','core-cancel-and-budget-no-output','core-input-bytes-immutable','core-aac-channel-preservation']:[]})),
 ];
 export const evidenceName=suite=>suite==='ui'?'ui-browser':suite;

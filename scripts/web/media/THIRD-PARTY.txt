@@ -4,13 +4,24 @@ Optional browser media backend (loaded only when editing is requested)
 Source and build scripts: https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15
 License: https://github.com/ffmpegwasm/ffmpeg.wasm/blob/v12.15/LICENSE
 
-@ffmpeg/core 0.12.10: GPL-2.0-or-later (contains FFmpeg and optional codec libraries)
+Rebuilt ffmpeg.wasm engine: GPL-2.0-or-later (FFmpeg and x264)
 Source/build configuration: https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15
 Upstream licensing: https://ffmpegwasm.netlify.app/docs/overview/#license
 FFmpeg source and license: https://ffmpeg.org/download.html and https://ffmpeg.org/legal.html
 Included GPL v2 text: https://github.com/FFmpeg/FFmpeg/blob/n5.1.4/COPYING.GPLv2
 
-These are separate, unmodified npm distributions, hosted on the same origin.
+The wrapper is an unmodified npm distribution. The engine is rebuilt from
+FFmpeg n5.1.4 with the ffmpeg.wasm v12.15 single-thread CLI/toolchain and x264.
+It backports FFmpeg n6.0 movenc.c channel-count emission, and only includes the
+libx264 and mjpeg encoders (no audio encoders). It is not an unmodified npm core.
+Reproducible build and exact source change: engine-source.txt; source revisions:
+vendor/core/build.json. Source: https://github.com/FFmpeg/FFmpeg/tree/n5.1.4,
+https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15, and
+https://github.com/ffmpegwasm/x264/tree/4-cores (revision recorded in build.json).
+Upstream fix: https://github.com/FFmpeg/FFmpeg/blob/n6.0/libavformat/movenc.c
+Save the two labelled files from engine-source.txt into an engine-source folder,
+then build with: docker build --output type=local,dest=engine engine-source
+All components are hosted on the same origin.
 No media is sent to an external service. The GPL media component is not linked
 into the Kotlin protocol Core or the desktop/Android artifacts by this change.
 See the included license files and dependency source/build references before

@@ -16,7 +16,7 @@ New-Item -ItemType Directory -Path $media -Force | Out-Null
 Copy-Item scripts/web/media/*.mjs $media
 $vendor = Join-Path $media 'vendor'
 New-Item -ItemType Directory -Path $vendor -Force | Out-Null
-foreach ($package in @('ffmpeg', 'core')) {
+foreach ($package in @('ffmpeg')) {
     $npm = "scripts/web/node_modules/@ffmpeg/$package"
     if (-not (Test-Path "$npm/dist/esm")) { throw "Install pinned browser media dependencies before packaging: $package" }
     $packageDirectory = Join-Path $vendor $package
@@ -29,6 +29,15 @@ foreach ($package in @('ffmpeg', 'core')) {
 Copy-Item scripts/web/media/THIRD-PARTY.txt $media
 Copy-Item scripts/web/media/ffmpeg-wrapper-LICENSE.txt $media
 Copy-Item scripts/web/media/ffmpeg-core-GPL-2.0.txt $media
+New-Item -ItemType Directory -Path "$vendor/core" -Force | Out-Null
+foreach ($file in @('ffmpeg-core.js', 'ffmpeg-core.wasm', 'build.json')) {
+    if (-not (Test-Path ".web-media-engine/$file")) { throw "Missing rebuilt browser engine: $file" }
+    Copy-Item ".web-media-engine/$file" "$vendor/core/$file" -Force
+}
+@('Dockerfile', 'preserve-channels.py') | ForEach-Object {
+    "=== $_ ==="
+    Get-Content "scripts/web/engine/$_"
+} | Set-Content "$media/engine-source.txt" -Encoding utf8
 # Noto's latest stable Sans CJK release; ship its unmodified font and OFL license.
 # These public assets are fetched at packaging time, never at application runtime.
 $fontDirectory = Join-Path $destination 'fonts'

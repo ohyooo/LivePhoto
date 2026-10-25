@@ -37,7 +37,8 @@ private fun outputBlob(bytes: Bytes, mime: String): dynamic {
     var offset = 0
     while (offset < bytes.size) {
         val end = minOf(offset + 65536, bytes.size)
-        parts.push(bytes.slice(offset, end).toByteArray())
+        val part = bytes.slice(offset, end).toByteArray()
+        parts.push(js("new Blob([part])"))
         offset = end
     }
     return js("new Blob(parts, {type: mime})")

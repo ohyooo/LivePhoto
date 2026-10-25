@@ -16,7 +16,7 @@ jobs:
   build:
     name: Build Web library and shared UI once
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 50
     outputs:
       artifact: ${{ steps.names.outputs.artifact }}
     env:
@@ -81,6 +81,17 @@ jobs:
       - name: Install pinned packaging dependencies
         working-directory: scripts/web
         run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Cache browser media engine
+        id: media-engine
+        uses: actions/cache@v6
+        with:
+          path: .web-media-engine
+          key: web-media-engine-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/web/engine/**') }}
+
+      - name: Build browser engine with upstream channel-count preservation
+        if: steps.media-engine.outputs.cache-hit != 'true'
+        run: docker build --output type=local,dest=.web-media-engine scripts/web/engine
 
       - name: Package library
         shell: pwsh

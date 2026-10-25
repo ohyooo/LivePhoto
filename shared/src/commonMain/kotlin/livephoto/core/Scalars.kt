@@ -4,11 +4,6 @@ package livephoto.core
 public class Bytes private constructor(private val storage: List<ByteArray>, private val pageSize: Int, private val start: Int, public val size: Int) {
     public constructor(value: ByteArray) : this(listOf(value.copyOf()), maxOf(1, value.size), 0, value.size)
     internal companion object {
-        /** The caller must relinquish its private array and never mutate it again. */
-        internal fun takeOwnership(value: ByteArray, length: Int): Bytes {
-            require(length in 0..value.size)
-            return Bytes(listOf(value), maxOf(1, value.size), 0, length)
-        }
         internal const val PAGE_SIZE: Int = 65536
         /** Private fixed-size pages become immutable together with the transaction. */
         internal fun takePages(pages: List<ByteArray>, length: Int): Bytes {

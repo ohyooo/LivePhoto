@@ -293,7 +293,7 @@ private fun OutputSettings(profile: Int, onSelect: (Int) -> Unit, enabled: Boole
         }
         Disclosure("格式说明", "JPEG 输出 · 不自动转码", formats, { formats = !formats }) {
             Text("OPPO / OnePlus、Google V2、Google V1。不是所有容器或 metadata 组合都支持；不会忽略安全错误。")
-            Text("媒体编辑：原视频可超过 32 MiB，预处理上限 512 MiB / 60 秒，输出 48 MiB；生成前图片与处理后视频合计须小于 32 MiB。当前写视频仅无音频或符合条件的立体声 AAC；音频始终 copy。HDR、ICC 和 metadata 的保留以报告为准。")
+            Text("媒体编辑：原视频可超过 32 MiB，预处理上限 512 MiB / 60 秒，输出 48 MiB；生成前图片与处理后视频合计须小于 32 MiB。符合条件的 AAC 音频始终 copy，保留声道数；目标动态照片协议仍有独立的音频限制。HDR、ICC 和 metadata 的保留以报告为准。")
         }
         Disclosure("更多能力", "规划占位，不会启动任务", planned, { planned = !planned }) {
             Text("Apple 写入：暂停\n批量处理：未实现\n更多画面调整：规划占位", color = MaterialTheme.colorScheme.onSurfaceVariant)

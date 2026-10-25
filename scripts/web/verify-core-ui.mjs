@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {composeDriver} from './ui-interaction.mjs';
 
 /** Real Compose/Wasm UI -> typed adapter -> Core -> Worker. JS Core is used only to audit downloads. */
-export async function verifyCoreUi({browser,origin,coreSource,largeSource,monoSource,imagePath,directory,probe,viewport:onlyViewport}){
+export async function verifyCoreUi({browser,origin,coreSource,largeSource,inconsistentSource,imagePath,directory,probe,viewport:onlyViewport}){
   const checks=[],outputs=[];
   const original=probe(coreSource),sourceHash=createHash('sha256').update(await readFile(coreSource)).digest('hex');
   const check=(name,valid)=>{if(!valid)throw Error(name);checks.push(name);};
@@ -140,20 +140,20 @@ export async function verifyCoreUi({browser,origin,coreSource,largeSource,monoSo
       await driver.click('应用裁剪');
       await page.locator('#player-edit-status').filter({hasText:/KEY_PHOTO_OUTSIDE_TRIM/}).waitFor({state:'attached'});
       if(downloads!==beforeOutside||await text(/名称：core-input\.mp4/).count()!==1)throw Error('Out-of-range Core cover replaced input');
-      await choose(monoSource);const before=downloads;
+      await choose(inconsistentSource);const before=downloads;
       await driver.click('裁剪范围');
       await driver.dragRange('end',.80);
       await driver.click('应用裁剪');
       await page.locator('#player-edit-status').filter({hasText:/CAPABILITY_UNSUPPORTED/}).waitFor({state:'attached'});
-      if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core trim automatically fell back');
+      if(downloads!==before||await text(/名称：core-inconsistent-audio\.mp4/).count()!==1)throw Error('Default Core trim automatically fell back');
       // Refusal keeps the uncommitted range; explicitly discard it before a separate transcode.
       await driver.click('重置选段');
       await driver.click('裁剪范围');
       await driver.click('转为 H.264');
       await status(/转码失败.*CAPABILITY_UNSUPPORTED/s);
-      if(downloads!==before||await text(/名称：core-mono\.mp4/).count()!==1)throw Error('Default Core transcode automatically fell back');
+      if(downloads!==before||await text(/名称：core-inconsistent-audio\.mp4/).count()!==1)throw Error('Default Core transcode automatically fell back');
       await driver.click('重新封装');await status(/封装失败.*CAPABILITY_UNSUPPORTED/s);
-      check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-mono\.mp4/).count()===1);
+      check(size+':core-refusal-keeps-input',downloads===before&&await text(/名称：core-inconsistent-audio\.mp4/).count()===1);
       await choose(coreSource);
       // The native video can become ready before Compose's accessibility mirror updates.
       await page.locator('#player-edit-status').waitFor({state:'detached',timeout:5000});

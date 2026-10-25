@@ -62,7 +62,7 @@ private fun buffer(bytes: Bytes): ArrayBuffer {
     return array.buffer
 }
 private fun parts(): JsAny = js("[]")
-private fun addPart(parts: JsAny, part: ArrayBuffer): Unit = js("{ parts.push(part); }")
+private fun addPart(parts: JsAny, part: ArrayBuffer): Unit = js("{ parts.push(new Blob([part])); }")
 private fun joinParts(parts: JsAny): Blob = js("new Blob(parts)")
 private fun blob(bytes: Bytes): Blob {
     val parts = parts()

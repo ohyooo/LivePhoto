@@ -94,7 +94,7 @@ public class BrowserFfmpegBackend(executor: MemoryFfmpegExecutor) : MediaBackend
         operations = it.operations.map { entry -> entry.copy(conditions = entry.conditions + listOf(Condition(ConditionOperator.Equals,
             "runtimeProfile", Value.Text("private-worker-input512MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
             if (entry.operation in setOf(Operation.Trim, Operation.Remux, Operation.Transcode)) listOf(Condition(ConditionOperator.Equals,
-                "wasmAudioProfile", Value.Text("absent-or-AAC-LC-stereo-with-original-channelcount2-no-mono-header-normalization"))) else emptyList()) }) }.let { caps ->
+                "wasmAudioProfile", Value.Text("absent-or-AAC-LC-original-channelcount-matches-ASC-no-audio-encoder"))) else emptyList()) }) }.let { caps ->
         caps.copy(operations = caps.operations.map { entry -> if (entry.operation == Operation.Transcode) entry.copy(conditions = entry.conditions +
             Condition(ConditionOperator.Equals, "encoderAnnotation", Value.Text("original-AVC-sample-entry-encoder-annotation-must-match-pinned-muxer-output-otherwise-no-publication"))) else entry })
     }
@@ -113,10 +113,10 @@ public class BrowserFfmpegBackend(executor: MemoryFfmpegExecutor) : MediaBackend
             if (ref.resourceId != null || ref.snapshot != null) fail("INVALID_ARGUMENT", "Core must resolve browser media references", Stage.Plan)
             val reader = BinaryReader(source, job.context)
             val video = BmffVideoProbe(reader).probe(ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
-            // The pinned Wasm muxer normalizes MP4 channelcount to 2. Do not
-            // silently rewrite a mono source header, weaken verification, or encode audio.
-            if (video.tracks.any { it.handler == "soun" && (it.audioChannels != 2u || it.audioActualChannelCount != 2u) })
-                fail("CAPABILITY_UNSUPPORTED", "This Wasm muxer cannot preserve mono/multichannel AAC sample-entry metadata; only absent audio or stereo AAC is enabled", Stage.Plan)
+            // The rebuilt muxer emits actual channels. Legacy reserved headers
+            // that disagree with ASC still cannot be silently normalized.
+            if (video.tracks.any { it.handler == "soun" && it.audioChannels != it.audioActualChannelCount })
+                fail("CAPABILITY_UNSUPPORTED", "AAC sample-entry channelcount must match AudioSpecificConfig to preserve both without normalization", Stage.Plan)
             reader.validateIdentity().orThrow()
         }
         return when (gate) { is CoreResult.Failure -> gate; is CoreResult.Success -> identify(run()) }
