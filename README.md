@@ -88,11 +88,11 @@ const originalVideoBlob = extracted.blob;
 
 Convert 仅开放上面三个既有 JPEG 目标，默认同目标原样保留；不隐式修复或转码。Clean Split 与 `extractVideo` 不同：前者返回清理绑定后的 `assets[]`（每项含 role、mime、digest、Blob），后者只原样提取嵌入视频。多资产结果的顶层 `blob` 为 `null`，请遍历 `assets`。写操作的 `report.preservation` 按资产报告保真证明、变化及问题；内存中集合原子发布不等于浏览器下载已持久化。以上新增接口的当前验收状态见路线文档。
 
-三个目标不代表任意来源都能转换。当前新建 OPPO 布局将 XMP 放在 EXIF 前方，转换为 Google 时若需调整 XMP 并移动未验证 EXIF，Core 会返回 `UNSAFE_METADATA_REWRITE`，没有输出；网页不会删除 EXIF、隐式授权丢失或转码来绕过。相同目标仍可原样复制，Google 来源的有限转换与这两个拒绝方向分别验收。
+三个目标不代表任意来源都能转换。XMP 新内容能放回原有可写槽位、且没有 MPF 时，会只调整包外空白，保持后续 EXIF 的位置与字节。默认新建 OPPO→Google V1 已通过此路径验证；Google V2 在该布局上仍放不下，返回 `UNSAFE_METADATA_REWRITE`，没有输出。未知 EXIF 关联仍报告 `Unknown`，严格 metadata 保留策略继续拒绝；不会删除 EXIF、授权丢失或转码来绕过。相同目标仍可原样复制。
 
 `repairLivePhoto(input)` 默认仅预览已有 Core 能证明安全的 metadata 修复，不扫描猜测视频位置。确认 `result.report.blocked` 为空、核对 `proposedChanges` 后，可传 `{ dryRun: false }` 生成新文件；可用 `allowedIssueCodes` 限定问题类型。此入口不开放 remux、重新配对、转码或 metadata 丢失授权。`success` 仅表示取得报告：被阻止、无需修改或预览时均没有输出 Blob。实际修改见 `changesApplied`，验证和保真证明位于 `report.operation`。原输入不变，修复失败不返回半成品；当前验收状态见路线文档。
 
-Repair 不保证支持所有可创建的布局。当前默认新建 OPPO 文件的目录包含显式次级 `Padding="0"`，超出既有 Core 修复门禁，会返回 `REPAIR_AMBIGUOUS`，预览也不例外；这不等于文件无效。此适配保留拒绝，不删除字段或自行更改协议。Google V1/V2 的有限长度修复与该 OPPO 布局的无输出拒绝分别测试。
+Repair 不保证支持所有可创建的布局。已知 OPPO 无尾标布局的显式次级 `Padding="0"` 可参与有限长度修复：必须有标准厂商标记、两个目录项和唯一完整视频，并通过保留证明。非零、负值、`00`、未知字段或尾部、歧义视频仍拒绝；普通 Google 布局的修复规则不因此放宽。不会删除字段绕过检查。
 
 构建（使用已有 JDK 25 和项目 Wrapper）：
 

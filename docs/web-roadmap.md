@@ -10,7 +10,7 @@
 
 已按新设计接入“新建 / 照片工具”双页、800/1280 响应式列布局、三态主题、紧凑文件行和移除/重置确认、独立裁剪草稿与封面预览、折叠报告及显式复制。窗口变化、切页和主题切换应保留素材及编辑状态；待应用选段和失效封面阻止生成。未扩展协议、音频编码或媒体后端。
 
-当前已验收源码 `aae8e62` 的 [Web CI 40104533602](https://github.com/ohyooo/LivePhoto/actions/runs/40104533602) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 809 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。真实 UI 检查还覆盖 Worker 启动、分块读取、模块加载与执行期间取消、迟到结果丢弃和重新操作。已由服务器直接下载产物并部署，保留旧版本；含独立 Worker Wasm 的全部 28 个静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，客户端返回 HTTP 200，原首页保持不变。这不代表所有浏览器/手机相册兼容。
+当前已验收源码 `34253a7` 的 [Web CI 40148248112](https://github.com/ohyooo/LivePhoto/actions/runs/40148248112) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 811 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。真实 UI 检查还覆盖 Worker 启动、分块读取、模块加载与执行期间取消、迟到结果丢弃和重新操作。已由服务器直接下载产物并部署，保留旧版本；含独立 Worker Wasm 的全部 28 个静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，客户端返回 HTTP 200，原首页保持不变。这不代表所有浏览器/手机相册兼容。
 
 用户已明确允许预发布版以修复 Popup/Dialog 关闭后无障碍 DOM 停止同步的问题（[CMP-9368](https://youtrack.jetbrains.com/issue/CMP-9368) / [CMP-10623](https://youtrack.jetbrains.com/issue/CMP-10623)）。Compose 与共享 Material3 对齐 [1.13.0-alpha02](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.13.0-alpha02)，保留现有 Kotlin、Gradle 和 SDK；已删除点击标题、额外 Tab 和动画延时的无效绕行。弹层关闭后节点自行移除、真实交互、下载与诊断已在上述 CI 验证；不关闭无障碍、不删除测试。输入测试在全选与键入之间等待框架动画帧检查点，重选后等待旧报告节点移除，不把原生视频就绪当成 Compose 报告同步完成。Alpha 仍是预发布依赖，本轮不宣称 Android/Native 回归完成。
 
@@ -27,7 +27,7 @@
 - [x] 只读协议接口实现：多重检测、Inspect、Analyze、关键照片位置与来源读取。
 - [x] Clean Split 接口实现：多资产 Blob 输出、变化清单及分项保真证明；与 Raw Extract 分开。
 - [x] 有限 JPEG Convert 接口实现：与 Create 分开，不隐式修复或转码；下述 EXIF 限制仍保留。
-- [x] 有限 Repair：默认 dry-run，显式应用安全修改；结构化报告保留阻止/无操作/修复前后问题。Google V1/V2 长度修复通过浏览器验证；默认新建 OPPO 布局保留安全拒绝，见下方限制。
+- [x] 有限 Repair：默认 dry-run，显式应用安全修改；结构化报告保留阻止/无操作/修复前后问题。Google V1/V2 和下述已知 OPPO 零 Padding 布局的长度修复通过浏览器验证；其它不安全布局继续拒绝。
 - [x] 已有 JPEG 关键照片 metadata 修改共享入口：输入十进制秒，明确 Nearest/100ms、报告请求和实际时间，Core 验证图片编码/视频保留后另存；不抽帧或替换封面。分数时钟可在明确容差内量化并报告，Exact/FrameIndex/零容差保持严格。新增代码实际验收以对应 CI 为准。
 - [x] 共享 Kotlin `commonTest` 的浏览器运行：804 项原有纯内存测试在 `f742538` 的 [真实 Chrome 测试 job](https://github.com/ohyooo/LivePhoto/actions/runs/39184904432/job/117845433218) 全部通过，零失败、零跳过，逐类 JUnit XML 与源声明核对。47 项桌面素材/真实 FFmpeg 测试与宿主适配移入 `desktopTest`，测试内容及素材字节不改；`7190817` 的[三平台 Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/39180470040) 各 925 项 shared＋44 项 CLI 测试通过并独立核验。不是重写 JavaScript 测试，也不是 Kotlin/Wasm 迁移；Android 尚未执行这 804 项共用测试。
 - [x] 已公开 API 的浏览器回归：正向/结构化错误、不可变输入、多资产、字节一致性和安全拒绝；主线程与 Worker 验收分开，当前 Worker 覆盖 Create、Raw Extract 和 Repair 预览。
@@ -49,8 +49,8 @@ UI 后台实现已在 `aae8e62` 完成上述整轮验收、产物审计与部署
 
 本轮新增规则已在上述 CI 验收并部署：允许选择超过 32 MiB 的原视频，在后台预处理的 256 MiB / 60 秒预算内裁剪；生成时只检查图片与当前实际视频合计，必须小于 32 MiB。媒体中间输出仍限 48 MiB。两尺寸真实 UI 合成回归使用附有合法零填充 free box 的大于 33 MiB MP4，验证直接生成被阻止、实际裁剪后可以生成，另独立核验音视频 packet 和封面时间；功能库还验证合计恰好 32 MiB 时读取前拒绝。未据此宣称所有大文件或浏览器都能处理。
 
-- [ ] 不移动 EXIF 的固定长度 XMP 槽位优化及独立保留证明。当前 Core 对 XMP 调整会移动未验证 EXIF 的布局返回 `UNSAFE_METADATA_REWRITE`，Web 保留此拒绝，不删除 EXIF 或增加丢失授权。新建 OPPO 文件转 Google 的两个方向受此限制；同目标原样复制与无此布局依赖的转换分开验证。
-- [ ] 独立核验 OPPO 显式次级 `Padding="0"` 的修复边界。当前默认新建布局含此字段，现有 Core Repair 刻意不接受；Web 返回 `REPAIR_AMBIGUOUS` 且无输出，不能把可创建误写为可修复，也不在适配层移除字段绕过。
+- [x] 固定长度 XMP 槽位及保留边界：仅在新包放得下、原包可写且无 MPF 时使用根外空白保持段长。默认 OPPO→Google V1 的转换、EXIF 原位置/原字节和视频原字节已验证；Google V2 放不下仍拒绝。未知 EXIF 关联仍为 `Unknown`，Strict/必需 MetadataPreserving 仍拒绝，MPF/Extended XMP 原门禁保留。不是任意 metadata 保真的声明。
+- [x] OPPO 显式次级 `Padding="0"` 的有限长度修复：标准厂商标记/版本、无尾标、两个目录项、单一完整物理视频及独立保真验证；预览无输出、显式应用、原视频字节和幂等已在公共测试、真实浏览器及两尺寸 UI 验证。`1`、`-1`、`00`、未知字段/尾部和歧义继续拒绝；普通 Google 规则不放宽。验收版本 `34253a7` 的 [Web CI 40148248112](https://github.com/ohyooo/LivePhoto/actions/runs/40148248112) 全部 32 个 job 成功，公共 JS/Wasm 各 811 项，正式产物已审计并更新 LAN 和 GitHub Pages。
 - [x] 独立 JS 功能库十个协议 API 的分块 IO：Kotlin BinarySource 接按需 Blob.slice，公开 File/Blob API 不变。主线程与 Worker 验证零整读、每次最多 64 KiB、预算零读取、IO_READ_FAILED 无输出及所有既有字节/保真检查，结果已包含在上述整轮 CI。FFmpeg 媒体入口仍需完整暂存。
 - [ ] 更大输入预算与流式输出。Wasm UI 七个协议入口已经按需读取 Blob，每次最多 64 KiB；修复还独立计算完整内容摘要、核对审阅方案并保留 SOURCE_CHANGED。原有保真、超预算零读取、来源定位和 IO 错误无输出检查保留。UI Worker 与取消的当前验收状态见上文，不能将旧 JS Worker 专项当作 UI 后台迁移证明。生成输入合计小于 32 MiB、已有照片单文件仍限 32 MiB；媒体原视频预处理预算 256 MiB，输出仍为 48 MiB 有界内存事务。FFmpeg 的私有内存输入仍需完整暂存，不宣称任意大文件流式、零拷贝或 64 KiB 总内存。
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
