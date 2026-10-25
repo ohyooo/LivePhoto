@@ -2,7 +2,6 @@ package livephoto.ui
 
 import livephoto.core.*
 import livephoto.core.memory.MemoryBinarySource
-import livephoto.core.memory.MemoryOutputTransaction
 
 public data class ExtractedVideo(
     public val byteLength: ULong,
@@ -14,11 +13,11 @@ public data class ExtractedVideo(
 )
 
 /** No borrowed Core handles escape this bounded application session. */
-public data class PreparedVideo(public val bytes: Bytes, public val report: ExtractedVideo)
+public data class PreparedVideo<out T>(public val bytes: T, public val report: ExtractedVideo)
 
 public suspend fun prepareExtractedVideo(
     core: LivePhotoCore, bytes: ByteArray, cancellation: Cancellation? = null,
-): CoreResult<PreparedVideo> {
+): CoreResult<PreparedVideo<Bytes>> {
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-video-extraction"))
@@ -29,14 +28,18 @@ public suspend fun prepareExtractedVideo(
 /** Borrowed input; output verification and staging are identical for all adapters. */
 public suspend fun prepareExtractedVideo(
     core: LivePhotoCore, source: BinarySource, cancellation: Cancellation? = null,
-): CoreResult<PreparedVideo> {
+): CoreResult<PreparedVideo<Bytes>> =
+    prepareExtractedVideo(core, source, cancellation, ::MemoryUiOutput)
+
+public suspend fun <T> prepareExtractedVideo(
+    core: LivePhotoCore, source: BinarySource, cancellation: Cancellation? = null, outputFactory: UiOutputFactory<T>): CoreResult<PreparedVideo<T>> {
     when (val size = source.size()) {
         is CoreResult.Failure -> return size
         is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Video extraction input exceeds 32 MiB"))
     }
     val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
-    val output = MemoryOutputTransaction(context, "ui-video-extraction")
+    val output = outputFactory(context, "ui-video-extraction")
     var operation: OperationResult? = null
     try {
         return when (val result = core.extract(ExtractRequest(SourceSet.Single(source), emptyList(), output = output, context = context))) {
@@ -58,7 +61,7 @@ public suspend fun prepareExtractedVideo(
                 }
                 if (!exact) return CoreResult.Failure(CoreError(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), Stage.Verify,
                     "Core did not provide a verified exact-extraction digest"))
-                val extracted = output.committedAssets().getValue(asset.id)
+                val extracted = output.asset(asset.id)
                 CoreResult.Success(PreparedVideo(extracted, ExtractedVideo(asset.byteLength, asset.mime, extension,
                     asset.digest, result.value.preservation,
                     (result.value.issues + result.value.validation.issues + result.value.preservation.issues).distinct())))

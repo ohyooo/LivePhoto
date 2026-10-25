@@ -80,11 +80,12 @@ try {
       globalThis.taskWorkers={started:0,runs:0,terminated:0,outputBlobs:0,invalidOutputs:0};
       globalThis.releaseTaskReads=[];
       const NativeWorker=globalThis.Worker;
+      const outputFiles=new WeakSet();
       globalThis.Worker=class extends NativeWorker {
         constructor(url,options){super(url,options);this.taskWorker=String(url).endsWith('/worker/livephoto-worker.js');if(this.taskWorker){
           globalThis.taskWorkers.started++;
           this.addEventListener('message',({data})=>{if(data.type==='done')for(const value of [data.result?.bytes,data.result?.second])if(value!=null){
-            if(value instanceof Blob)globalThis.taskWorkers.outputBlobs++;else globalThis.taskWorkers.invalidOutputs++;
+            if(value instanceof File){globalThis.taskWorkers.outputBlobs++;outputFiles.add(value);}else globalThis.taskWorkers.invalidOutputs++;
           }});
         }}
         postMessage(data,...rest){if(this.taskWorker&&data.type==='run')globalThis.taskWorkers.runs++;return super.postMessage(data,...rest);}
@@ -97,7 +98,7 @@ try {
       };
       Blob.prototype.slice=function(...args){
         const part=slice.apply(this,args);
-        if(this instanceof File){
+        if(this instanceof File&&!outputFiles.has(this)){
           globalThis.analysisIo.slices++;
           globalThis.analysisIo.maxSlice=Math.max(globalThis.analysisIo.maxSlice,part.size);
           if(['unreadable.jpg','unreadable.mp4'].includes(this.name))Object.defineProperty(part,'arrayBuffer',{

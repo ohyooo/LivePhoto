@@ -8,7 +8,6 @@ import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Int8Array
 import org.w3c.files.Blob
 import livephoto.core.*
-import livephoto.core.memory.MemoryOutputTransaction
 import livephoto.core.ffmpeg.*
 import livephoto.ui.*
 
@@ -113,7 +112,7 @@ private fun failure(kind: String, error: CoreError, options: Options): Reply = r
     else -> "${error.code.value} / ${error.stage}：${error.message.take(1600)}"
 }, true)
 
-private suspend fun execute(request: Request): Reply {
+private suspend fun execute(request: Request, disk: DiskSession): Reply {
     val options = request.options
     val kind = options.kind
     val input = Source(request, 0, if (kind == "Create") "browser-image" else "browser-${kind.lowercase()}:${options.reference}")
@@ -126,45 +125,45 @@ private suspend fun execute(request: Request): Reply {
                 is CoreResult.Failure -> failed(result.error)
                 is CoreResult.Success -> reply(formatPhotoAnalysis(result.value))
             }
-            "Extract" -> when (val result = prepareExtractedVideo(core, input)) {
+            "Extract" -> when (val result = prepareExtractedVideo(core, input, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)
                 is CoreResult.Success -> reply(formatExtractedVideo(result.value.report, options.publication),
-                    bytes = blob(result.value.bytes), mime = result.value.report.mime, name = "LivePhoto-video.${result.value.report.extension}")
+                    bytes = result.value.bytes, mime = result.value.report.mime, name = "LivePhoto-video.${result.value.report.extension}")
             }
-            "Split" -> when (val result = prepareCleanSplit(core, input)) {
+            "Split" -> when (val result = prepareCleanSplit(core, input, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)
                 is CoreResult.Success -> reply(formatCleanSplit(result.value),
-                    bytes = blob(result.value.image.bytes), mime = result.value.image.mime, name = "LivePhoto-clean.${result.value.image.extension}",
-                    second = blob(result.value.video.bytes), secondMime = result.value.video.mime, secondName = "LivePhoto-clean.${result.value.video.extension}")
+                    bytes = result.value.image.bytes, mime = result.value.image.mime, name = "LivePhoto-clean.${result.value.image.extension}",
+                    second = result.value.video.bytes, secondMime = result.value.video.mime, secondName = "LivePhoto-clean.${result.value.video.extension}")
             }
-            "Convert" -> when (val result = prepareConvertedPhoto(core, input, target)) {
+            "Convert" -> when (val result = prepareConvertedPhoto(core, input, target, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)
                 is CoreResult.Success -> reply(formatConvertedPhoto(result.value.report, options.publication),
-                    bytes = blob(result.value.bytes), mime = "image/jpeg", name = "LivePhoto-converted-${target.protocol.value}.jpg")
+                    bytes = result.value.bytes, mime = "image/jpeg", name = "LivePhoto-converted-${target.protocol.value}.jpg")
             }
-            "Key" -> when (val result = preparePhotoKey(core, input, time)) {
+            "Key" -> when (val result = preparePhotoKey(core, input, time, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)
                 is CoreResult.Success -> reply(formatPhotoKey(result.value.report, options.publication),
-                    bytes = blob(result.value.bytes), mime = "image/jpeg", name = "LivePhoto-key.jpg")
+                    bytes = result.value.bytes, mime = "image/jpeg", name = "LivePhoto-key.jpg")
             }
             "Repair" -> {
                 val previous = reviewed
                 reviewed = null
                 if (options.review.isNotEmpty() && (previous == null || previous.first != options.review || previous.second != options.reference))
                     return failed(CoreError(IssueCode("SOURCE_CHANGED"), Stage.Read, "Review is no longer available; preview the selected input again"))
-                when (val result = preparePhotoRepair(core, input, if (options.review.isEmpty()) null else previous!!.third)) {
+                when (val result = preparePhotoRepair(core, input, if (options.review.isEmpty()) null else previous!!.third, outputFactory = disk::output)) {
                     is CoreResult.Failure -> failed(result.error)
                     is CoreResult.Success -> {
                         val review = result.value.report.review?.let { approved -> token().also { reviewed = Triple(it, options.reference, approved) } } ?: ""
                         reply(formatPhotoRepair(result.value.report, options.publication), result.value.report.blocked.isNotEmpty(),
-                            bytes = result.value.bytes?.let(::blob), mime = "image/jpeg", name = "LivePhoto-repaired.jpg", review = review)
+                            bytes = result.value.bytes, mime = "image/jpeg", name = "LivePhoto-repaired.jpg", review = review)
                     }
                 }
             }
             "Create" -> {
                 val video = Source(request, 1, "browser-video")
                 val context = Context(Limits(32uL * 1024u * 1024u, 48uL * 1024u * 1024u))
-                val output = MemoryOutputTransaction(context, "browser-create")
+                val output = disk.output(context, "browser-create")
                 var operation: OperationResult? = null
                 try {
                     val policy = if (target.protocol == ProtocolIds.Oplus) MutationPolicy(loss = LossPolicy.AllowListed,
@@ -177,7 +176,7 @@ private suspend fun execute(request: Request): Reply {
                             val asset = result.value.output.assets.single()
                             val name = "LivePhoto-${target.protocol.value}.jpg"
                             val displayed = result.value.copy(output = MediaOutput(listOf(asset.copy(recommendedName = name)), result.value.output.receipt))
-                            reply(formatCreatedPhoto(displayed, options.publication), bytes = blob(output.committedAssets().getValue(asset.id)), mime = asset.mime, name = name)
+                            reply(formatCreatedPhoto(displayed, options.publication), bytes = output.asset(asset.id), mime = asset.mime, name = name)
                         }
                     }
                 } finally {
@@ -186,7 +185,7 @@ private suspend fun execute(request: Request): Reply {
                     video.close()
                 }
             }
-            else -> media(request, input)
+            else -> media(request, input, disk)
         }
     } finally { input.close() }
 }
@@ -200,7 +199,7 @@ private fun append(args: JsAny, value: String): Unit = js("{ args.push(value); }
 private fun executeMedia(args: JsAny, input: JsAny, offset: Double, length: Double, previous: Blob?, name: String, timeout: Double): Promise<MediaProcess> =
     js("import(/* webpackIgnore: true */ new URL('../media/core-runtime.mjs', self.location.href).href).then(module => { if (!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>input.size) throw Error('Unbound media extent'); const view=offset===0&&length===input.size?input:input.slice(offset,offset+length); return module.executeCoreFfmpeg(JSON.stringify(args),view,previous,name,timeout); })")
 
-private suspend fun media(request: Request, source: BinarySource): Reply {
+private suspend fun media(request: Request, source: BinarySource, disk: DiskSession): Reply {
     val options = request.options
     val action = CoreMediaAction.entries.find { it.name == options.kind }
         ?: return failure(options.kind, CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Unknown task"), options)
@@ -220,11 +219,11 @@ private suspend fun media(request: Request, source: BinarySource): Reply {
     }))
     val start = Time(options.time.toLong(), options.scale.toUInt())
     val end = Time(options.end.toLong(), options.endScale.toUInt())
-    return when (val result = prepareCoreMedia(backend, source, action, start, end, inputLimit = BROWSER_MEDIA_INPUT_LIMIT)) {
+    return when (val result = prepareCoreMedia(backend, source, action, start, end, inputLimit = BROWSER_MEDIA_INPUT_LIMIT, outputFactory = disk::output)) {
         is CoreResult.Failure -> failure(options.kind, result.error, options)
         is CoreResult.Success -> {
             val value = result.value
-            reply(value.summary, bytes = value.bytes?.let(::blob), mime = value.mime ?: "",
+            reply(value.summary, bytes = value.bytes, mime = value.mime ?: "",
                 time = value.actualTime?.value?.toString() ?: "", scale = value.actualTime?.timescale?.toString() ?: "",
                 start = value.retainedVideoWindow?.start?.value?.toString() ?: "", end = value.retainedVideoWindow?.end?.value?.toString() ?: "",
                 windowScale = value.retainedVideoWindow?.start?.timescale?.toString() ?: "")
@@ -232,12 +231,18 @@ private suspend fun media(request: Request, source: BinarySource): Reply {
     }
 }
 
+private fun hasOutput(result: Reply): Boolean = js("!result.failed && (result.bytes != null || result.second != null)")
+private fun outputLease(result: Reply, lease: String): Reply = js("Object.assign(result,{storageLease:lease})")
+
 fun main() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     install { request -> scope.launch {
-        val result = try { execute(request) }
+        val disk = DiskSession()
+        val result = try { execute(request, disk) }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { reply("后台处理失败\n错误码：WORKER_FAILED\n未发布输出，请重新选择文件。", true) }
-        send(request.task, result)
+        val completed = try { outputLease(result, disk.finish(hasOutput(result))) }
+        catch (_: Exception) { reply("输出暂存失败\n错误码：IO_WRITE_FAILED\n未发布输出，请检查浏览器存储空间。", true) }
+        send(request.task, completed)
     } }
 }

@@ -2,7 +2,6 @@ package livephoto.ui
 
 import livephoto.core.*
 import livephoto.core.memory.MemoryBinarySource
-import livephoto.core.memory.MemoryOutputTransaction
 
 /** Decimal seconds, not a floating-point timestamp or a frame-rate estimate. */
 public fun parseKeySeconds(text: String): Time? {
@@ -15,11 +14,11 @@ public data class PhotoKeyReport(
     public val requested: Time, public val actual: Time, public val digest: Digest,
     public val byteLength: ULong, public val preservation: PreservationReport, public val issues: List<Issue>,
 )
-public data class PreparedPhotoKey(public val bytes: Bytes, public val report: PhotoKeyReport)
+public data class PreparedPhotoKey<out T>(public val bytes: T, public val report: PhotoKeyReport)
 
 /** Only application orchestration: Core selects/encodes the key and proves preservation. */
 public suspend fun preparePhotoKey(core: LivePhotoCore, bytes: ByteArray, requested: Time,
-    cancellation: Cancellation? = null): CoreResult<PreparedPhotoKey> {
+    cancellation: Cancellation? = null): CoreResult<PreparedPhotoKey<Bytes>> {
     if (requested < Time.Zero) return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Key time must be nonnegative"))
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Key input exceeds 32 MiB"))
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-key"))
@@ -29,7 +28,11 @@ public suspend fun preparePhotoKey(core: LivePhotoCore, bytes: ByteArray, reques
 
 /** Borrowed input; changing key metadata still requires the original preservation proofs. */
 public suspend fun preparePhotoKey(core: LivePhotoCore, source: BinarySource, requested: Time,
-    cancellation: Cancellation? = null): CoreResult<PreparedPhotoKey> {
+    cancellation: Cancellation? = null): CoreResult<PreparedPhotoKey<Bytes>> =
+    preparePhotoKey(core, source, requested, cancellation, ::MemoryUiOutput)
+
+public suspend fun <T> preparePhotoKey(core: LivePhotoCore, source: BinarySource, requested: Time,
+    cancellation: Cancellation? = null, outputFactory: UiOutputFactory<T>): CoreResult<PreparedPhotoKey<T>> {
     if (requested < Time.Zero) return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Key time must be nonnegative"))
     when (val size = source.size()) {
         is CoreResult.Failure -> return size
@@ -37,7 +40,7 @@ public suspend fun preparePhotoKey(core: LivePhotoCore, source: BinarySource, re
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Key input exceeds 32 MiB"))
     }
     val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
-    val output = MemoryOutputTransaction(context, "ui-key")
+    val output = outputFactory(context, "ui-key")
     var operation: OperationResult? = null
     try {
         return when (val result = core.setKeyPhotoPosition(SetKeyRequest(SourceSet.Single(source),
@@ -52,7 +55,7 @@ public suspend fun preparePhotoKey(core: LivePhotoCore, source: BinarySource, re
                 val actual = result.value.keyPhoto?.position
                 if (actual == null || !verified(Guarantee.ImageDataPreserving) || !verified(Guarantee.BitstreamPreserving))
                     return CoreResult.Failure(CoreError(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), Stage.Verify, "Core did not prove key position and image/video preservation"))
-                CoreResult.Success(PreparedPhotoKey(output.committedAssets().getValue(asset.id), PhotoKeyReport(requested, actual,
+                CoreResult.Success(PreparedPhotoKey(output.asset(asset.id), PhotoKeyReport(requested, actual,
                     asset.digest, asset.byteLength, result.value.preservation,
                     (result.value.issues + result.value.keyPhoto.orEmptyIssues() + result.value.validation.issues + result.value.preservation.issues).distinct())))
             }

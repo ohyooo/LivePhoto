@@ -23,8 +23,8 @@ class CleanSplitTest {
         assertContentEquals(byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0), bytes)
     }
     @Test fun reportDoesNotClaimMetadataOrExternalPairAtomicity() {
-        val image = SplitFile(Bytes(byteArrayOf(1)), "image/jpeg", "jpg", Digest("1".repeat(64)))
-        val video = SplitFile(Bytes(byteArrayOf(2)), "video/mp4", "mp4", Digest("2".repeat(64)))
+        val image = SplitFile(Bytes(byteArrayOf(1)), "image/jpeg", "jpg", Digest("1".repeat(64)), 1uL)
+        val video = SplitFile(Bytes(byteArrayOf(2)), "video/mp4", "mp4", Digest("2".repeat(64)), 1uL)
         val preservation = PreservationReport(listOf(GuaranteeRecord(AssetId("image"), Guarantee.MetadataPreserving, GuaranteeOutcome.Unknown)))
         val report = formatCleanSplit(PreparedCleanSplit(image, video, preservation, emptyList()))
         assertTrue(report.contains("尚未保存"))

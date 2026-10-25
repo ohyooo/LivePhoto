@@ -2,7 +2,6 @@ package livephoto.ui
 
 import livephoto.core.*
 import livephoto.core.memory.MemoryBinarySource
-import livephoto.core.memory.MemoryOutputTransaction
 
 public enum class ConversionTarget(public val displayName: String, public val selector: ProtocolSelector) {
     Oplus("OPPO / OnePlus", ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail"))),
@@ -19,12 +18,12 @@ public data class ConvertedPhoto(
     public val issues: List<Issue>,
 )
 
-public data class PreparedConversion(public val bytes: Bytes, public val report: ConvertedPhoto)
+public data class PreparedConversion<out T>(public val bytes: T, public val report: ConvertedPhoto)
 
 /** Application orchestration only; Core owns conversion, validation and preservation evidence. */
 public suspend fun prepareConvertedPhoto(
     core: LivePhotoCore, bytes: ByteArray, target: ProtocolSelector, cancellation: Cancellation? = null,
-): CoreResult<PreparedConversion> {
+): CoreResult<PreparedConversion<Bytes>> {
     if (ConversionTarget.entries.none { it.selector == target }) return CoreResult.Failure(CoreError(
         IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This screen supports only the three displayed JPEG conversion targets"))
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
@@ -37,7 +36,11 @@ public suspend fun prepareConvertedPhoto(
 /** Borrowed input; the same Core conversion and preservation checks serve all adapters. */
 public suspend fun prepareConvertedPhoto(
     core: LivePhotoCore, source: BinarySource, target: ProtocolSelector, cancellation: Cancellation? = null,
-): CoreResult<PreparedConversion> {
+): CoreResult<PreparedConversion<Bytes>> =
+    prepareConvertedPhoto(core, source, target, cancellation, ::MemoryUiOutput)
+
+public suspend fun <T> prepareConvertedPhoto(
+    core: LivePhotoCore, source: BinarySource, target: ProtocolSelector, cancellation: Cancellation? = null, outputFactory: UiOutputFactory<T>): CoreResult<PreparedConversion<T>> {
     if (ConversionTarget.entries.none { it.selector == target }) return CoreResult.Failure(CoreError(
         IssueCode("CAPABILITY_UNSUPPORTED"), Stage.Plan, "This screen supports only the three displayed JPEG conversion targets"))
     when (val size = source.size()) {
@@ -46,7 +49,7 @@ public suspend fun prepareConvertedPhoto(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Conversion input exceeds 32 MiB"))
     }
     val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
-    val output = MemoryOutputTransaction(context, "ui-conversion")
+    val output = outputFactory(context, "ui-conversion")
     var operation: OperationResult? = null
     try {
         return when (val result = core.convert(ConvertRequest(SourceSet.Single(source), target, output = output, context = context))) {
@@ -64,7 +67,7 @@ public suspend fun prepareConvertedPhoto(
                 if (!exact && !(verified(Guarantee.ImageDataPreserving) && verified(Guarantee.BitstreamPreserving)))
                     return CoreResult.Failure(CoreError(IssueCode("PRESERVATION_REQUIREMENT_FAILED"), Stage.Verify,
                         "Core did not prove whole-carrier copying or image/video preservation"))
-                CoreResult.Success(PreparedConversion(output.committedAssets().getValue(asset.id), ConvertedPhoto(
+                CoreResult.Success(PreparedConversion(output.asset(asset.id), ConvertedPhoto(
                     target, asset.byteLength, asset.digest, exact, result.value.preservation,
                     (result.value.issues + result.value.validation.issues + result.value.preservation.issues).distinct())))
             }

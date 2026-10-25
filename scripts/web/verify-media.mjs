@@ -10,7 +10,7 @@ import {verifyStorage} from './verify-storage.mjs';
 
 const part=process.env.LIVEPHOTO_TEST_PART;
 const audioCase=/^aac-(mono|surround)-(remux|trim|transcode)$/.exec(part);
-const storageCase=['storage-cleanup','storage-interruption','storage-failure','storage-limit'].includes(part);
+const storageCase=['storage-cleanup','storage-interruption','storage-failure','storage-limit','storage-publication'].includes(part);
 if(!audioCase&&!storageCase&&!['main','worker','mobile','wide'].includes(part))throw Error('Select media context');
 const directory=await mkdtemp(join(tmpdir(),'livephoto-web-media-'));
 const ffmpeg=process.env.LIVEPHOTO_FFMPEG;

@@ -1,6 +1,13 @@
 /** Transport only: bounded IO on the owner thread, Kotlin/Wasm computation in a dedicated Worker. */
 export function createTaskRunner() {
   let worker=null, ready=false, pending=null, next=0;
+  const outputs=new Map();let disposed=false;
+  const adopt=id=>new Promise((resolve,reject)=>{
+    navigator.locks.request('livephoto-output-stage-v1/'+id,()=>new Promise(release=>{
+      if(disposed){release();resolve();return;}
+      outputs.set(id,release);resolve();
+    })).catch(reject);
+  });
   const finish=(error,result)=>{
     const current=pending;if(!current)return;
     pending=null;clearTimeout(current.timer);
@@ -39,6 +46,12 @@ export function createTaskRunner() {
           [result.bytes,result.second].some(value=>value!=null&&!(value instanceof Blob))||
           (result.bytes?.size??0)+(result.second?.size??0)>48*1024*1024||
           (result.failed&&(result.bytes!=null||result.second!=null))){stop('WORKER_FAILED');return;}
+        const hasOutput=result.bytes!=null||result.second!=null;
+        if(hasOutput){
+          if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(result.storageLease??'')){stop('WORKER_FAILED');return;}
+          try{await adopt(result.storageLease);}catch{if(worker===active)stop('WORKER_FAILED');return;}
+          if(worker!==active||pending!==task){outputs.get(result.storageLease)?.();outputs.delete(result.storageLease);return;}
+        }
         finish(null,result);
       }
     };
@@ -61,7 +74,7 @@ export function createTaskRunner() {
       });
     },
     cancel(){if(pending)stop('CANCELLED');},
-    dispose(){stop('CANCELLED');},
+    dispose(){disposed=true;stop('CANCELLED');for(const release of outputs.values())release();outputs.clear();},
   };
   addEventListener('pagehide',()=>runner.dispose());
   return runner;

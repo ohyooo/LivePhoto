@@ -17,8 +17,8 @@ internal fun LivePhotoScreen(
     describe: (suspend (Uri) -> SelectedMediaInfo)? = null,
     analyze: (suspend (Uri) -> CoreResult<AnalysisResult>)? = null,
     extractVideo: (suspend (Uri) -> CoreResult<AndroidCreateController.Extracted>)? = null,
-    cleanSplit: (suspend (Uri) -> CoreResult<livephoto.ui.PreparedCleanSplit>)? = null,
-    saveSplitFile: (suspend (livephoto.ui.SplitFile) -> Uri)? = null,
+    cleanSplit: (suspend (Uri) -> CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>>)? = null,
+    saveSplitFile: (suspend (livephoto.ui.SplitFile<livephoto.core.Bytes>) -> Uri)? = null,
     convertPhoto: (suspend (Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Converted>)? = null,
     repairPhoto: (suspend (Uri, livephoto.ui.RepairReview?) -> CoreResult<AndroidCreateController.Repaired>)? = null,
     setPhotoKey: (suspend (Uri, Time) -> CoreResult<AndroidCreateController.Keyed>)? = null,
@@ -53,9 +53,9 @@ internal fun LivePhotoScreen(
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }
-            override suspend fun cleanSplit(reference: String): CoreResult<livephoto.ui.PreparedCleanSplit> =
+            override suspend fun cleanSplit(reference: String): CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>> =
                 cleanSplit?.invoke(Uri.parse(reference)) ?: super.cleanSplit(reference)
-            override suspend fun saveSplitFile(file: livephoto.ui.SplitFile): String {
+            override suspend fun saveSplitFile(file: livephoto.ui.SplitFile<livephoto.core.Bytes>): String {
                 checkNotNull(saveSplitFile)(file)
                 val folder = if (file.mime == "image/jpeg") "Pictures/LivePhoto" else "Movies/LivePhoto"
                 return "${file.mime}：已保存到 $folder；另一文件需单独保存。"

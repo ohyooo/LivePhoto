@@ -38,7 +38,7 @@ class CoreMediaEditingTest {
             }
         }
         val bytes = byteArrayOf(1, 2, 3)
-        val result = assertIs<CoreResult.Success<PreparedCoreMedia>>(prepareCoreMedia(core, bytes, CoreMediaAction.Probe, cancellation = cancellation)).value
+        val result = assertIs<CoreResult.Success<PreparedCoreMedia<Bytes>>>(prepareCoreMedia(core, bytes, CoreMediaAction.Probe, cancellation = cancellation)).value
         assertEquals(1, calls); assertNull(result.bytes); assertNull(result.mime)
         assertTrue(result.summary.contains("Partial")); assertContentEquals(byteArrayOf(1, 2, 3), bytes)
     }

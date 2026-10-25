@@ -156,12 +156,12 @@ class AndroidUiTest {
             override val supportsCleanSplit = true
             @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit = { onResult("same-uri") }
             override suspend fun describe(reference: String) = livephoto.ui.SelectedMediaInfo("motion.jpg", 128)
-            override suspend fun cleanSplit(reference: String): CoreResult<livephoto.ui.PreparedCleanSplit> {
-                val image = livephoto.ui.SplitFile(livephoto.core.Bytes(byteArrayOf(1)), "image/jpeg", "jpg", livephoto.core.Digest("0".repeat(64)))
-                val video = livephoto.ui.SplitFile(livephoto.core.Bytes(byteArrayOf(2)), "video/mp4", "mp4", livephoto.core.Digest("1".repeat(64)))
+            override suspend fun cleanSplit(reference: String): CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>> {
+                val image = livephoto.ui.SplitFile(livephoto.core.Bytes(byteArrayOf(1)), "image/jpeg", "jpg", livephoto.core.Digest("0".repeat(64)), 1uL)
+                val video = livephoto.ui.SplitFile(livephoto.core.Bytes(byteArrayOf(2)), "video/mp4", "mp4", livephoto.core.Digest("1".repeat(64)), 1uL)
                 return CoreResult.Success(livephoto.ui.PreparedCleanSplit(image, video, livephoto.core.PreservationReport(), emptyList()))
             }
-            override suspend fun saveSplitFile(file: livephoto.ui.SplitFile): String {
+            override suspend fun saveSplitFile(file: livephoto.ui.SplitFile<livephoto.core.Bytes>): String {
                 saves++
                 if (file.mime == "video/mp4") error("TEST_VIDEO_SAVE_FAILURE")
                 return "TEST_IMAGE_SAVED"

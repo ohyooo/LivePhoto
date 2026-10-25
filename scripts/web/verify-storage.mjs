@@ -10,6 +10,38 @@ export async function verifyStorage({page,context,origin,part}) {
     window.storageRun=(args=command,cancel=()=>false,timeout=30000)=>module.executeCoreFfmpeg(JSON.stringify(args),storageInput,null,'output.bin',timeout,cancel);
     window.storageEntries=async()=>{const names=[];for await(const [name]of storageRoot.entries())names.push(name);return names.sort();};
   },{runtime,directory,command});
+  if(part==='storage-publication'){
+    const valid=await page.evaluate(async()=>{
+      const module=location.origin+'/livephoto/output-storage.mjs';
+      const source=new Blob([`import {createOutputJob} from ${JSON.stringify(module)}; onmessage=async({data})=>{try{const job=await createOutputJob();if(data==='write'){const file=await job.create('asset-0');for(let offset=0;offset<150003;){const bytes=new Int8Array(Math.min(65536,150003-offset));for(let i=0;i<bytes.length;i++)bytes[i]=(offset+i)%127;file.write(bytes,offset);offset+=bytes.length;}const output=await file.freeze();await job.finish(true);postMessage({success:true,id:job.id,output});}else{await job.finish(false);postMessage({success:true});}}catch(error){postMessage({success:false,error:String(error)});}}`],{type:'text/javascript'});
+      const url=URL.createObjectURL(source);
+      const run=action=>new Promise((resolve,reject)=>{
+        const worker=new Worker(url,{type:'module'}),timer=setTimeout(()=>{worker.terminate();reject(Error('Disk publication timeout'));},30000);
+        worker.onmessage=({data})=>{clearTimeout(timer);worker.terminate();data.success?resolve(data):reject(Error(data.error));};
+        worker.onerror=()=>{clearTimeout(timer);worker.terminate();reject(Error('Disk publication Worker failed'));};worker.postMessage(action);
+      });
+      let release,acquired;
+      try{
+        const first=await run('write');
+        if(!(first.output instanceof File)||first.output.size!==150003)throw Error('Output is not a disk File');
+        const ready=new Promise(resolve=>{acquired=resolve;});
+        const held=navigator.locks.request('livephoto-output-stage-v1/'+first.id,()=>{acquired();return new Promise(resolve=>{release=resolve;});});
+        await ready;
+        const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('livephoto-output-stage-v1');
+        const job=await root.getDirectoryHandle(first.id);
+        const marker=await(await job.getFileHandle('lease.json')).createWritable();await marker.write(JSON.stringify({expires:0}));await marker.close();
+        await run('clean');
+        const bytes=new Uint8Array(await first.output.arrayBuffer());
+        if(bytes.length!==150003||bytes.some((value,index)=>value!==index%127))throw Error('Active disk output was changed/removed');
+        release();await held;release=null;
+        await run('clean');
+        let count=0;for await(const _ of root.entries())count++;
+        return count===0;
+      }finally{release?.();URL.revokeObjectURL(url);}
+    });
+    if(!valid)throw Error('Disk output lifetime, chunk IO or expired cleanup failed');
+    return part;
+  }
   if(part==='storage-cleanup'){
     // Another page owns a real job lock. Scavenging must not remove it.
     const other=await context.newPage();await other.goto(origin+'/livephoto/test');

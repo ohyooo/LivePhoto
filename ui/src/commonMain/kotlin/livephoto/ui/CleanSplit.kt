@@ -2,26 +2,26 @@ package livephoto.ui
 
 import livephoto.core.*
 import livephoto.core.memory.MemoryBinarySource
-import livephoto.core.memory.MemoryOutputTransaction
 
 /** Prepared, bounded outputs only. Saving each file is an explicit, independent UI action. */
-public data class SplitFile(
-    public val bytes: Bytes,
+public data class SplitFile<out T>(
+    public val bytes: T,
     public val mime: String,
     public val extension: String,
     public val digest: Digest,
+    public val byteLength: ULong,
 )
 
-public data class PreparedCleanSplit(
-    public val image: SplitFile,
-    public val video: SplitFile,
+public data class PreparedCleanSplit<out T>(
+    public val image: SplitFile<T>,
+    public val video: SplitFile<T>,
     public val preservation: PreservationReport,
     public val issues: List<Issue>,
 )
 
 public suspend fun prepareCleanSplit(
     core: LivePhotoCore, bytes: ByteArray, cancellation: Cancellation? = null,
-): CoreResult<PreparedCleanSplit> {
+): CoreResult<PreparedCleanSplit<Bytes>> {
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-clean-split"))
@@ -32,14 +32,18 @@ public suspend fun prepareCleanSplit(
 /** Borrowed input; preparing outputs still does not publish either file. */
 public suspend fun prepareCleanSplit(
     core: LivePhotoCore, source: BinarySource, cancellation: Cancellation? = null,
-): CoreResult<PreparedCleanSplit> {
+): CoreResult<PreparedCleanSplit<Bytes>> =
+    prepareCleanSplit(core, source, cancellation, ::MemoryUiOutput)
+
+public suspend fun <T> prepareCleanSplit(
+    core: LivePhotoCore, source: BinarySource, cancellation: Cancellation? = null, outputFactory: UiOutputFactory<T>): CoreResult<PreparedCleanSplit<T>> {
     when (val size = source.size()) {
         is CoreResult.Failure -> return size
         is CoreResult.Success -> if (size.value > ANALYSIS_INPUT_LIMIT.toULong()) return CoreResult.Failure(CoreError(
             IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Clean split input exceeds 32 MiB"))
     }
     val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
-    val output = MemoryOutputTransaction(context, "ui-clean-split")
+    val output = outputFactory(context, "ui-clean-split")
     var operation: OperationResult? = null
     fun failure(code: String, message: String) = CoreResult.Failure(CoreError(IssueCode(code), Stage.Verify, message))
     try {
@@ -61,10 +65,9 @@ public suspend fun prepareCleanSplit(
                     it.outcome == GuaranteeOutcome.Verified && it.sourceDigest == video.digest && it.outputDigest == video.digest }
                 if (!imageVerified || !videoVerified)
                     return failure("PRESERVATION_REQUIREMENT_FAILED", "Core did not prove image coding preservation and exact video extraction")
-                val files = output.committedAssets()
                 CoreResult.Success(PreparedCleanSplit(
-                    SplitFile(files.getValue(image.id), image.mime, "jpg", image.digest),
-                    SplitFile(files.getValue(video.id), video.mime, if (video.mime == "video/mp4") "mp4" else "mov", video.digest),
+                    SplitFile(output.asset(image.id), image.mime, "jpg", image.digest, image.byteLength),
+                    SplitFile(output.asset(video.id), video.mime, if (video.mime == "video/mp4") "mp4" else "mov", video.digest, video.byteLength),
                     result.value.preservation,
                     (result.value.issues + result.value.validation.issues + result.value.preservation.issues).distinct(),
                 ))
@@ -76,11 +79,11 @@ public suspend fun prepareCleanSplit(
     }
 }
 
-public fun formatCleanSplit(split: PreparedCleanSplit): String = buildString {
+public fun formatCleanSplit(split: PreparedCleanSplit<*>): String = buildString {
     append("清理拆分已准备；准备时尚未保存，后续状态见各保存按钮下方。\n已移除动态照片绑定；原片未修改，不转码、不重新编码音频。")
-    append("\n图片：").append(split.image.mime).append("；").append(formatMediaSize(split.image.bytes.size.toLong()))
+    append("\n图片：").append(split.image.mime).append("；").append(formatMediaSize(split.image.byteLength.toLong()))
     append("\n图片 SHA-256：").append(split.image.digest.value)
-    append("\n视频：").append(split.video.mime).append("；").append(formatMediaSize(split.video.bytes.size.toLong()))
+    append("\n视频：").append(split.video.mime).append("；").append(formatMediaSize(split.video.byteLength.toLong()))
     append("\n视频 SHA-256：").append(split.video.digest.value)
     append("\nImageDataPreserving：Verified；视频 ExactExtraction：Verified。")
     append("\n普通 metadata 保留结果（按资产）：")

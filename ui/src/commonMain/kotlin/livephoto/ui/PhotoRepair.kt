@@ -2,7 +2,6 @@ package livephoto.ui
 
 import livephoto.core.*
 import livephoto.core.memory.MemoryBinarySource
-import livephoto.core.memory.MemoryOutputTransaction
 
 /** The explicit UI confirmation is bound to these exact input bytes and proposed changes. */
 public data class RepairReview(public val sourceDigest: Digest, public val changes: List<Change>)
@@ -21,12 +20,12 @@ public data class PhotoRepairReport(
     public val issues: List<Issue> = emptyList(),
 )
 
-public data class PreparedPhotoRepair(public val bytes: Bytes?, public val report: PhotoRepairReport)
+public data class PreparedPhotoRepair<out T>(public val bytes: T?, public val report: PhotoRepairReport)
 
 /** Preview has no transaction; applying first rechecks the reviewed source and Core proposal. */
 public suspend fun preparePhotoRepair(
     core: LivePhotoCore, bytes: ByteArray, review: RepairReview? = null, cancellation: Cancellation? = null,
-): CoreResult<PreparedPhotoRepair> {
+): CoreResult<PreparedPhotoRepair<Bytes>> {
     if (bytes.size > ANALYSIS_INPUT_LIMIT) return CoreResult.Failure(CoreError(
         IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Repair input exceeds 32 MiB"))
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-repair"))
@@ -37,9 +36,13 @@ public suspend fun preparePhotoRepair(
 /** Borrowed input; both preview and apply independently hash all bytes using bounded reads. */
 public suspend fun preparePhotoRepair(
     core: LivePhotoCore, source: BinarySource, review: RepairReview? = null, cancellation: Cancellation? = null,
-): CoreResult<PreparedPhotoRepair> {
+): CoreResult<PreparedPhotoRepair<Bytes>> =
+    preparePhotoRepair(core, source, review, cancellation, ::MemoryUiOutput)
+
+public suspend fun <T> preparePhotoRepair(
+    core: LivePhotoCore, source: BinarySource, review: RepairReview? = null, cancellation: Cancellation? = null, outputFactory: UiOutputFactory<T>): CoreResult<PreparedPhotoRepair<T>> {
     val context = Context(Limits(ANALYSIS_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
-    var output: MemoryOutputTransaction? = null
+    var output: UiOutput<T>? = null
     var operation: OperationResult? = null
     fun failure(code: String, stage: Stage, message: String) = CoreResult.Failure(CoreError(IssueCode(code), stage, message))
     try {
@@ -68,7 +71,7 @@ public suspend fun preparePhotoRepair(
                 RepairReview(digest, preview.proposedChanges.toList()) else null
             return CoreResult.Success(PreparedPhotoRepair(null, report(preview, authorization)))
         }
-        val transaction = MemoryOutputTransaction(context, "ui-repair")
+        val transaction = outputFactory(context, "ui-repair")
         output = transaction
         return when (val result = core.repair(RepairRequest(SourceSet.Single(source), mode = RepairMode.SafeMetadataOnly, dryRun = false, output = transaction, context = context))) {
             is CoreResult.Failure -> result
@@ -84,7 +87,7 @@ public suspend fun preparePhotoRepair(
                     it.sourceDigest != null && it.sourceDigest == it.outputDigest }
                 if (!verified(Guarantee.ImageDataPreserving) || !verified(Guarantee.BitstreamPreserving))
                     return failure("PRESERVATION_REQUIREMENT_FAILED", Stage.Verify, "Core did not prove image and video preservation")
-                CoreResult.Success(PreparedPhotoRepair(transaction.committedAssets().getValue(asset.id), report(result.value).copy(
+                CoreResult.Success(PreparedPhotoRepair(transaction.asset(asset.id), report(result.value).copy(
                     outputDigest = asset.digest, byteLength = asset.byteLength, preservation = applied.preservation,
                     issues = (applied.issues + applied.validation.issues + applied.preservation.issues).distinct())))
             }

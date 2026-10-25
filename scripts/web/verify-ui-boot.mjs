@@ -33,7 +33,7 @@ try{
     const b=element.getBoundingClientRect();return b.width>0&&b.height>0?{x:b.x+b.width/2,y:b.y+b.height/2}:null;
   },name);
   try{await page.waitForFunction(()=>!!document.querySelector('canvas'));}
-  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({errors:window.bootErrors,visibility:document.visibilityState,focus:document.hasFocus(),webgl2:!!document.createElement('canvas').getContext('webgl2'),text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
+  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({errors:window.bootErrors,visibility:document.visibilityState,focus:document.hasFocus(),webgl2:!!document.createElement('canvas').getContext('webgl2'),viewport:[innerWidth,innerHeight],layout:[...document.querySelectorAll('html,body,#app,compose-component,compose-component>div')].map(e=>({tag:e.tagName,id:e.id,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})),text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
   await page.keyboard.press('Tab');
   await page.waitForFunction(()=>!!document.querySelector('#main-action'));
   const runtime=await page.evaluate(()=>performance.getEntriesByType('resource').some(e=>/livephoto-ui\.[a-f0-9]+\.wasm/.test(e.name)));

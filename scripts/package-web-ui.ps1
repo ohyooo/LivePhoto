@@ -11,6 +11,7 @@ if (-not (Test-Path "$worker/livephoto-worker.js")) { throw 'Missing Kotlin/Wasm
 New-Item -ItemType Directory -Path "$destination/worker" | Out-Null
 Copy-Item "$worker/*" "$destination/worker" -Recurse
 Copy-Item scripts/web/ui-task-runtime.mjs $destination
+Copy-Item scripts/web/output-storage.mjs $destination
 $media = Join-Path $destination 'media'
 New-Item -ItemType Directory -Path $media -Force | Out-Null
 Copy-Item scripts/web/media/*.mjs $media

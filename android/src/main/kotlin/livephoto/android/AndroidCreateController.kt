@@ -75,7 +75,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     }
 
     /** Preparation is memory-only. Each later export is an explicit single-file action. */
-    suspend fun cleanSplit(input: Uri): CoreResult<livephoto.ui.PreparedCleanSplit> = withContext(Dispatchers.IO) {
+    suspend fun cleanSplit(input: Uri): CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>> = withContext(Dispatchers.IO) {
         val job = currentCoroutineContext()[Job]
         val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
         catch (limit: InputBudgetExceededException) {
@@ -85,7 +85,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         livephoto.ui.prepareCleanSplit(core, bytes, Cancellation { job?.isActive == false })
     }
 
-    suspend fun saveSplitFile(file: livephoto.ui.SplitFile): Uri = withContext(Dispatchers.IO) {
+    suspend fun saveSplitFile(file: livephoto.ui.SplitFile<livephoto.core.Bytes>): Uri = withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
         val exporter = AndroidPhotoExporter(android.contentResolver)
         val name = "LivePhoto-clean-${UUID.randomUUID()}.${file.extension}"

@@ -27,7 +27,7 @@ for(const [directory,document,scope] of [
 await mkdir(resolve(root,'browser-api'),{recursive:true});
 await cp(resolve(root,'web-library'),resolve(root,'browser-api/web-library'),{recursive:true});
 if(process.argv.includes('--tests')) {
-  for(const [file,count] of [['web-browser-evidence.json',70],['web-media-evidence.json',19],['web-player-evidence.json',91],['web-ui-browser-evidence.json',130],['web-theme-evidence.json',12]]) {
+  for(const [file,count] of [['web-browser-evidence.json',70],['web-media-evidence.json',20],['web-player-evidence.json',91],['web-ui-browser-evidence.json',130],['web-theme-evidence.json',12]]) {
     const proof=await json(file);
     if(proof.commit!==process.env.GITHUB_SHA||String(proof.run)!==process.env.GITHUB_RUN_ID||proof.tests!==count||proof.failures!==0||proof.checks?.length!==count||new Set(proof.checks).size!==count)throw Error('Incomplete/wrong-source test evidence: '+file);
   }

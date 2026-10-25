@@ -3,11 +3,10 @@ package livephoto.ui
 import livephoto.core.*
 import livephoto.core.ffmpeg.BROWSER_MEDIA_INPUT_LIMIT
 import livephoto.core.memory.MemoryBinarySource
-import livephoto.core.memory.MemoryOutputTransaction
 
 public enum class CoreMediaAction { Probe, Remux, Trim, ExtractFrame, Transcode }
 public data class EditedVideo(val reference: String, val summary: String)
-public data class PreparedCoreMedia(val bytes: Bytes?, val mime: String?, val actualTime: Time?, val summary: String,
+public data class PreparedCoreMedia<out T>(val bytes: T?, val mime: String?, val actualTime: Time?, val summary: String,
     val retainedVideoWindow: TimeRange? = null)
 public data class CoreMediaEdit(val summary: String, val imageReference: String? = null, val video: EditedVideo? = null)
 
@@ -27,7 +26,7 @@ public fun retainedCoreVideoWindow(start: Time, end: Time, mapping: List<Timelin
 /** Bounded application orchestration only. Commands, media proofs and publication stay in Core. */
 public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, action: CoreMediaAction,
     start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null,
-    inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia> {
+    inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia<Bytes>> {
     if (inputLimit !in 1..BROWSER_MEDIA_INPUT_LIMIT || bytes.size > inputLimit)
         return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds its memory budget"))
     val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-core-media"))
@@ -38,7 +37,12 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, actio
 /** Borrows an immutable random-access source; its owner controls its lifetime. */
 public suspend fun prepareCoreMedia(core: LivePhotoCore, source: BinarySource, action: CoreMediaAction,
     start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null,
-    inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia> {
+    inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia<Bytes>> =
+    prepareCoreMedia(core, source, action, start, end, cancellation, inputLimit, ::MemoryUiOutput)
+
+public suspend fun <T> prepareCoreMedia(core: LivePhotoCore, source: BinarySource, action: CoreMediaAction,
+    start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null,
+    inputLimit: Int = ANALYSIS_INPUT_LIMIT, outputFactory: UiOutputFactory<T>): CoreResult<PreparedCoreMedia<T>> {
     if (inputLimit !in 1..BROWSER_MEDIA_INPUT_LIMIT)
         return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds its memory budget"))
     when (val size = source.size()) {
@@ -50,7 +54,7 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, source: BinarySource, a
         return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Invalid media range; maximum 60 seconds"))
     val ctx = Context(Limits(inputLimit.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
     val input = ResourceRef(SourceSet.Single(source))
-    val output = MemoryOutputTransaction(ctx, "ui-core-media")
+    val output = outputFactory(ctx, "ui-core-media")
     var applied: OperationResult? = null
     var actualTime: Time? = null
     var retainedWindow: TimeRange? = null
@@ -103,7 +107,7 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, source: BinarySource, a
                     if (action == CoreMediaAction.ExtractFrame) "封面使用 Core 返回的实际帧时间。"
                     else if (retainedWindow != null) "已验证视频时间平移；保留范围内的旧封面可沿用，范围外拒绝替换输入。"
                     else "请在处理后的视频上重新选封面，旧封面时间不自动沿用。"
-                CoreResult.Success(PreparedCoreMedia(output.committedAssets().getValue(asset.id), mime, actualTime, summary, retainedWindow))
+                CoreResult.Success(PreparedCoreMedia(output.asset(asset.id), mime, actualTime, summary, retainedWindow))
             }
         }
     } finally {
