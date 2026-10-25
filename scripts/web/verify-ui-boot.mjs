@@ -17,13 +17,16 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await launchBrowser(),checks=[];
 try{
   const context=await browser.newContext({viewport:{width:1280,height:800}}),page=await context.newPage();
+  page.setDefaultTimeout(120000);
+  page.on?.('pageerror',error=>console.error('UI_PAGE_ERROR',String(error)));
   await page.goto(`http://127.0.0.1:${server.address().port}/livephoto/`);
   const bounds=name=>page.evaluate(name=>{
     const element=[...document.querySelectorAll('[role="button"],button')].find(e=>e.getAttribute('aria-label')===name||e.textContent.trim()===name);
     if(!element)return null;
     const b=element.getBoundingClientRect();return b.width>0&&b.height>0?{x:b.x+b.width/2,y:b.y+b.height/2}:null;
   },name);
-  await page.waitForFunction(()=>!!document.querySelector('canvas'));
+  try{await page.waitForFunction(()=>!!document.querySelector('canvas'));}
+  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
   await page.keyboard.press('Tab');
   await page.waitForFunction(()=>!!document.querySelector('#main-action'));
   const runtime=await page.evaluate(()=>performance.getEntriesByType('resource').some(e=>/livephoto-ui\.[a-f0-9]+\.wasm/.test(e.name)));

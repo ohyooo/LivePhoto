@@ -20,7 +20,7 @@ export async function guardMediaInput(input) {
       stats.inputWrites++;throw Error('Media input copied to MEMFS');
     }
     if(message.type==='execute'){
-      if(!(message.input instanceof Blob)||!(message.stage instanceof FileSystemDirectoryHandle)||
+      if(!(message.input instanceof Blob)||!(/^[0-9a-f-]{36}$/).test(message.stage)||
         (message.previousOutput!=null&&!(message.previousOutput instanceof Blob)))throw Error('Invalid disk media job');
       if(message.input===input)stats.mounts++;
       this.addEventListener('message',({data})=>{

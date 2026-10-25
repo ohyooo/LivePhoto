@@ -54,7 +54,9 @@ export async function executeCoreFfmpeg(argsJson,input,previousOutput,outputName
               resolve();
             }else stop('ioFailed');
           };
-          engine.postMessage({type:'execute',args,input,previousOutput,outputName,timeoutMillis,stage});
+          // Safari cannot clone directory handles. The child resolves this
+          // owned UUID inside the same private origin while our lock is held.
+          engine.postMessage({type:'execute',args,input,previousOutput,outputName,timeoutMillis,stage:id});
         });
       }finally{
         engine?.terminate();

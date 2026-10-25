@@ -18,7 +18,10 @@ onmessage=async({data:{args,input,previousOutput,outputName,timeoutMillis,stage}
     }
     const writes=args.at(-1)===outputName;
     if(writes){
-      handle=await(await stage.getFileHandle('output',{create:true})).createSyncAccessHandle();
+      if(!/^[0-9a-f-]{36}$/.test(stage))throw Error('Invalid private stage');
+      const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('livephoto-media-stage-v1');
+      const folder=await root.getDirectoryHandle(stage);
+      handle=await(await folder.getFileHandle('output',{create:true})).createSyncAccessHandle();
       const node=fs.create('/'+outputName);
       const originalGetattr=node.node_ops.getattr;
       const bounded=size=>{
