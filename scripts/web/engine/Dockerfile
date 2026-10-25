@@ -14,11 +14,12 @@ WORKDIR /ffmpeg
 COPY preserve-channels.py /preserve-channels.py
 RUN python3 /preserve-channels.py
 # Audio is copied, never encoded. Keep the upstream decoders/filters; only the
-# already exposed AVC and JPEG output encoders are needed by the Web backend.
-RUN bash /wrapper/build/ffmpeg.sh --enable-gpl --enable-libx264 --disable-encoders --enable-encoder=libx264,mjpeg
+# already exposed AVC/JPEG encoders and null-output decode verification adapters
+# are needed. No compressed audio encoder is available.
+RUN bash /wrapper/build/ffmpeg.sh --enable-gpl --enable-libx264 --disable-encoders --enable-encoder=libx264,mjpeg,wrapped_avframe,pcm_s16le
 RUN mkdir -p src /out && cp -R /wrapper/src/bind /wrapper/src/fftools src/ && \
     bash /wrapper/build/ffmpeg-wasm.sh -lx264 -sEXPORT_ES6 -o /out/ffmpeg-core.js && \
-    printf '{"ffmpeg":"%s","wrapper":"%s","x264":"%s","channelCount":"FFmpeg n6.0 movenc.c backport","audioEncoders":false}\n' \
+    printf '{"ffmpeg":"%s","wrapper":"%s","x264":"%s","channelCount":"FFmpeg n6.0 movenc.c backport","compressedAudioEncoders":false}\n' \
       "$(git rev-parse HEAD)" "$(git -C /wrapper rev-parse HEAD)" "$(git -C /x264 rev-parse HEAD)" > /out/build.json
 FROM scratch AS export
 COPY --from=build /out/ /
