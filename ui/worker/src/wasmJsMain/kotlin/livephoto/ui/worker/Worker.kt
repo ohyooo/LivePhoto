@@ -15,6 +15,7 @@ private external interface Request : JsAny {
     val task: Int
     val options: Options
     val sizes: JsArray<JsNumber>
+    val files: JsArray<JsAny>
 }
 private external interface Options : JsAny {
     val kind: String
@@ -50,6 +51,7 @@ private fun install(run: (Request) -> Unit): Unit = js("""{
 private fun read(task: Int, source: Int, offset: Double, length: Int): Promise<ArrayBuffer?> = js("self.readUiSource(task,source,offset,length)")
 private fun send(task: Int, result: Reply): Unit = js("{ self.postMessage({type:'done',task,result},[result.bytes,result.second].filter(Boolean)); }")
 private fun number(values: JsArray<JsNumber>, index: Int): Double = js("values[index]")
+private fun file(values: JsArray<JsAny>, index: Int): JsAny = js("values[index]")
 private fun byte(values: Int8Array, index: Int): Byte = js("values[index]")
 private fun put(values: Int8Array, index: Int, value: Byte): Unit = js("{ values[index]=value; }")
 private fun token(): String = js("crypto.randomUUID()")
@@ -181,7 +183,7 @@ private external interface MediaProcess : JsAny {
 }
 private fun arguments(): JsAny = js("[]")
 private fun append(args: JsAny, value: String): Unit = js("{ args.push(value); }")
-private fun executeMedia(args: JsAny, input: Int8Array, previous: Int8Array?, name: String, timeout: Double): Promise<MediaProcess> =
+private fun executeMedia(args: JsAny, input: JsAny, previous: Int8Array?, name: String, timeout: Double): Promise<MediaProcess> =
     js("import(/* webpackIgnore: true */ new URL('../media/core-runtime.mjs', self.location.href).href).then(module => module.executeCoreFfmpeg(JSON.stringify(args),input,previous,name,timeout))")
 
 private suspend fun media(request: Request, source: BinarySource): Reply {
@@ -189,28 +191,15 @@ private suspend fun media(request: Request, source: BinarySource): Reply {
     val action = CoreMediaAction.entries.find { it.name == options.kind }
         ?: return failure(options.kind, CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Unknown task"), options)
     val backend = DefaultLivePhotoCore(BrowserFfmpegBackend(MemoryFfmpegExecutor { values, input, previous, name, timeout, _ ->
+        require(input === source) { "Unbound browser media source" }
         val args = arguments(); values.forEach { append(args, it) }
-        val result = executeMedia(args, Int8Array(buffer(input)), previous?.let { Int8Array(buffer(it)) }, name, timeout.toDouble()).await()
+        val result = executeMedia(args, file(request.files, 0), previous?.let { Int8Array(buffer(it)) }, name, timeout.toDouble()).await()
         MemoryFfmpegResult(FfmpegProcessResult(result.code, result.output, result.outputLimited, result.cancelled, result.timedOut, result.ioFailed),
             result.bytes?.let { array -> Bytes(ByteArray(array.length) { byte(array, it) }) })
     }))
-    // FFmpeg MEMFS still needs a bounded materialization, performed off the UI thread.
-    val size = (source.size() as CoreResult.Success).value.toInt()
-    val bytes = ByteArray(size)
-    var offset = 0
-    while (offset < size) {
-        when (val part = source.readAt(offset.toULong(), minOf(65536, size - offset).toUInt())) {
-            is CoreResult.Failure -> return failure(options.kind, part.error, options)
-            is CoreResult.Success -> {
-                check(part.value.size > 0)
-                for (index in 0 until part.value.size) bytes[offset + index] = part.value[index]
-                offset += part.value.size
-            }
-        }
-    }
     val start = Time(options.time.toLong(), options.scale.toUInt())
     val end = Time(options.end.toLong(), options.endScale.toUInt())
-    return when (val result = prepareCoreMedia(backend, bytes, action, start, end, inputLimit = BROWSER_MEDIA_INPUT_LIMIT)) {
+    return when (val result = prepareCoreMedia(backend, source, action, start, end, inputLimit = BROWSER_MEDIA_INPUT_LIMIT)) {
         is CoreResult.Failure -> failure(options.kind, result.error, options)
         is CoreResult.Success -> {
             val value = result.value

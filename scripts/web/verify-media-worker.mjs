@@ -1,6 +1,7 @@
 // CI-only: real production Kotlin/JS Core inside a module Worker, spawning
 // the optional FFmpeg Worker itself. No parser or media implementation here.
 import {createMediaBackend} from '/api/livephoto.mjs';
+import {guardMediaInput} from '/media-io.mjs';
 
 onmessage=async({data:{input}})=>{
   const checks=[];
@@ -13,6 +14,7 @@ onmessage=async({data:{input}})=>{
     check('worker-context-and-capabilities',typeof document==='undefined'&&self instanceof DedicatedWorkerGlobalScope&&
       caps.backendIds.join(',')==='ffmpeg-wasm'&&caps.operations.length===5&&caps.operations.every(op=>op.implementation==='Experimental'));
     const outputs={};
+    const io=await guardMediaInput(input);
     for(const [action,options] of [['probe',undefined],['remux',undefined],['trim',{start:.4,end:1.6}],
       ['extractFrame',{start:.4}],['transcode',{authorizeTranscode:true}]]){
       const value=await backend[action](input,options);
@@ -36,8 +38,10 @@ onmessage=async({data:{input}})=>{
     try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
     check('worker-cancellation-and-budget',!cancelled.success&&cancelled.code==='CANCELLED'&&cancelled.blob===null&&
       !interrupted.success&&interrupted.code==='CANCELLED'&&interrupted.blob===null&&budget);
-    check('worker-input-immutable',await digest(input)===inputSha256);
+    io.restore();
+    check('worker-input-immutable',await digest(input)===inputSha256&&io.stats.mounts>=5&&
+      io.stats.wholeReads===0&&io.stats.inputWrites===0);
     if(checks.length!==9||new Set(checks).size!==9)throw Error('Incomplete media Worker checks');
-    postMessage({success:true,tests:checks.length,failures:0,checks,inputSha256,outputs});
+    postMessage({success:true,tests:checks.length,failures:0,checks,inputSha256,outputs,inputIo:io.stats});
   }catch(error){postMessage({success:false,message:String(error).slice(0,2000),checks});}
 };

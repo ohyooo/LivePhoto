@@ -5,12 +5,12 @@ import livephoto.core.binary.*
 import livephoto.core.bmff.BmffVideoProbe
 import livephoto.core.memory.MemoryBinarySource
 
-// MEMFS materializes input; keep preprocessing bounded independently of the final photo budget.
+// Preprocessing remains bounded independently of the final photo budget.
 public const val BROWSER_MEDIA_INPUT_LIMIT: Int = 256 * 1024 * 1024
 
 /** Worker adapter only. Commands and all media verification remain in the existing backend. */
 public fun interface MemoryFfmpegExecutor {
-    public suspend fun execute(arguments: List<String>, input: Bytes, previousOutput: Bytes?, outputName: String,
+    public suspend fun execute(arguments: List<String>, input: BinarySource, previousOutput: Bytes?, outputName: String,
         timeoutMillis: Long, context: Context): MemoryFfmpegResult
 }
 public data class MemoryFfmpegResult(public val process: FfmpegProcessResult, public val output: Bytes? = null)
@@ -24,7 +24,7 @@ public class MemoryFfmpegRuntime(private val executor: MemoryFfmpegExecutor) : F
         if (context.cancellation?.isCancelled() == true) return FfmpegProcessResult(null, "", cancelled = true)
         if (arguments.firstOrNull() != "ffmpeg" || arguments.filterIndexed { i, _ -> i > 0 && arguments[i - 1] == "-i" }
                 .any { it !in setOf(workspace.input, workspace.output) }) return FfmpegProcessResult(null, "", ioFailed = true)
-        val result = executor.execute(arguments.drop(1), workspace.inputBytes, workspace.outputBytes, workspace.output,
+        val result = executor.execute(arguments.drop(1), workspace.source, workspace.outputBytes, workspace.output,
             timeoutMillis.coerceIn(1, 120_000), context)
         if (result.output != null && result.output.size.toULong() > workspace.outputLimit)
             return FfmpegProcessResult(null, "", outputLimited = true)
@@ -41,19 +41,12 @@ public class MemoryFfmpegRuntime(private val executor: MemoryFfmpegExecutor) : F
             val reader = BinaryReader(source, context)
             val identity = reader.identity().orThrow()
             if (identity.size > minOf(context.limits.maxSpoolBytes, BROWSER_MEDIA_INPUT_LIMIT.toULong())) fail("RESOURCE_LIMIT_EXCEEDED", "Browser media input exceeds memory budget", Stage.Read)
-            val data = ByteArray(identity.size.toInt())
-            var offset = 0
-            while (offset < data.size) {
-                val part = reader.readBuffer(offset.toULong(), minOf(65536, data.size - offset).toUInt()).orThrow()
-                part.copyInto(data, offset)
-                offset += part.size
-            }
             reader.validateIdentity().orThrow()
-            Workspace(Bytes(data), outputName, minOf(context.limits.maxOutputBytes, 48uL * 1024u * 1024u)).also { active = it }
+            Workspace(source, outputName, minOf(context.limits.maxOutputBytes, 48uL * 1024u * 1024u)).also { active = it }
         } finally { opening = false }
     }
 
-    private inner class Workspace(val inputBytes: Bytes, override val output: String, override val outputLimit: ULong) : FfmpegFiles {
+    private inner class Workspace(val source: BinarySource, override val output: String, override val outputLimit: ULong) : FfmpegFiles {
         override val input: String = "input.bin"
         var outputBytes: Bytes? = null
         override suspend fun outputSize(): CoreResult<ULong> = outputBytes?.let { CoreResult.Success(it.size.toULong()) }

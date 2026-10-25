@@ -23,22 +23,23 @@ public fun browserMediaCapabilities(): String {
 
 /** Private JS execution adapter; Core verifies every output before exposure. */
 @JsExport
-public fun processMedia(input: ByteArray, action: String, executor: dynamic, startUs: Double = 0.0,
+public fun processMedia(input: dynamic, action: String, executor: dynamic, startUs: Double = 0.0,
     endUs: Double = 0.0, authorizeTranscode: Boolean = false, cancelled: () -> Boolean = { false }): Promise<WebResult> = promise {
-    if (input.size > BROWSER_MEDIA_INPUT_LIMIT) return@promise WebResult(false, "RESOURCE_LIMIT_EXCEEDED", "Read", "Media input exceeds 256 MiB")
+    if (webInputSize(input) > BROWSER_MEDIA_INPUT_LIMIT) return@promise WebResult(false, "RESOURCE_LIMIT_EXCEEDED", "Read", "Media input exceeds 256 MiB")
     if (!startUs.isFinite() || !endUs.isFinite() || startUs < 0 || endUs < 0 || startUs > 60_000_000 || endUs > 60_000_000 ||
         startUs % 1 != 0.0 || endUs % 1 != 0.0 || action !in setOf("probe", "remux", "trim", "transcode", "frame"))
         return@promise WebResult(false, "INVALID_ARGUMENT", "Plan", "Unknown action or invalid integer microsecond range (maximum 60 seconds)")
     if (action == "trim" && endUs <= startUs) return@promise WebResult(false, "INVALID_ARGUMENT", "Plan", "Trim range must be nonempty")
     val ctx = Context(Limits(BROWSER_MEDIA_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = Cancellation(cancelled))
+    val source = webSource(input, SourceId("web-media"))
     val backend = BrowserFfmpegBackend(MemoryFfmpegExecutor { args, data, previous, name, timeout, context ->
-        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), data.toByteArray(), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
+        require(data === source) { "Unbound browser media source" }
+        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
         MemoryFfmpegResult(FfmpegProcessResult((response.code as? Int), response.output as String,
             response.outputLimited as Boolean, response.cancelled as Boolean, response.timedOut as Boolean, response.ioFailed as Boolean),
             (response.bytes as? ByteArray)?.let(::Bytes))
     })
     val core = DefaultLivePhotoCore(backend)
-    val source = MemoryBinarySource(Bytes(input), SourceId("web-media"))
     val ref = ResourceRef(SourceSet.Single(source))
     val output = MemoryOutputTransaction(ctx, "web-media")
     var applied: OperationResult? = null

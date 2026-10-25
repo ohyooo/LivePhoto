@@ -14,7 +14,7 @@ class MemoryFfmpegRuntimeTest {
         val runtime = MemoryFfmpegRuntime { args, bytes, _, name, timeout, _ ->
             assertEquals(listOf("-i", "input.bin", "output.bin"), args)
             assertEquals("output.bin", name); assertEquals(120_000L, timeout)
-            assertContentEquals(input, bytes.toByteArray())
+            assertContentEquals(input, value(bytes.readAt(0u, 3u)).toByteArray())
             MemoryFfmpegResult(FfmpegProcessResult(0, "ok"), Bytes(byteArrayOf(4, 5, 6)))
         }
         val files = value(runtime.openFiles(MemoryBinarySource(Bytes(input), SourceId("test")), context, "output.bin", true))
@@ -45,7 +45,9 @@ class MemoryFfmpegRuntimeTest {
         assertIs<CoreResult.Failure>(runtime.openFiles(source, context, "output.bin", true))
         assertTrue(runtime.execute(listOf("ffmpeg", "-i", "https://example.invalid/input", "output.bin"), 1000, context).ioFailed)
         value(files.close()); value(value(runtime.openFiles(source, context, "output.bin", true)).close())
-        val media = MemoryBinarySource(Bytes(byteArrayOf(1, 2, 3)), SourceId("media-not-metadata"))
+        val media = object : BinarySource by source {
+            override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> = error("Opening must borrow, not materialize, the input")
+        }
         value(value(runtime.openFiles(media, context.copy(limits = context.limits.copy(maxMetadataBytes = 1u)), "output.bin", true)).close())
     }
     @Test fun cancellationAndOversizedOutputNeverExposeAFile(): Unit = runImmediate {

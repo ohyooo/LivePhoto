@@ -30,10 +30,25 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, actio
     inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia> {
     if (inputLimit !in 1..BROWSER_MEDIA_INPUT_LIMIT || bytes.size > inputLimit)
         return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds its memory budget"))
+    val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-core-media"))
+    return try { prepareCoreMedia(core, source, action, start, end, cancellation, inputLimit) }
+    finally { source.close() }
+}
+
+/** Borrows an immutable random-access source; its owner controls its lifetime. */
+public suspend fun prepareCoreMedia(core: LivePhotoCore, source: BinarySource, action: CoreMediaAction,
+    start: Time = Time.Zero, end: Time = Time.Zero, cancellation: Cancellation? = null,
+    inputLimit: Int = ANALYSIS_INPUT_LIMIT): CoreResult<PreparedCoreMedia> {
+    if (inputLimit !in 1..BROWSER_MEDIA_INPUT_LIMIT)
+        return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds its memory budget"))
+    when (val size = source.size()) {
+        is CoreResult.Failure -> return size
+        is CoreResult.Success -> if (size.value > inputLimit.toULong())
+            return CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, "Core media input exceeds its memory budget"))
+    }
     if (start < Time.Zero || end < Time.Zero || start > Time(60, 1u) || end > Time(60, 1u) || action == CoreMediaAction.Trim && end <= start)
         return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Invalid media range; maximum 60 seconds"))
     val ctx = Context(Limits(inputLimit.toULong(), 48uL * 1024u * 1024u), cancellation = cancellation)
-    val source = MemoryBinarySource(Bytes(bytes), SourceId("ui-core-media"))
     val input = ResourceRef(SourceSet.Single(source))
     val output = MemoryOutputTransaction(ctx, "ui-core-media")
     var applied: OperationResult? = null
@@ -94,6 +109,5 @@ public suspend fun prepareCoreMedia(core: LivePhotoCore, bytes: ByteArray, actio
     } finally {
         applied?.output?.assets?.forEach { it.readableSource?.close() }
         if (applied == null) output.abort()
-        source.close()
     }
 }

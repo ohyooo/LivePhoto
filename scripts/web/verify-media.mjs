@@ -54,12 +54,14 @@ const shiftedInput=await readFile(shiftedSource);
 const emptyEncoderInput=await readFile(emptyEncoderSource);
 const input=await readFile(source), root=resolve('ci-output/web-ui'),apiRoot=resolve('ci-output/browser-api/web-library');
 const mediaWorker=await readFile('scripts/web/verify-media-worker.mjs');
+const mediaIo=await readFile('scripts/web/verify-media-io.mjs');
 const server=createServer(async(req,res)=>{
   try {
     const path=new URL(req.url,'http://localhost').pathname;
     if(path==='/livephoto/test') {res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Media adapter validation</title>');return;}
     if(path==='/fixture') {res.setHeader('Content-Type','video/mp4');res.end(input);return;}
     if(path==='/media-worker.mjs') {res.setHeader('Content-Type','text/javascript');res.end(mediaWorker);return;}
+    if(path==='/media-io.mjs') {res.setHeader('Content-Type','text/javascript');res.end(mediaIo);return;}
     if(path==='/core-fixture') {res.setHeader('Content-Type','video/mp4');res.end(coreInput);return;}
     if(path==='/core-mono-fixture') {res.setHeader('Content-Type','video/mp4');res.end(monoInput);return;}
     if(path==='/core-fractional-fixture') {res.setHeader('Content-Type','video/mp4');res.end(shiftedInput);return;}
@@ -101,6 +103,8 @@ try {
     const file=await(await fetch('/core-fixture')).blob();
     const hash=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');
     const before=await hash(file),results={};
+    const {guardMediaInput}=await import('/media-io.mjs');
+    const io=await guardMediaInput(file);
     for(const [action,options] of [['probe',undefined],['remux',undefined],['trim',{start:.4,end:1.6}],['extractFrame',{start:.4}],['transcode',{authorizeTranscode:true}]]) {
       const value=await backend[action](file,options);
       if(!value.success)throw Error('Core '+action+': '+value.code+' '+value.stage+' '+value.message+' '+JSON.stringify(value.report)+' '+JSON.stringify(diagnostics.slice(-3)));
@@ -122,7 +126,9 @@ try {
     const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:256*1024*1024+1});
     oversized.arrayBuffer=()=>{throw Error('Over-budget input was read');};
     let budget=false;try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
-    return {results,capabilities,invalidRange,forbidden,malformed,mono,fractional,unknownColor,encoderChange,cancelled,stopped,budget,immutable:before===await hash(file)};
+    io.restore();
+    return {results,capabilities,invalidRange,forbidden,malformed,mono,fractional,unknownColor,encoderChange,cancelled,stopped,budget,
+      inputIo:io.stats,immutable:before===await hash(file)};
   });
   check('invalid-range-rejected',!coreResults.invalidRange.success&&!coreResults.invalidRange.blob);
   const r=coreResults.results;
@@ -165,7 +171,8 @@ try {
     !coreResults.encoderChange.success&&coreResults.encoderChange.code==='POSTCONDITION_FAILED'&&!coreResults.encoderChange.blob);
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
-  check('core-input-bytes-immutable',coreResults.immutable);
+  check('core-input-bytes-immutable',coreResults.immutable&&coreResults.inputIo.mounts>=5&&
+    coreResults.inputIo.wholeReads===0&&coreResults.inputIo.inputWrites===0);
   }
   if(part==='worker'){
   const workerResult=await page.evaluate(async()=>{

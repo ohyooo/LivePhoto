@@ -11,12 +11,6 @@ function source(blob, limit) {
   return {size:blob.size,readAt:async(offset,length)=>new Int8Array(await blob.slice(offset,offset+length).arrayBuffer())};
 }
 
-async function bytes(blob, limit) {
-  if (!(blob instanceof Blob)) throw new TypeError('Expected a File or Blob');
-  if (blob.size > limit) throw new RangeError('Input exceeds the documented memory budget');
-  return new Int8Array(await blob.arrayBuffer());
-}
-
 function result(value) {
   const { success, code, stage, message, protocol, verdict, coverage, mime, issues } = value;
   const assets = Array.from(value.assets, asset => ({
@@ -53,9 +47,9 @@ export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs
   if(runtime.origin!==globalThis.location.origin)throw new TypeError('Media runtime must be same-origin');
   const run=async(input,action,{start=0,end=0,authorizeTranscode=false}={})=>{
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<0||start>60||end>60||typeof authorizeTranscode!=='boolean')throw new TypeError('Invalid media range or authorization');
-    const data=await bytes(input,256*1024*1024);
-    const executor=async(...args)=>{
-      const response=await(await import(runtime.href)).executeCoreFfmpeg(...args);
+    const data=source(input,256*1024*1024);
+    const executor=async(args,previous,name,timeout,cancelled)=>{
+      const response=await(await import(runtime.href)).executeCoreFfmpeg(args,input,previous,name,timeout,cancelled);
       // Explicit opt-in only: decoder diagnostics can include private metadata.
       if(typeof onDiagnostic==='function')try{onDiagnostic({code:response.code,output:response.output.slice(0,2000),cancelled:response.cancelled,timedOut:response.timedOut,ioFailed:response.ioFailed});}catch{}
       return response;

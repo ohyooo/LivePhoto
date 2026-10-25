@@ -1,9 +1,9 @@
-/** Private MEMFS execution bridge: no protocol parsing, publication, paths or shell. */
+/** Read-only Blob input and private MEMFS output; no protocol parsing or publication. */
 const base=new URL('./',import.meta.url);
 export async function executeCoreFfmpeg(argsJson,input,previousOutput,outputName,timeoutMillis,isCancelled=()=>false) {
   const args=JSON.parse(argsJson),limit=48*1024*1024;
   if(!Array.isArray(args)||args.length>256||!args.every(a=>typeof a==='string'&&a.length<=4096)||
-    !['output.bin','frame.jpg'].includes(outputName)||input.byteLength>256*1024*1024||
+    !['output.bin','frame.jpg'].includes(outputName)||!(input instanceof Blob)||input.size>256*1024*1024||
     (previousOutput?.byteLength??0)>limit)throw Error('Invalid private memory job');
   let engine,timer,poll,stopped=false;
   const result={code:null,output:'',outputLimited:false,cancelled:false,timedOut:false,ioFailed:false,bytes:null};
@@ -21,14 +21,15 @@ export async function executeCoreFfmpeg(argsJson,input,previousOutput,outputName
       result.output+=line;
     });
     await engine.load({coreURL:new URL('vendor/core/ffmpeg-core.js',base).href,wasmURL:new URL('vendor/core/ffmpeg-core.wasm',base).href});
-    await engine.writeFile('input.bin',new Uint8Array(input.buffer,input.byteOffset,input.byteLength));
+    await engine.createDir('/input');
+    if(!await engine.mount('WORKERFS',{blobs:[{name:'input.bin',data:input}]},'/input'))throw Error('Read-only media mount failed');
     if(previousOutput)await engine.writeFile(outputName,new Uint8Array(previousOutput.buffer,previousOutput.byteOffset,previousOutput.byteLength));
     // The wrapper prepends -y, which conflicts with Core's external-process -n.
     // Emulate -n against this fresh, private MEMFS instead; never permit input
     // overwrite or replacement of a previous verified output.
     if(!['-',outputName].includes(args.at(-1))||
       (args.includes('-n')&&previousOutput&&args.at(-1)===outputName))throw Error('Refusing private output overwrite');
-    result.code=await engine.exec(args.filter(arg=>arg!=='-n'),timeoutMillis);
+    result.code=await engine.exec(args.filter(arg=>arg!=='-n').map(arg=>arg==='input.bin'?'/input/input.bin':arg),timeoutMillis);
     if(result.code===0&&args.at(-1)===outputName){
       const bytes=await engine.readFile(outputName);
       if(bytes.byteLength>limit){result.outputLimited=true;return;}

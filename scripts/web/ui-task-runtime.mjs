@@ -19,7 +19,7 @@ export function createTaskRunner() {
     active.onmessage=async({data})=>{
       const task=pending;
       if(worker===active&&data.type==='ready'){
-        ready=true;if(task)active.postMessage({type:'run',task:task.id,options:task.options,sizes:task.files.map(f=>f.size)});
+        ready=true;if(task)active.postMessage({type:'run',task:task.id,options:task.options,sizes:task.files.map(f=>f.size),files:task.files});
         return;
       }
       if(worker!==active||!task||data.task!==task.id)return;
@@ -54,7 +54,7 @@ export function createTaskRunner() {
       return new Promise((resolve,reject)=>{
         const id=++next;
         pending={id,options,files,resolve,reject,timer:setTimeout(()=>stop('TIMEOUT'),120000)};
-        try {const active=start();if(ready)active.postMessage({type:'run',task:id,options,sizes:files.map(f=>f.size)});}
+        try {const active=start();if(ready)active.postMessage({type:'run',task:id,options,sizes:files.map(f=>f.size),files});}
         catch {stop('WORKER_FAILED');}
       });
     },
