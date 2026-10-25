@@ -33,14 +33,14 @@ onmessage=async({data:{input}})=>{
     const timer=setTimeout(()=>running.abort(),100);
     let interrupted;try{interrupted=await pending;}finally{clearTimeout(timer);}
     let budget=false;
-    const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:256*1024*1024+1});
+    const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:512*1024*1024+1});
     oversized.arrayBuffer=()=>{throw Error('Over-budget input was read');};
     try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
     check('worker-cancellation-and-budget',!cancelled.success&&cancelled.code==='CANCELLED'&&cancelled.blob===null&&
       !interrupted.success&&interrupted.code==='CANCELLED'&&interrupted.blob===null&&budget);
     io.restore();
     check('worker-input-immutable',await digest(input)===inputSha256&&io.stats.mounts>=5&&
-      io.stats.wholeReads===0&&io.stats.inputWrites===0);
+      io.stats.wholeReads===0&&io.stats.inputWrites===0&&io.stats.outputParts>0);
     if(checks.length!==9||new Set(checks).size!==9)throw Error('Incomplete media Worker checks');
     postMessage({success:true,tests:checks.length,failures:0,checks,inputSha256,outputs,inputIo:io.stats});
   }catch(error){postMessage({success:false,message:String(error).slice(0,2000),checks});}

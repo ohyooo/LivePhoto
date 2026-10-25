@@ -36,7 +36,9 @@ export function createTaskRunner() {
       } else if(data.type==='done'){
         const result=data.result;
         if(typeof result?.report!=='string'||typeof result.failed!=='boolean'||
-          (result.bytes?.byteLength??0)+(result.second?.byteLength??0)>48*1024*1024){stop('WORKER_FAILED');return;}
+          [result.bytes,result.second].some(value=>value!=null&&!(value instanceof Blob))||
+          (result.bytes?.size??0)+(result.second?.size??0)>48*1024*1024||
+          (result.failed&&(result.bytes!=null||result.second!=null))){stop('WORKER_FAILED');return;}
         finish(null,result);
       }
     };
@@ -46,7 +48,7 @@ export function createTaskRunner() {
     run(options,files){
       if(pending)return Promise.reject(Error('A task is already running'));
       if(!Array.isArray(files)||files.length<1||files.length>2||files.some(f=>!(f instanceof Blob)))return Promise.reject(Error('Invalid files'));
-      const inputLimit=['Probe','Remux','Trim','ExtractFrame','Transcode'].includes(options?.kind)?256*1024*1024:32*1024*1024;
+      const inputLimit=['Probe','Remux','Trim','ExtractFrame','Transcode'].includes(options?.kind)?512*1024*1024:32*1024*1024;
       const inputSize=files.reduce((n,f)=>n+f.size,0);
       if(inputSize>inputLimit||(options?.kind==='Create'&&inputSize===inputLimit)){
         return Promise.resolve({report:'',failed:true,code:'RESOURCE_LIMIT_EXCEEDED'});

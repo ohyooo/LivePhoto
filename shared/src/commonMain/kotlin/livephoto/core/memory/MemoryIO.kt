@@ -92,7 +92,7 @@ public class MemoryOutputTransaction(private val context: Context, private val t
     }
 
     private class MemorySink(private val owner: MemoryOutputTransaction) : BinarySink {
-        private var storage = ByteArray(0)
+        private val pages = mutableListOf<ByteArray>()
         private var frozen: Bytes? = null
         private var length = 0
         private var position = 0
@@ -103,18 +103,36 @@ public class MemoryOutputTransaction(private val context: Context, private val t
             if (closed) fail("IO_WRITE_FAILED", "Staging sink is closed", Stage.WriteProtocol)
         }
         private fun capacity(required: Int) {
-            if (required <= storage.size) return
             val limit = minOf(owner.context.limits.maxOutputBytes, Int.MAX_VALUE.toULong()).toInt()
             if (required > limit) fail("RESOURCE_LIMIT_EXCEEDED", "Memory staging exceeds its buffer limit", Stage.WriteProtocol)
-            val doubled = minOf(storage.size.toLong() * 2, limit.toLong()).toInt()
-            storage = storage.copyOf(maxOf(required, minOf(maxOf(16, doubled), limit)))
+            while (true) {
+                val last = pages.lastOrNull()
+                val allocated = if (last == null) 0L else (pages.size - 1).toLong() * Bytes.PAGE_SIZE + last.size
+                if (allocated >= required) return
+                if (last == null || last.size == Bytes.PAGE_SIZE) pages.add(ByteArray(minOf(Bytes.PAGE_SIZE, required - allocated.toInt())))
+                else pages[pages.lastIndex] = last.copyOf(minOf(Bytes.PAGE_SIZE, maxOf(required - (pages.size - 1) * Bytes.PAGE_SIZE, last.size * 2)))
+            }
+        }
+        private fun zero(from: Int, until: Int) {
+            var offset = from
+            while (offset < until) {
+                val count = minOf(until - offset, Bytes.PAGE_SIZE - offset % Bytes.PAGE_SIZE)
+                pages[offset / Bytes.PAGE_SIZE].fill(0, offset % Bytes.PAGE_SIZE, offset % Bytes.PAGE_SIZE + count)
+                offset += count
+            }
         }
         override suspend fun write(bytes: Bytes): CoreResult<UInt> = attempt {
             writable()
             val end = checkedInt(checkedAdd(position.toULong(), bytes.size.toULong()))
             val nextLength = maxOf(length, end)
             owner.resize(length, nextLength); capacity(nextLength)
-            bytes.copyInto(storage, position)
+            var copied = 0
+            while (copied < bytes.size) {
+                val offset = position + copied
+                val count = minOf(bytes.size - copied, Bytes.PAGE_SIZE - offset % Bytes.PAGE_SIZE)
+                bytes.slice(copied, copied + count).copyInto(pages[offset / Bytes.PAGE_SIZE], offset % Bytes.PAGE_SIZE)
+                copied += count
+            }
             position = end; length = nextLength
             bytes.size.toUInt()
         }
@@ -122,16 +140,18 @@ public class MemoryOutputTransaction(private val context: Context, private val t
         override suspend fun truncate(length: ULong): CoreResult<Unit> = attempt<Unit> {
             writable(); val next = checkedInt(length)
             owner.resize(this.length, next); capacity(next)
-            if (next < this.length) storage.fill(0, next, this.length)
-            else if (next > this.length) storage.fill(0, this.length, next)
+            if (next < this.length) {
+                zero(next, minOf(this.length.toLong(), ((next.toLong() + Bytes.PAGE_SIZE - 1) / Bytes.PAGE_SIZE) * Bytes.PAGE_SIZE).toInt())
+                while (pages.size.toLong() * Bytes.PAGE_SIZE >= next.toLong() + Bytes.PAGE_SIZE) pages.removeAt(pages.lastIndex)
+            } else if (next > this.length) zero(this.length, next)
             this.length = next; position = minOf(position, next)
         }
         override suspend fun flush(): CoreResult<Unit> = attempt<Unit> { writable() }
         override suspend fun close(): CoreResult<Unit> { closed = true; return CoreResult.Success(Unit) }
-        fun freeze(): Bytes = frozen ?: Bytes.takeOwnership(storage, length).also {
+        fun freeze(): Bytes = frozen ?: Bytes.takePages(pages, length).also {
             // prepare() has disabled all writers; readers and commit share immutable storage.
             frozen = it
-            storage = ByteArray(0)
+            pages.clear()
         }
     }
 }

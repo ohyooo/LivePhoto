@@ -1,28 +1,42 @@
 package livephoto.core
 
 /** An immutable byte buffer. Neither the supplied array nor returned copies alias its storage. */
-public class Bytes private constructor(private val storage: ByteArray, private val start: Int, public val size: Int) {
-    public constructor(value: ByteArray) : this(value.copyOf(), 0, value.size)
+public class Bytes private constructor(private val storage: List<ByteArray>, private val pageSize: Int, private val start: Int, public val size: Int) {
+    public constructor(value: ByteArray) : this(listOf(value.copyOf()), maxOf(1, value.size), 0, value.size)
     internal companion object {
         /** The caller must relinquish its private array and never mutate it again. */
         internal fun takeOwnership(value: ByteArray, length: Int): Bytes {
             require(length in 0..value.size)
-            return Bytes(value, 0, length)
+            return Bytes(listOf(value), maxOf(1, value.size), 0, length)
+        }
+        internal const val PAGE_SIZE: Int = 65536
+        /** Private fixed-size pages become immutable together with the transaction. */
+        internal fun takePages(pages: List<ByteArray>, length: Int): Bytes {
+            require(length >= 0 && pages.sumOf { it.size.toLong() } >= length)
+            require(pages.dropLast(1).all { it.size == PAGE_SIZE } && (pages.lastOrNull()?.size ?: 0) <= PAGE_SIZE)
+            return Bytes(pages.toList(), PAGE_SIZE, 0, length)
         }
     }
     public operator fun get(index: Int): Byte {
         require(index in 0 until size) { "Byte index exceeds buffer" }
-        return storage[start + index]
+        val offset = start + index
+        return storage[offset / pageSize][offset % pageSize]
     }
-    public fun toByteArray(): ByteArray = storage.copyOfRange(start, start + size)
+    public fun toByteArray(): ByteArray = ByteArray(size).also { copyInto(it, 0) }
     internal fun copyInto(destination: ByteArray, destinationOffset: Int): Unit {
         require(destinationOffset >= 0 && size <= destination.size - destinationOffset)
-        storage.copyInto(destination, destinationOffset, start, start + size)
+        var copied = 0
+        while (copied < size) {
+            val offset = start + copied
+            val count = minOf(size - copied, pageSize - offset % pageSize)
+            storage[offset / pageSize].copyInto(destination, destinationOffset + copied, offset % pageSize, offset % pageSize + count)
+            copied += count
+        }
     }
     /** An immutable view over already immutable storage; no repeated short-IO buffer copying. */
     public fun slice(startIndex: Int, endIndex: Int = size): Bytes {
         require(startIndex >= 0 && endIndex >= startIndex && endIndex <= size)
-        return Bytes(storage, start + startIndex, endIndex - startIndex)
+        return Bytes(storage, pageSize, start + startIndex, endIndex - startIndex)
     }
     override fun equals(other: Any?): Boolean = other is Bytes && size == other.size && (0 until size).all { this[it] == other[it] }
     override fun hashCode(): Int {

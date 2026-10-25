@@ -77,11 +77,16 @@ try {
     await page.evaluate(()=>{
       const slice=Blob.prototype.slice;
       globalThis.analysisIo={fullReads:0,slices:0,maxSlice:0};
-      globalThis.taskWorkers={started:0,runs:0,terminated:0};
+      globalThis.taskWorkers={started:0,runs:0,terminated:0,outputBlobs:0,invalidOutputs:0};
       globalThis.releaseTaskReads=[];
       const NativeWorker=globalThis.Worker;
       globalThis.Worker=class extends NativeWorker {
-        constructor(url,options){super(url,options);this.taskWorker=String(url).endsWith('/worker/livephoto-worker.js');if(this.taskWorker)globalThis.taskWorkers.started++;}
+        constructor(url,options){super(url,options);this.taskWorker=String(url).endsWith('/worker/livephoto-worker.js');if(this.taskWorker){
+          globalThis.taskWorkers.started++;
+          this.addEventListener('message',({data})=>{if(data.type==='done')for(const value of [data.result?.bytes,data.result?.second])if(value!=null){
+            if(value instanceof Blob)globalThis.taskWorkers.outputBlobs++;else globalThis.taskWorkers.invalidOutputs++;
+          }});
+        }}
         postMessage(data,...rest){if(this.taskWorker&&data.type==='run')globalThis.taskWorkers.runs++;return super.postMessage(data,...rest);}
         terminate(){if(this.taskWorker)globalThis.taskWorkers.terminated++;return super.terminate();}
       };
@@ -714,7 +719,8 @@ try {
     }
     }
     const workerIo=await page.evaluate(()=>({workers:globalThis.taskWorkers,io:globalThis.analysisIo}));
-    if(!workerIo.workers?.runs||!workerIo.workers.started||workerIo.io.fullReads!==0||workerIo.io.maxSlice>65536)
+    if(!workerIo.workers?.runs||!workerIo.workers.started||workerIo.io.fullReads!==0||workerIo.io.maxSlice>65536||
+      workerIo.workers.invalidOutputs!==0||(scenario!=='analysis'&&!workerIo.workers.outputBlobs))
       throw Error('UI must execute in Kotlin/Wasm Worker with bounded input reads');
     await context.close();
   }

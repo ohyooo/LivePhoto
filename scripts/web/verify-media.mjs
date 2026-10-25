@@ -46,7 +46,7 @@ generateCore(['-i',coreSource,'-map','0','-c','copy','-use_editlist','0','-map_m
   '-metadata:s:v','encoder=','-fflags','+bitexact','-write_btrt','0',emptyEncoderSource]);
 const coreInput=await readFile(coreSource);
 // A valid top-level free box raises file size without changing any encoded packets.
-const largeSource=join(directory,'core-large.mp4'),padding=Buffer.alloc(33*1024*1024);
+const largeSource=join(directory,'core-large.mp4'),padding=Buffer.alloc(257*1024*1024);
 padding.writeUInt32BE(padding.length,0);padding.write('free',4,'ascii');
 await writeFile(largeSource,Buffer.concat([coreInput,padding]));
 const monoInput=await readFile(monoSource);
@@ -123,7 +123,7 @@ try {
     const interrupted=createMediaBackend({runtimeUrl:location.origin+'/livephoto/media/core-runtime.mjs',signal:running.signal}).probe(file);
     const stop=setTimeout(()=>running.abort(),100);
     let stopped;try{stopped=await interrupted;}finally{clearTimeout(stop);}
-    const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:256*1024*1024+1});
+    const oversized=new Blob([new Uint8Array([0])]);Object.defineProperty(oversized,'size',{value:512*1024*1024+1});
     oversized.arrayBuffer=()=>{throw Error('Over-budget input was read');};
     let budget=false;try{await backend.remux(oversized);}catch(error){budget=error instanceof RangeError;}
     io.restore();
@@ -172,7 +172,7 @@ try {
   check('core-cancel-and-budget-no-output',!coreResults.cancelled.success&&coreResults.cancelled.code==='CANCELLED'&&!coreResults.cancelled.blob&&
     !coreResults.stopped.success&&coreResults.stopped.code==='CANCELLED'&&!coreResults.stopped.blob&&coreResults.budget);
   check('core-input-bytes-immutable',coreResults.immutable&&coreResults.inputIo.mounts>=5&&
-    coreResults.inputIo.wholeReads===0&&coreResults.inputIo.inputWrites===0);
+    coreResults.inputIo.wholeReads===0&&coreResults.inputIo.inputWrites===0&&coreResults.inputIo.outputParts>0);
   }
   if(part==='worker'){
   const workerResult=await page.evaluate(async()=>{

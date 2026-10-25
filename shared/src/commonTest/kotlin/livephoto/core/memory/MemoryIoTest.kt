@@ -140,6 +140,31 @@ class MemoryIoTest {
     }
 
     @Test
+    fun pagedOutputSupportsCrossPagePatchesSlicesAndTruncateRegrowth(): Unit = runImmediate {
+        val expected = ByteArray(196_613) { (it % 251).toByte() }
+        val transaction = MemoryOutputTransaction(context(output = 262_144u), "paged-output")
+        val handle = value(transaction.create(spec()))
+        value(handle.sink.write(Bytes(expected)))
+        value(handle.sink.seek(65_534u))
+        value(handle.sink.write(Bytes(byteArrayOf(4, 3, 2, 1))))
+        byteArrayOf(4, 3, 2, 1).copyInto(expected, 65_534)
+        value(handle.sink.truncate(131_073u))
+        value(handle.sink.seek(196_611u))
+        value(handle.sink.write(Bytes(byteArrayOf(8, 9))))
+        expected.fill(0, 131_073, 196_611)
+        expected[196_611] = 8; expected[196_612] = 9
+        value(transaction.prepare()); value(transaction.commit())
+        val bytes = transaction.committedAssets().getValue(handle.id)
+        assertContentEquals(expected, bytes.toByteArray())
+        val slice = bytes.slice(65_533, 131_076).slice(1, 65_542)
+        assertContentEquals(expected.copyOfRange(65_534, 131_075), slice.toByteArray())
+        assertEquals(Bytes(expected), bytes)
+        assertEquals(Bytes(expected).hashCode(), bytes.hashCode())
+        val copy = slice.toByteArray(); copy.fill(7)
+        assertEquals(expected[65_534], bytes[65_534])
+    }
+
+    @Test
     fun seekAndTruncatePreserveContentAndZeroNewHoles(): Unit = runImmediate {
         val transaction = MemoryOutputTransaction(context(), "seek-truncate")
         val sink = value(transaction.create(spec())).sink

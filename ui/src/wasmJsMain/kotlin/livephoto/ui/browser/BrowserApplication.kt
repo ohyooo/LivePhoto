@@ -328,7 +328,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             check(!disposed && !coreBusy) { "已有媒体任务或输入已改变" }
             coreBusy = true; coreCancelled = false
             try {
-                check(browserFileSize(file) <= livephoto.core.ffmpeg.BROWSER_MEDIA_INPUT_LIMIT) { "媒体预处理输入超过 256 MiB" }
+                check(browserFileSize(file) <= livephoto.core.ffmpeg.BROWSER_MEDIA_INPUT_LIMIT) { "媒体预处理输入超过 512 MiB" }
                 check(state.value.duration.isFinite() && state.value.duration > 0 && state.value.duration <= 60) { "Core 媒体工具仅限 60 秒内视频" }
                 val prepared = tasks.run(taskOptions(action.name, timeline.root, time = start.value.toString(), scale = start.timescale.toString(),
                     end = end.value.toString(), endScale = end.timescale.toString()), file)

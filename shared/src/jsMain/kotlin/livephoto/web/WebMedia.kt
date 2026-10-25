@@ -25,7 +25,7 @@ public fun browserMediaCapabilities(): String {
 @JsExport
 public fun processMedia(input: dynamic, action: String, executor: dynamic, startUs: Double = 0.0,
     endUs: Double = 0.0, authorizeTranscode: Boolean = false, cancelled: () -> Boolean = { false }): Promise<WebResult> = promise {
-    if (webInputSize(input) > BROWSER_MEDIA_INPUT_LIMIT) return@promise WebResult(false, "RESOURCE_LIMIT_EXCEEDED", "Read", "Media input exceeds 256 MiB")
+    if (webInputSize(input) > BROWSER_MEDIA_INPUT_LIMIT) return@promise WebResult(false, "RESOURCE_LIMIT_EXCEEDED", "Read", "Media input exceeds 512 MiB")
     if (!startUs.isFinite() || !endUs.isFinite() || startUs < 0 || endUs < 0 || startUs > 60_000_000 || endUs > 60_000_000 ||
         startUs % 1 != 0.0 || endUs % 1 != 0.0 || action !in setOf("probe", "remux", "trim", "transcode", "frame"))
         return@promise WebResult(false, "INVALID_ARGUMENT", "Plan", "Unknown action or invalid integer microsecond range (maximum 60 seconds)")

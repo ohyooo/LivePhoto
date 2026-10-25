@@ -1,7 +1,18 @@
 // CI-only guard for the real shared FFmpeg wrapper, in both browser contexts.
 export async function guardMediaInput(input) {
   const post=Worker.prototype.postMessage;
-  const stats={mounts:0,wholeReads:0,inputWrites:0};
+  const NativeBlob=globalThis.Blob;
+  const stats={mounts:0,wholeReads:0,inputWrites:0,outputParts:0};
+  globalThis.Blob=class extends NativeBlob {
+    constructor(parts=[],options){
+      for(const part of parts)if(ArrayBuffer.isView(part)||part instanceof ArrayBuffer){
+        if(part.byteLength>65536)throw Error('Whole output buffer passed to Blob');
+        stats.outputParts++;
+      }
+      super(parts,options);
+    }
+    static [Symbol.hasInstance](value){return value instanceof NativeBlob;}
+  };
   const read=input.arrayBuffer;
   input.arrayBuffer=()=>{stats.wholeReads++;throw Error('Whole media input read');};
   Worker.prototype.postMessage=function(message,...args){
@@ -16,5 +27,5 @@ export async function guardMediaInput(input) {
     }
     return post.call(this,message,...args);
   };
-  return {stats,restore(){input.arrayBuffer=read;Worker.prototype.postMessage=post;}};
+  return {stats,restore(){input.arrayBuffer=read;Worker.prototype.postMessage=post;globalThis.Blob=NativeBlob;}};
 }

@@ -7,7 +7,7 @@ import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.implementation.RangeSource
 
 // Preprocessing remains bounded independently of the final photo budget.
-public const val BROWSER_MEDIA_INPUT_LIMIT: Int = 256 * 1024 * 1024
+public const val BROWSER_MEDIA_INPUT_LIMIT: Int = 512 * 1024 * 1024
 
 /** Worker adapter only. Commands and all media verification remain in the existing backend. */
 public fun interface MemoryFfmpegExecutor {
@@ -92,7 +92,7 @@ public class BrowserFfmpegBackend(executor: MemoryFfmpegExecutor) : MediaBackend
     private val delegate = FfmpegMediaBackend("ffmpeg", MemoryFfmpegRuntime(executor))
     override fun capabilities(): MediaCapabilities = delegate.capabilities().let { it.copy(backendIds = listOf("ffmpeg-wasm"),
         operations = it.operations.map { entry -> entry.copy(conditions = entry.conditions + listOf(Condition(ConditionOperator.Equals,
-            "runtimeProfile", Value.Text("private-worker-input256MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
+            "runtimeProfile", Value.Text("private-worker-input512MiB-output48MiB-timeout120s-per-invocation-no-host-path-no-audio-encoder"))) +
             if (entry.operation in setOf(Operation.Trim, Operation.Remux, Operation.Transcode)) listOf(Condition(ConditionOperator.Equals,
                 "wasmAudioProfile", Value.Text("absent-or-AAC-LC-stereo-with-original-channelcount2-no-mono-header-normalization"))) else emptyList()) }) }.let { caps ->
         caps.copy(operations = caps.operations.map { entry -> if (entry.operation == Operation.Transcode) entry.copy(conditions = entry.conditions +

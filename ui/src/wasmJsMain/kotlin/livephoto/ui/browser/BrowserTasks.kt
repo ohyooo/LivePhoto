@@ -4,17 +4,16 @@ package livephoto.ui.browser
 
 import kotlin.js.*
 import kotlinx.coroutines.*
-import org.khronos.webgl.ArrayBuffer
 import org.w3c.files.Blob
 
 internal external interface TaskReply : JsAny {
     val report: String
     val failed: Boolean
     val code: String?
-    val bytes: ArrayBuffer?
+    val bytes: Blob?
     val mime: String?
     val name: String?
-    val second: ArrayBuffer?
+    val second: Blob?
     val secondMime: String?
     val secondName: String?
     val review: String?
@@ -36,7 +35,7 @@ internal fun taskOptions(kind: String, reference: String, protocol: String = "",
     end: String = "", endScale: String = "", review: String = "", imageName: String = "", videoName: String = "", publication: String = ""): JsAny =
     js("({kind,reference,protocol,profile,time,scale,end,endScale,review,imageName,videoName,publication})")
 private fun taskFiles(first: Blob, second: Blob?): JsAny = js("second ? [first,second] : [first]")
-internal fun taskBlob(bytes: ArrayBuffer, mime: String): Blob = js("new Blob([bytes],{type:mime})")
+internal fun taskBlob(bytes: Blob, mime: String): Blob = js("bytes.slice(0,bytes.size,mime)")
 private fun cancelledReply(): TaskReply = js("({report:'',failed:true,code:'CANCELLED'})")
 private fun timeoutReply(): TaskReply = js("({report:'',failed:true,code:'TIMEOUT'})")
 
@@ -77,7 +76,7 @@ internal fun taskFailure(kind: String, response: TaskReply): String {
     val reason = when (code) {
         "CANCELLED" -> "已取消处理；修复需要重新预览。"
         "RESOURCE_LIMIT_EXCEEDED" -> if (kind in setOf("Probe", "Remux", "Trim", "ExtractFrame", "Transcode"))
-            "媒体预处理输入超过 256 MiB，未读取文件。" else if (kind == "Create")
+            "媒体预处理输入超过 512 MiB，未读取文件。" else if (kind == "Create")
             "图片与当前视频合计须小于 32 MiB；请先裁剪视频。未读取文件。" else "输入超过 32 MiB，未读取文件。"
         "TIMEOUT" -> "处理超过 120 秒，后台任务已终止。"
         else -> "无法完成后台任务，请重试。"

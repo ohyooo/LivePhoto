@@ -16,14 +16,14 @@ function result(value) {
   const assets = Array.from(value.assets, asset => ({
     id: asset.id, role: asset.role, mime: asset.mime, byteLength: asset.byteLength,
     digest: asset.digest, recommendedName: asset.recommendedName,
-    blob: new Blob([asset.bytes], { type: asset.mime }),
+    blob: asset.blob,
   }));
   return {
     success, code, stage, message, protocol, verdict, coverage, mime,
     issues: Array.from(issues),
     report: value.reportJson ? JSON.parse(value.reportJson) : null,
     assets,
-    blob: value.bytes == null ? null : assets.length === 1 ? assets[0].blob : new Blob([value.bytes], { type: mime }),
+    blob: value.blob ?? null,
   };
 }
 
@@ -47,7 +47,7 @@ export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs
   if(runtime.origin!==globalThis.location.origin)throw new TypeError('Media runtime must be same-origin');
   const run=async(input,action,{start=0,end=0,authorizeTranscode=false}={})=>{
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<0||start>60||end>60||typeof authorizeTranscode!=='boolean')throw new TypeError('Invalid media range or authorization');
-    const data=source(input,256*1024*1024);
+    const data=source(input,512*1024*1024);
     const executor=async(args,offset,length,previous,name,timeout,cancelled)=>{
       if(!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>input.size)throw Error('Unbound media extent');
       const view=offset===0&&length===input.size?input:input.slice(offset,offset+length);

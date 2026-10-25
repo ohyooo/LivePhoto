@@ -11,7 +11,7 @@ import livephoto.core.memory.*
 private const val INPUT_LIMIT: Int = 32 * 1024 * 1024
 private const val OUTPUT_LIMIT: Int = 48 * 1024 * 1024
 
-/** JS-safe DTO. Binary data is Int8Array; no Kotlin handles or ULong escape. */
+/** JS-safe DTO. Verified outputs are immutable Blobs; no Kotlin handles or ULong escape. */
 @JsExport
 public class WebResult(
     public val success: Boolean,
@@ -22,7 +22,7 @@ public class WebResult(
     public val verdict: String = "",
     public val coverage: String = "",
     public val mime: String = "",
-    public val bytes: ByteArray? = null,
+    public val blob: dynamic = null,
     public val issues: Array<String> = emptyArray(),
     public val reportJson: String = "",
     public val assets: Array<WebAsset> = emptyArray(),
@@ -30,7 +30,18 @@ public class WebResult(
 
 @JsExport
 public class WebAsset(public val id: String, public val role: String, public val mime: String,
-    public val byteLength: String, public val digest: String, public val recommendedName: String?, public val bytes: ByteArray)
+    public val byteLength: String, public val digest: String, public val recommendedName: String?, public val blob: dynamic)
+
+private fun outputBlob(bytes: Bytes, mime: String): dynamic {
+    val parts: dynamic = js("[]")
+    var offset = 0
+    while (offset < bytes.size) {
+        val end = minOf(offset + 65536, bytes.size)
+        parts.push(bytes.slice(offset, end).toByteArray())
+        offset = end
+    }
+    return js("new Blob(parts, {type: mime})")
+}
 
 private fun context(inputLimit: Int = INPUT_LIMIT): Context = Context(Limits(inputLimit.toULong(), OUTPUT_LIMIT.toULong()))
 internal fun failure(error: CoreError): WebResult = WebResult(false, error.code.value, error.stage.name, error.message,
@@ -54,9 +65,9 @@ internal fun operation(result: OperationResult, output: MemoryOutputTransaction,
     report: String = reportJson(operationReport(result))): WebResult {
     val committed = output.committedAssets()
     val assets = result.output.assets.map { asset -> WebAsset(asset.id.value, asset.role.name, asset.mime,
-        asset.byteLength.toString(), asset.digest.value, asset.recommendedName, committed.getValue(asset.id).toByteArray()) }.toTypedArray()
+        asset.byteLength.toString(), asset.digest.value, asset.recommendedName, outputBlob(committed.getValue(asset.id), asset.mime)) }.toTypedArray()
     return WebResult(true, protocol = protocol, verdict = result.validation.verdict.name, coverage = result.validation.coverage.name,
-        mime = assets.singleOrNull()?.mime.orEmpty(), bytes = assets.singleOrNull()?.bytes, assets = assets,
+        mime = assets.singleOrNull()?.mime.orEmpty(), blob = assets.singleOrNull()?.blob, assets = assets,
         reportJson = report,
         issues = (result.issues + result.validation.issues + result.preservation.issues).map { it.code.value }.distinct().toTypedArray())
 }
@@ -200,12 +211,12 @@ public fun extractVideo(input: dynamic): Promise<WebResult> = read(input) { sour
                 extracted = result.value
                 val asset = result.value.output.assets.singleOrNull { it.role == AssetRole.MotionVideo }
                     ?: return@read invalid("CAPABILITY_UNSUPPORTED", "Expected one embedded motion video")
-                val bytes = output.committedAssets().getValue(asset.id).toByteArray()
-                WebResult(true, mime = asset.mime, bytes = bytes, reportJson = reportJson(operationReport(result.value)),
+                val blob = outputBlob(output.committedAssets().getValue(asset.id), asset.mime)
+                WebResult(true, mime = asset.mime, blob = blob, reportJson = reportJson(operationReport(result.value)),
                     verdict = result.value.validation.verdict.name, coverage = result.value.validation.coverage.name,
                     issues = (result.value.issues + result.value.validation.issues + result.value.preservation.issues).map { it.code.value }.distinct().toTypedArray(),
                     assets = arrayOf(WebAsset(asset.id.value, asset.role.name, asset.mime, asset.byteLength.toString(),
-                        asset.digest.value, asset.recommendedName, bytes)))
+                        asset.digest.value, asset.recommendedName, blob)))
             }
         }
     } finally { extracted?.output?.assets?.forEach { it.readableSource?.close() } }
