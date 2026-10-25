@@ -559,13 +559,28 @@ try {
       check(label+':repair-'+target+'-idempotent-no-output',downloads===prior+1&&again.includes('无需修改（未写入）')&&await repairCannotApply());
     }
     const oplus=analysisInputs.find(p=>p.target==='oplus.olive');
-    let oplusRefused=true;
-    for(const output of [oplus.output,damageField(oplus.output,oplus.target)]) {
-      const prior=downloads;
-      const report=await previewRepair({name:'oplus-repair.jpg',mimeType:'image/jpeg',buffer:output});
-      oplusRefused&&=downloads===prior&&report.includes('REPAIR_AMBIGUOUS')&&await repairCannotApply();
-    }
-    check(label+':repair-oplus-refused-no-output',oplusRefused);
+    const beforeOplus=downloads;
+    const oplusNoop=await previewRepair({name:'oplus-valid.jpg',mimeType:'image/jpeg',buffer:oplus.output});
+    const oplusNoopSafe=downloads===beforeOplus&&oplusNoop.includes('无需修改（未写入）')&&await repairCannotApply();
+    const damagedOplus=damageField(oplus.output,oplus.target);
+    const oplusPreview=await previewRepair({name:'oplus-damaged.jpg',mimeType:'image/jpeg',buffer:damagedOplus});
+    const pendingOplus=page.waitForEvent('download');pendingOplus.catch(()=>{});
+    await driver.click('应用修复并另存');
+    const oplusDownload=await pendingOplus;
+    if(await oplusDownload.failure())throw Error('Oplus zero-padding repair download failed');
+    const repairedOplus=await readFile(await oplusDownload.path());
+    await text(/已应用修复并发起下载/).waitFor({state:'attached'});
+    const oplusAudit=await page.evaluate(async data=>{
+      const api=await import('/api/livephoto.mjs'),blob=new Blob([new Uint8Array(data)]);
+      const validation=await api.validateLivePhoto(blob),video=await api.extractVideo(blob),again=await api.repairLivePhoto(blob);
+      if(!video.success)throw Error(video.message);
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await video.blob.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
+      return {valid:validation.success&&validation.verdict!=='Invalid'&&validation.coverage==='Complete',digest,
+        noop:again.success&&!again.report.proposedChanges.length&&!again.report.blocked.length&&!again.assets.length&&!again.blob};
+    },Array.from(repairedOplus));
+    check(label+':repair-oplus-zero-padding-preserving',oplusNoopSafe&&downloads===beforeOplus+1&&
+      oplusPreview.includes(createHash('sha256').update(damagedOplus).digest('hex'))&&
+      oplusAudit.valid&&oplusAudit.noop&&oplusAudit.digest===videoHash&&await repairCannotApply());
     const v1=analysisInputs.find(p=>p.target==='google.microvideo.v1');
     const invalidKey=damageField(v1.output,v1.target,true),priorBlocked=downloads;
     const blocked=await previewRepair({name:'blocked-key.jpg',mimeType:'image/jpeg',buffer:invalidKey});

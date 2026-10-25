@@ -123,7 +123,7 @@ class GoogleCoreMutationTest {
     }
 
     @Test
-    fun unresolvedMpfExifAndExtendedPacketDependenciesBlockCleanInsteadOfDroppingMetadata(): Unit = runImmediate {
+    fun fixedSlotsRetainExifWithoutAuthorizingMpfOrUnknownAssociations(): Unit = runImmediate {
         val protectedSegments = listOf(
             GoogleFixtures.segment(0xe2, "MPF\u0000".encodeToByteArray() + byteArrayOf(1, 2, 3, 4)),
             GoogleFixtures.segment(0xe1, "Exif\u0000\u0000".encodeToByteArray() + GoogleFixtures.bytes(0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x7c, 0x92, 7, 0, 4, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0)),
@@ -133,11 +133,26 @@ class GoogleCoreMutationTest {
         val appLength = ((base[4].toInt() and 255) shl 8) or (base[5].toInt() and 255)
         val firstXmpEnd = 4 + appLength
         for ((index, segment) in protectedSegments.withIndex()) {
-            // EXIF follows the rewritten packet here: shrinking XMP actually moves its base.
+            // The fixed slot must keep following EXIF stationary, while MPF/Extended XMP stay gated.
             val carrier = base.copyOfRange(0, firstXmpEnd) + segment + base.copyOfRange(firstXmpEnd, base.size)
             val transaction = MemoryOutputTransaction(context, "protected-$index")
-            assertIs<CoreResult.Failure>(core.split(SplitRequest(input(carrier), output = transaction, context = context)), "Protected segment index=$index follows rewritten XMP")
-            assertTrue(transaction.committedAssets().isEmpty())
+            if (index == 1) {
+                val result = value(core.split(SplitRequest(input(carrier), output = transaction, context = context)))
+                try {
+                    val image = result.output.assets.single { it.role == AssetRole.PrimaryImage }
+                    val after = transaction.committedAssets().getValue(image.id).toByteArray()
+                    assertContentEquals(segment, after.copyOfRange(firstXmpEnd, firstXmpEnd + segment.size))
+                    assertTrue(result.preservation.records.any { it.assetId == image.id && it.guarantee == Guarantee.MetadataPreserving && it.outcome == GuaranteeOutcome.Unknown })
+                } finally { result.output.assets.forEach { it.readableSource?.close() } }
+                for (policy in listOf(MutationPolicy(preservation = PreservationPolicy.Strict), MutationPolicy(requiredGuarantees = listOf(Guarantee.MetadataPreserving)))) {
+                    val required = MemoryOutputTransaction(context, "following-exif-required")
+                    assertIs<CoreResult.Failure>(core.split(SplitRequest(input(carrier), policy = policy, output = required, context = context)))
+                    assertTrue(required.committedAssets().isEmpty())
+                }
+            } else {
+                assertIs<CoreResult.Failure>(core.split(SplitRequest(input(carrier), output = transaction, context = context)), "Protected segment index=$index follows rewritten XMP")
+                assertTrue(transaction.committedAssets().isEmpty())
+            }
         }
         val exif = protectedSegments[1]
         val stationary = base.copyOfRange(0, 2) + exif + base.copyOfRange(2, base.size)

@@ -110,10 +110,8 @@ try {
       check(target + ':same-target-exact', same.success && await digest(same.blob) === carrierHash);
       for (const other of ['oplus.olive','google.motionphoto.v2','google.microvideo.v1'].filter(p => p !== target)) {
         const converted = await api.convertLivePhoto(created.blob, {target:other});
-        // Fresh upstream-compatible Oplus puts XMP before EXIF. Core deliberately
-        // refuses a conversion that would resize that slot and move unverified EXIF.
-        // Preserve its contract; the Web adapter must not authorize loss or transcode.
-        if (target === 'oplus.olive') {
+        // V1 fits this original slot; the larger V2 rewrite still cannot move EXIF.
+        if (target === 'oplus.olive' && other === 'google.motionphoto.v2') {
           check(target + ':convert-blocked-exif-' + other,
             !converted.success && converted.code === 'UNSAFE_METADATA_REWRITE' && converted.stage === 'Parse' &&
             converted.assets.length === 0 && converted.blob === null && converted.report.kind === 'Error' &&
@@ -128,23 +126,6 @@ try {
           converted.report.preservation.records.length > 0,
           JSON.stringify({success:converted.success,code:converted.code,stage:converted.stage,message:converted.message,
             protocol:converted.protocol,detected:convertedDetection?.protocol,videoHash:convertedVideoHash,expectedVideoHash:beforeVideo,report:converted.report}));
-      }
-      if (target === 'oplus.olive') {
-        // Core intentionally excludes this writer's explicit secondary Padding=0
-        // repair dialect. Do not broaden protocol writes in a Web adapter task.
-        const damaged = await corruptLength(created.blob, target), damagedHash = await digest(damaged);
-        for (const [name, input, options] of [
-          ['repair-existing-layout-refused',created.blob,{}],
-          ['repair-damaged-layout-refused',damaged,{}],
-          ['repair-filtered-layout-refused',damaged,{dryRun:false,allowedIssueCodes:['OTHER_ISSUE']}],
-          ['repair-apply-layout-refused',damaged,{dryRun:false}],
-        ]) {
-          const refused = await api.repairLivePhoto(input, options);
-          check(target + ':' + name, !refused.success && refused.code === 'REPAIR_AMBIGUOUS' && refused.stage === 'Plan' &&
-            refused.report.kind === 'Error' && refused.assets.length === 0 && refused.blob === null, JSON.stringify(refused));
-        }
-        check(target + ':repair-refused-input-immutable', await digest(created.blob) === carrierHash && await digest(damaged) === damagedHash);
-        continue;
       }
       const unchangedRepair = await api.repairLivePhoto(created.blob, {dryRun:false});
       check(target + ':repair-valid-noop', unchangedRepair.success && unchangedRepair.report.kind === 'Repair' &&

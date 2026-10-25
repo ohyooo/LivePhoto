@@ -16,9 +16,11 @@ class OplusRepairTest {
     @Test fun dAndVIndependentEvidenceMatrixPreviewStrictApplyAndSecondNoOp(): Unit = runImmediate {
         val cases = listOf(null to size, "0" to size, "1" to size, (size.toInt() + 1).toString() to size,
             size to null, size to "0", size to (size.toInt() + 1).toString(), "1" to "1", null to null, "0" to "0")
-        for ((index, lengths) in cases.withIndex()) {
+        for ((index, variant) in cases.flatMap { lengths -> listOf(null, "0").map { padding -> lengths to padding } }.withIndex()) {
+            val (lengths, padding) = variant
             val source = input(OplusFixtures.photo(directoryLength = lengths.first, videoLength = lengths.second,
-                googleTimestamp = "40000", vendorTimestamp = "0", extra = "<p:Copyright xmlns:p='urn:ordinary'>kept</p:Copyright>"))
+                googleTimestamp = "40000", vendorTimestamp = "0", secondaryPadding = padding,
+                extra = "<p:Copyright xmlns:p='urn:ordinary'>kept</p:Copyright>"))
             val before = SourceSession.open(source, context, ParseBudget(context), probeEmbeddedVideo = false).orThrow()
             val previewTx = MemoryOutputTransaction(context, "oplus-preview-$index")
             val request = RepairRequest(source, output = previewTx, context = context)
@@ -60,7 +62,9 @@ class OplusRepairTest {
             OplusFixtures.photo(directoryLength = "1", version = "3"),
             OplusFixtures.photo(directoryLength = "1", videoLength = "-1"),
             OplusFixtures.photo(directoryLength = "1", extra = "<o:Unknown>keep</o:Unknown>"),
-            OplusFixtures.photo(directoryLength = "1", secondaryPadding = "0"),
+            OplusFixtures.photo(directoryLength = "1", secondaryPadding = "1"),
+            OplusFixtures.photo(directoryLength = "1", secondaryPadding = "-1"),
+            OplusFixtures.photo(directoryLength = "1", secondaryPadding = "00"),
             OplusFixtures.photo(directoryLength = "1", extra = "<o:OLivePhotoVersion>2</o:OLivePhotoVersion>"),
             OplusFixtures.photo(directoryLength = "1", extra = "<o:VideoLength>$size</o:VideoLength>"),
             OplusFixtures.photo(directoryLength = "1", extra = "<camera:MotionPhoto>1</camera:MotionPhoto>"),

@@ -65,7 +65,8 @@ internal object GoogleJpegWriter {
         val original = jpeg.segments.filter { it.payloadKind == AppPayloadKind.Xmp }
         if (original.size > 1) fail("UNSAFE_METADATA_REWRITE", "Multiple XMP packets need explicit authority")
         val slot = original.singleOrNull()?.payload?.length?.let { checkedInt(it) - header.size }
-        val packet = if (slot != null) XmpWriter.fitPacket(xml, slot, context).orThrow() else xml
+        // Opaque MPF/GainMap graphs need their own proof, even when a packet could fit.
+        val packet = if (slot != null && !jpeg.hasMpf) XmpWriter.fitPacket(xml, slot, context).orThrow() else xml
         val length = checkedAdd(header.size.toULong(), packet.size.toULong())
         if (length > 65_533uL) fail("VALUE_NOT_REPRESENTABLE", "Canonical XMP does not fit one JPEG APP1 segment")
         val payload = ByteArray(checkedInt(length))

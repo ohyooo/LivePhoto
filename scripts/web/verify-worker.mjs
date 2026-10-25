@@ -48,10 +48,7 @@ onmessage = async ({data: {image, video}}) => {
         ? !converted.success && converted.code === 'UNSAFE_METADATA_REWRITE' && converted.blob === null && converted.assets.length === 0
         : converted.success && (await api.detectLivePhoto(converted.blob)).protocol === other &&
           await digest((await api.extractVideo(converted.blob)).blob) === videoHash, converted);
-      if (target === 'oplus.olive') {
-        const refused = await api.repairLivePhoto(created.blob, {dryRun: false});
-        check(target + ':repair', !refused.success && refused.code === 'REPAIR_AMBIGUOUS' && refused.blob === null && refused.assets.length === 0, refused);
-      } else {
+      {
         // Corrupt only an owned decimal length, preserving segment sizes/media.
         const bytes = new Uint8Array(await created.blob.arrayBuffer());
         const header = new TextDecoder('latin1').decode(bytes.slice(0, bytes.length - video.size));

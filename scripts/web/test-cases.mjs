@@ -12,7 +12,7 @@ export const uiCases={
   convert:['convert-oplus.olive-to-google.motionphoto.v2','convert-google.motionphoto.v2-to-oplus.olive','convert-google.microvideo.v1-to-google.microvideo.v1',
     ...invalid.map(p=>'convert-'+p+'-no-output'),'convert-clears-stale-report','convert-preserves-analysis-and-create-state'],
   repair:[...['valid-no-output','preview-no-output','applied-preserving','idempotent-no-output'].map(c=>'repair-google.microvideo.v1-'+c),
-    'repair-oplus-refused-no-output','repair-blocked-key-no-output','repair-source-changed-no-output',...invalid.map(p=>'repair-'+p+'-no-output'),
+    'repair-oplus-zero-padding-preserving','repair-blocked-key-no-output','repair-source-changed-no-output',...invalid.map(p=>'repair-'+p+'-no-output'),
     'repair-selection-state-isolated','repair-preserves-analysis-and-create-state'],
   key:['key-google.microvideo.v1-preserving','key-oplus.olive-refused','key-invalid-value-no-output','key-outside-no-output',
     ...invalid.map(p=>'key-'+p+'-no-output'),'key-selection-state-isolated','key-preserves-analysis-and-create-state'],
@@ -23,11 +23,10 @@ const playerCases=['tools-collapsed-by-default','aspect-and-viewport','controls-
 const themeCases=['default-follows-dark-browser','browser-preference-updates-rendering','toggle-in-top-right','manual-toggle-keeps-selected-media',
   'manual-override-is-respected','reload-follows-browser-again'];
 const browserCases=protocols.flatMap(p=>['create','detect','validate','extract','inputs-immutable','embedded-video','inspect-layout','analyze-no-media-backend',
-  'key-position','clean-split-assets','same-target-exact'].map(n=>p+':'+n).concat(protocols.filter(q=>q!==p).map(q=>p+':'+(p==='oplus.olive'?'convert-blocked-exif-':'convert-to-')+q)))
+  'key-position','clean-split-assets','same-target-exact'].map(n=>p+':'+n).concat(protocols.filter(q=>q!==p).map(q=>p+':'+(p==='oplus.olive'&&q==='google.motionphoto.v2'?'convert-blocked-exif-':'convert-to-')+q)))
   .concat(['ordinary-jpeg-is-not-live','unknown-target-rejected','swapped-content-rejected','truncated-video-no-output','budget-rejected-before-reading',
     'invalid-js-input-rejected','convert-unknown-target-no-assets','convert-ordinary-is-not-create','inspect-unknown-and-malformed-structured-results','convert-target-required'])
-  .concat(protocols.flatMap(p=>(p==='oplus.olive'?['repair-existing-layout-refused','repair-damaged-layout-refused','repair-filtered-layout-refused','repair-apply-layout-refused','repair-refused-input-immutable']:
-    ['repair-valid-noop','repair-dry-run','repair-filter-blocked','repair-applied-preserving','repair-idempotent-no-output']).map(n=>p+':'+n)))
+  .concat(protocols.flatMap(p=>['repair-valid-noop','repair-dry-run','repair-filter-blocked','repair-applied-preserving','repair-idempotent-no-output'].map(n=>p+':'+n)))
   .concat(['repair-invalid-options-rejected','repair-budget-before-reading','repair-ordinary-no-output','repair-malformed-no-output','repair-ambiguous-suffix-no-output']);
 const sizes=['mobile','wide'];
 export const testPlan=[

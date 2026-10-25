@@ -232,10 +232,11 @@ internal object RepairOperations {
             item
         }
         val primary = items.first(); val motion = items.last()
+        val oplusZeroPadding = oplus && motion.attribute(ITEM_URI, "Padding") == "0"
         if (primary.attribute(ITEM_URI, "Semantic") != "Primary" || primary.attribute(ITEM_URI, "Mime") != "image/jpeg" ||
             primary.attribute(ITEM_URI, "Length") !in setOf(null, "0") || primary.attribute(ITEM_URI, "Padding") !in setOf(null, "0") ||
             motion.attribute(ITEM_URI, "Semantic") != "MotionPhoto" || motion.attribute(ITEM_URI, "Mime") !in setOf("video/mp4", "video/quicktime") ||
-            motion.attribute(ITEM_URI, "Padding") != (if (vivo) "0" else null) ||
+            motion.attribute(ITEM_URI, "Padding") != (if (vivo || oplusZeroPadding) "0" else null) ||
             vivo && (primary.attribute(ITEM_URI, "Length") != null || primary.attribute(ITEM_URI, "Padding") != null || motion.attribute(ITEM_URI, "Mime") != "video/mp4") ||
             oplus && motion.attribute(ITEM_URI, "Mime") != "video/mp4")
             fail("REPAIR_AMBIGUOUS", "Only zero-padding ordinary JPEG plus a final sole video is repairable", Stage.Plan)
@@ -246,17 +247,17 @@ internal object RepairOperations {
         // fully checked original inline graph above already proves the zero-padding
         // dialect, so report that existing fact in the preview, not as a new issue
         // caused by the length repair. Keep the publication regression guard intact.
-        val dialect = if (vivo) listOf(
+        val dialect = if (vivo || oplusZeroPadding) listOf(
             Issue(IssueCode("MALFORMED_XMP"), Severity.Warning, Layer.Compatibility,
                 Location(source = session.snapshot.identities.single().id, selector = "{$ITEM_URI}Padding")),
             Issue(IssueCode("MALFORMED_XMP"), Severity.Error, Layer.Protocol,
                 Location(source = session.snapshot.identities.single().id, selector = "{$ITEM_URI}Padding"))) else emptyList()
         val before = (session.inspection.issues + dialect).distinct()
         val fixable = setOf("MOTION_VIDEO_LENGTH_MISMATCH", "OFFSET_OUT_OF_BOUNDS", "MISSING_REQUIRED_XMP") + if (oplus) setOf("MOTION_VIDEO_MISSING") else emptySet()
-        // The checked vivo dialect explicitly requires zero Motion Padding. Do not suppress
-        // any other malformed-XMP error or apply this exception to a generic Google carrier.
+        // Only the checked vendor dialects admit this exact zero Motion Padding spelling.
+        // Other malformed-XMP errors and generic Google carriers retain their original gates.
         val unrelated = before.filter { issue ->
-            val knownPaddingDialect = vivo && issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Protocol && issue.location?.selector == "{$ITEM_URI}Padding"
+            val knownPaddingDialect = (vivo || oplusZeroPadding) && issue.code.value == "MALFORMED_XMP" && issue.layer == Layer.Protocol && issue.location?.selector == "{$ITEM_URI}Padding"
             issue.severity == Severity.Error && issue.code.value !in fixable && !knownPaddingDialect || issue.code.value in setOf("CAPABILITY_UNSUPPORTED", "UNKNOWN_PROTOCOL_VARIANT", "CONFLICTING_METADATA")
         }
         if (unrelated.isNotEmpty()) return Prepared(session, RepairResult(before, emptyList(), emptyList(), before, blocked = unrelated), protocol = protocol)
