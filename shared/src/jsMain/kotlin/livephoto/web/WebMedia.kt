@@ -37,10 +37,10 @@ public fun processMedia(input: dynamic, action: String, executor: dynamic, start
             is CoreResult.Failure -> return@MemoryFfmpegExecutor MemoryFfmpegResult(FfmpegProcessResult(null, "", ioFailed = true))
             is CoreResult.Success -> resolved.value
         }
-        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), range.offset.toDouble(), range.length.toDouble(), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
+        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), range.offset.toDouble(), range.length.toDouble(), previous?.let { outputBlob(it, "application/octet-stream") }, name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
         MemoryFfmpegResult(FfmpegProcessResult((response.code as? Int), response.output as String,
             response.outputLimited as Boolean, response.cancelled as Boolean, response.timedOut as Boolean, response.ioFailed as Boolean),
-            (response.bytes as? ByteArray)?.let(::Bytes))
+            (response.chunks as? Array<ByteArray>)?.let { Bytes.fromChunks(it.asSequence()) })
     })
     val core = DefaultLivePhotoCore(backend)
     val ref = ResourceRef(SourceSet.Single(source))

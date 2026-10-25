@@ -19,11 +19,14 @@ export async function guardMediaInput(input) {
     if(message.type==='WRITE_FILE'&&['input.bin','/input/input.bin'].includes(message.data.path)){
       stats.inputWrites++;throw Error('Media input copied to MEMFS');
     }
-    if(message.type==='MOUNT'){
-      const {fsType,options,mountPoint}=message.data;
-      if(fsType!=='WORKERFS'||mountPoint!=='/input'||options.blobs?.length!==1||
-        options.blobs[0].name!=='input.bin'||!(options.blobs[0].data instanceof Blob))throw Error('Invalid media mount');
-      if(options.blobs[0].data===input)stats.mounts++;
+    if(message.type==='execute'){
+      if(!(message.input instanceof Blob)||!(message.stage instanceof FileSystemDirectoryHandle)||
+        (message.previousOutput!=null&&!(message.previousOutput instanceof Blob)))throw Error('Invalid disk media job');
+      if(message.input===input)stats.mounts++;
+      this.addEventListener('message',({data})=>{
+        if(data.type==='chunk'&&(!(data.bytes instanceof Int8Array)||data.bytes.length>65536))
+          throw Error('Unbounded media output transfer');
+      });
     }
     return post.call(this,message,...args);
   };

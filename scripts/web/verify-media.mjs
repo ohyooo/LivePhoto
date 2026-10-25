@@ -6,10 +6,12 @@ import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {verifyCoreUi} from './verify-core-ui.mjs';
+import {verifyStorage} from './verify-storage.mjs';
 
 const part=process.env.LIVEPHOTO_TEST_PART;
 const audioCase=/^aac-(mono|surround)-(remux|trim|transcode)$/.exec(part);
-if(!audioCase&&!['main','worker','mobile','wide'].includes(part))throw Error('Select media context');
+const storageCase=['storage-cleanup','storage-interruption','storage-failure'].includes(part);
+if(!audioCase&&!storageCase&&!['main','worker','mobile','wide'].includes(part))throw Error('Select media context');
 const directory=await mkdtemp(join(tmpdir(),'livephoto-web-media-'));
 const ffmpeg=process.env.LIVEPHOTO_FFMPEG;
 if(!ffmpeg) throw Error('Existing synthetic fixture generator required');
@@ -264,7 +266,8 @@ try {
     scope:'module-worker-production-kotlin-js-core-nested-ffmpeg-worker-native-packet-audit'};
   }
   if(['mobile','wide'].includes(part))wasmUi=await verifyCoreUi({browser,origin,coreSource,largeSource,inconsistentSource,imagePath,directory,probe,viewport:part});
-  const expected=audioCase?1:part==='main'?9:0;
+  if(storageCase)check(await verifyStorage({page,context,origin,part}),true);
+  const expected=audioCase||storageCase?1:part==='main'?9:0;
   if(checks.length!==expected||new Set(checks).size!==expected)throw Error('Incomplete media evidence');
   await writeFile(`ci-output/web-media-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,
     browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,worker,wasmUi,inputSha256:createHash('sha256').update(coreInput).digest('hex'),

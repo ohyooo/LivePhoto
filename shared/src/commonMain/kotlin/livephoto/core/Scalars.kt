@@ -3,8 +3,26 @@ package livephoto.core
 /** An immutable byte buffer. Neither the supplied array nor returned copies alias its storage. */
 public class Bytes private constructor(private val storage: List<ByteArray>, private val pageSize: Int, private val start: Int, public val size: Int) {
     public constructor(value: ByteArray) : this(listOf(value.copyOf()), maxOf(1, value.size), 0, value.size)
-    internal companion object {
+    public companion object {
         internal const val PAGE_SIZE: Int = 65536
+        /** Copies a stream of chunks into immutable pages, without a contiguous file-sized array. */
+        public fun fromChunks(chunks: Sequence<ByteArray>): Bytes {
+            val pages = mutableListOf<ByteArray>()
+            var size = 0
+            for (chunk in chunks) {
+                require(chunk.size <= Int.MAX_VALUE - size) { "Byte buffer exceeds supported size" }
+                var offset = 0
+                while (offset < chunk.size) {
+                    val within = size % PAGE_SIZE
+                    if (within == 0) pages.add(ByteArray(PAGE_SIZE))
+                    val count = minOf(PAGE_SIZE - within, chunk.size - offset)
+                    chunk.copyInto(pages.last(), within, offset, offset + count)
+                    size += count
+                    offset += count
+                }
+            }
+            return takePages(pages, size)
+        }
         /** Private fixed-size pages become immutable together with the transaction. */
         internal fun takePages(pages: List<ByteArray>, length: Int): Bytes {
             require(length >= 0 && pages.sumOf { it.size.toLong() } >= length)

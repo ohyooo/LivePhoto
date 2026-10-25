@@ -32,7 +32,7 @@ public class WebResult(
 public class WebAsset(public val id: String, public val role: String, public val mime: String,
     public val byteLength: String, public val digest: String, public val recommendedName: String?, public val blob: dynamic)
 
-private fun outputBlob(bytes: Bytes, mime: String): dynamic {
+internal fun outputBlob(bytes: Bytes, mime: String): dynamic {
     val parts: dynamic = js("[]")
     var offset = 0
     while (offset < bytes.size) {

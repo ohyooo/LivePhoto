@@ -193,11 +193,11 @@ private suspend fun execute(request: Request): Reply {
 
 private external interface MediaProcess : JsAny {
     val code: Int?; val output: String; val outputLimited: Boolean
-    val cancelled: Boolean; val timedOut: Boolean; val ioFailed: Boolean; val bytes: Int8Array?
+    val cancelled: Boolean; val timedOut: Boolean; val ioFailed: Boolean; val chunks: JsArray<Int8Array>?
 }
 private fun arguments(): JsAny = js("[]")
 private fun append(args: JsAny, value: String): Unit = js("{ args.push(value); }")
-private fun executeMedia(args: JsAny, input: JsAny, offset: Double, length: Double, previous: Int8Array?, name: String, timeout: Double): Promise<MediaProcess> =
+private fun executeMedia(args: JsAny, input: JsAny, offset: Double, length: Double, previous: Blob?, name: String, timeout: Double): Promise<MediaProcess> =
     js("import(/* webpackIgnore: true */ new URL('../media/core-runtime.mjs', self.location.href).href).then(module => { if (!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>input.size) throw Error('Unbound media extent'); const view=offset===0&&length===input.size?input:input.slice(offset,offset+length); return module.executeCoreFfmpeg(JSON.stringify(args),view,previous,name,timeout); })")
 
 private suspend fun media(request: Request, source: BinarySource): Reply {
@@ -211,9 +211,12 @@ private suspend fun media(request: Request, source: BinarySource): Reply {
         }
         val args = arguments(); values.forEach { append(args, it) }
         val result = executeMedia(args, file(request.files, 0), range.offset.toDouble(), range.length.toDouble(),
-            previous?.let { Int8Array(buffer(it)) }, name, timeout.toDouble()).await()
+            previous?.let(::blob), name, timeout.toDouble()).await()
         MemoryFfmpegResult(FfmpegProcessResult(result.code, result.output, result.outputLimited, result.cancelled, result.timedOut, result.ioFailed),
-            result.bytes?.let { array -> Bytes(ByteArray(array.length) { byte(array, it) }) })
+            result.chunks?.let { chunks -> Bytes.fromChunks((0 until chunks.length).asSequence().map { index ->
+                val array = chunks[index]!!
+                ByteArray(array.length) { byte(array, it) }
+            }) })
     }))
     val start = Time(options.time.toLong(), options.scale.toUInt())
     val end = Time(options.end.toLong(), options.endScale.toUInt())

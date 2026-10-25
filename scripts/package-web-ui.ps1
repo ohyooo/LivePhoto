@@ -16,16 +16,6 @@ New-Item -ItemType Directory -Path $media -Force | Out-Null
 Copy-Item scripts/web/media/*.mjs $media
 $vendor = Join-Path $media 'vendor'
 New-Item -ItemType Directory -Path $vendor -Force | Out-Null
-foreach ($package in @('ffmpeg')) {
-    $npm = "scripts/web/node_modules/@ffmpeg/$package"
-    if (-not (Test-Path "$npm/dist/esm")) { throw "Install pinned browser media dependencies before packaging: $package" }
-    $packageDirectory = Join-Path $vendor $package
-    New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
-    Get-ChildItem "$npm/dist/esm" -File | Where-Object { $_.Extension -in @('.js', '.wasm') } |
-        Copy-Item -Destination $packageDirectory
-    if (-not (Test-Path "$npm/package.json")) { throw "Missing package provenance: $package" }
-    Copy-Item "$npm/package.json" (Join-Path $vendor "$package-package.json")
-}
 Copy-Item scripts/web/media/THIRD-PARTY.txt $media
 Copy-Item scripts/web/media/ffmpeg-wrapper-LICENSE.txt $media
 Copy-Item scripts/web/media/ffmpeg-core-GPL-2.0.txt $media

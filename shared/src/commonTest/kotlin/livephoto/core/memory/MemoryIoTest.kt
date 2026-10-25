@@ -4,6 +4,20 @@ import livephoto.core.*
 import kotlin.test.*
 
 class MemoryIoTest {
+    @Test
+    fun chunkAssemblyCopiesReusedBuffersAcrossPageBoundaries() {
+        val chunk = ByteArray(40001)
+        val bytes = Bytes.fromChunks(sequence {
+            repeat(4) { index -> chunk.fill(index.toByte()); yield(chunk) }
+            yield(byteArrayOf())
+        })
+        chunk.fill(99)
+        assertEquals(160004, bytes.size)
+        for (index in 0 until bytes.size) assertEquals((index / 40001).toByte(), bytes[index])
+        assertContentEquals(ByteArray(20) { if (it < 10) 0 else 1 }, bytes.slice(39991, 40011).toByteArray())
+        assertEquals(Bytes(byteArrayOf()), Bytes.fromChunks(emptySequence()))
+    }
+
     private fun context(output: ULong = 1024uL, cancellation: Cancellation? = null) =
         Context(Limits(1024uL, output), cancellation = cancellation)
     private fun spec(role: AssetRole = AssetRole.PrimaryImage) = OutputAssetSpec(role, mime = "application/octet-stream")

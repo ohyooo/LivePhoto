@@ -1,6 +1,6 @@
 Optional browser media backend (loaded only when editing is requested)
 
-@ffmpeg/ffmpeg 0.12.15: MIT
+ffmpeg.wasm v12.15 engine bindings and build scripts: MIT
 Source and build scripts: https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v12.15
 License: https://github.com/ffmpegwasm/ffmpeg.wasm/blob/v12.15/LICENSE
 
@@ -10,7 +10,8 @@ Upstream licensing: https://ffmpegwasm.netlify.app/docs/overview/#license
 FFmpeg source and license: https://ffmpeg.org/download.html and https://ffmpeg.org/legal.html
 Included GPL v2 text: https://github.com/FFmpeg/FFmpeg/blob/n5.1.4/COPYING.GPLv2
 
-The wrapper is an unmodified npm distribution. The engine is rebuilt from
+The npm Worker wrapper is not included; disk-worker.mjs is the project's IO adapter.
+The engine is rebuilt from
 FFmpeg n5.1.4 with the ffmpeg.wasm v12.15 single-thread CLI/toolchain and x264.
 It backports FFmpeg n6.0 movenc.c channel-count emission, and only includes the
 libx264/mjpeg plus wrapped_avframe/pcm_s16le for null-output decode verification.

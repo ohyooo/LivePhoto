@@ -2,6 +2,5 @@
   "name": "livephoto-web-validation",
   "private": true,
   "type": "module",
-  "dependencies": { "@ffmpeg/ffmpeg": "0.12.15" },
   "devDependencies": { "playwright": "1.64.1" }
 }

@@ -229,6 +229,9 @@ jobs:
           - {suite: browser, part: main}
           - {suite: browser, part: worker}
           - {suite: media, part: main}
+          - {suite: media, part: storage-cleanup}
+          - {suite: media, part: storage-interruption}
+          - {suite: media, part: storage-failure}
           - {suite: media, part: worker}
           - {suite: media, part: mobile}
           - {suite: media, part: wide}
