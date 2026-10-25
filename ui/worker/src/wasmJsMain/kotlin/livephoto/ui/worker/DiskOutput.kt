@@ -77,7 +77,7 @@ internal class DiskSession {
                     }
                 }
             }
-        })
+        } })
         override fun capabilities(): OutputCapabilities = transaction.capabilities()
         override suspend fun create(spec: OutputAssetSpec): CoreResult<OutputHandle> = transaction.create(spec)
         override suspend fun prepare(): CoreResult<Unit> = transaction.prepare()
