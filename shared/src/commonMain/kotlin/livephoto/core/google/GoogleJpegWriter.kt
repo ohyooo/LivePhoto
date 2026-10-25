@@ -39,7 +39,7 @@ internal object GoogleJpegWriter {
         var bytes = if (packet == null) XmpWriter.create(updates.filterValues { it != null }.mapValues { it.value!! }, context).orThrow()
             else XmpWriter.merge(packet, updates, context).orThrow()
         if (target.protocol == ProtocolIds.GoogleV2) bytes = GoogleDirectoryWriter.append(XmpReader.parse(bytes, context).orThrow(), videoLength, mime, context, primaryPadding, motionPadding)
-        patch(jpeg, bytes, additionalPatches)
+        patch(jpeg, bytes, context, additionalPatches)
     }
 
     fun cleanPlan(session: SourceSession, context: Context, additionalPatches: List<JpegPatch> = emptyList(), verifiedSamsungPadding: Boolean = false): CoreResult<JpegRewritePlan> = attemptNow {
@@ -57,18 +57,20 @@ internal object GoogleJpegWriter {
         val packet = if (session.bindings.any { it.protocol == ProtocolIds.GoogleV2 }) removeDirectory(xmp.packets.single(), context) else xmp.packets.single()
         val fields = session.bindings.flatMap { it.ownedProperties }.filter { it != ExpandedName(CONTAINER_URI, "Directory") }.toSet()
         val bytes = XmpWriter.merge(packet, fields.associateWith { null }, context).orThrow()
-        patch(jpeg, bytes, additionalPatches)
+        patch(jpeg, bytes, context, additionalPatches)
     }
 
-    internal fun patch(jpeg: JpegStructure, xml: Bytes, additionalPatches: List<JpegPatch> = emptyList()): JpegRewritePlan {
+    internal fun patch(jpeg: JpegStructure, xml: Bytes, context: Context, additionalPatches: List<JpegPatch> = emptyList()): JpegRewritePlan {
         val header = XMP_HEADER.encodeToByteArray()
-        val length = checkedAdd(header.size.toULong(), xml.size.toULong())
-        if (length > 65_533uL) fail("VALUE_NOT_REPRESENTABLE", "Canonical XMP does not fit one JPEG APP1 segment")
-        val payload = ByteArray(checkedInt(length))
-        header.copyInto(payload); xml.copyInto(payload, header.size)
-        val app = JpegRewrite.appSegment(0xe1, Bytes(payload)).orThrow()
         val original = jpeg.segments.filter { it.payloadKind == AppPayloadKind.Xmp }
         if (original.size > 1) fail("UNSAFE_METADATA_REWRITE", "Multiple XMP packets need explicit authority")
+        val slot = original.singleOrNull()?.payload?.length?.let { checkedInt(it) - header.size }
+        val packet = if (slot != null) XmpWriter.fitPacket(xml, slot, context).orThrow() else xml
+        val length = checkedAdd(header.size.toULong(), packet.size.toULong())
+        if (length > 65_533uL) fail("VALUE_NOT_REPRESENTABLE", "Canonical XMP does not fit one JPEG APP1 segment")
+        val payload = ByteArray(checkedInt(length))
+        header.copyInto(payload); packet.copyInto(payload, header.size)
+        val app = JpegRewrite.appSegment(0xe1, Bytes(payload)).orThrow()
         val range = original.singleOrNull()?.range ?: ByteRange(jpeg.segments.firstOrNull { it.marker == 0xda }?.range?.offset ?: fail("CORRUPTED_CONTAINER", "JPEG has no scan header"), 0uL)
         return JpegRewrite.plan(jpeg, additionalPatches + JpegPatch(range, app)).orThrow()
     }

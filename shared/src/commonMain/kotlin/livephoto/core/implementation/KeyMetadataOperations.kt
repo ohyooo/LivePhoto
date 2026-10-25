@@ -122,7 +122,7 @@ internal object KeyMetadataOperations {
         val timestamp = microseconds(key.position!!).toString()
         val updates = session.bindings.associate { binding -> ExpandedName(CAMERA_URI, if (binding.protocol == ProtocolIds.GoogleV1) "MicroVideoPresentationTimestampUs" else "MotionPhotoPresentationTimestampUs") to timestamp }
         val xml = XmpWriter.merge(xmp.packets.single(), updates, request.context).orThrow()
-        val rewrite = GoogleJpegWriter.patch(jpeg, xml)
+        val rewrite = GoogleJpegWriter.patch(jpeg, xml, request.context)
         val changes = updates.map { (name, value) -> Change("{${name.uri}}${name.local}", xmp.scalar(name.uri, name.local).orThrow()?.let(Value::Text), Value.Text(value), "Set requested key photo timestamp without replacing the primary image", true) }
         return Prepared(session, rewrite, key, changes, ranges.single())
     }

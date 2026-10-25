@@ -52,7 +52,7 @@ internal object OplusJpegWriter {
             // Upstream WriteNativeAsync writes SOI, XMP APP1, then the prepared JPEG body.
             // Equal-offset insertions are deliberately ordered XMP before the new EXIF marker.
             JpegRewrite.plan(jpeg, listOf(JpegPatch(ByteRange(2uL, 0uL), app)) + additional).orThrow()
-        } else GoogleJpegWriter.patch(jpeg, xml, additional)
+        } else GoogleJpegWriter.patch(jpeg, xml, context, additional)
     }
 
     private fun upstreamCompatiblePacket(length: ULong, timestamp: Long, primaryPadding: ULong): Bytes = Bytes((

@@ -170,7 +170,7 @@ internal object RepairOperations {
             return Prepared(session, RepairResult(before, emptyList(), emptyList(), before, blocked = listOf(issue)))
         val replacement = XmpWriter.merge(xmp.packets.single(), mapOf(ExpandedName(CAMERA_URI, field) to target), request.context).orThrow()
         // Even a preview must pass the existing EXIF/MPF/XMP relocation gate.
-        val rewrite = GoogleJpegWriter.patch(jpeg, replacement)
+        val rewrite = GoogleJpegWriter.patch(jpeg, replacement, request.context)
         session.recheck()
         val change = Change("{$CAMERA_URI}$field", old?.let(Value::Text), Value.Text(target), "Unique verified complete video starts exactly after JPEG; offset is its byte length", true)
         return Prepared(session, RepairResult(before, listOf(change), emptyList(), before), rewrite)
@@ -301,7 +301,7 @@ internal object RepairOperations {
         val directoryXml = XmlWriter.write(XmlDocument(root, packet.document.nodes.map { if (it === packet.document.root) root else it }), request.context).orThrow()
         val xml = if (vendorIssue != null) XmpWriter.merge(XmpReader.parse(directoryXml, request.context).orThrow(),
             mapOf(ExpandedName(OPLUS_URI, "VideoLength") to target), request.context).orThrow() else directoryXml
-        val rewrite = GoogleJpegWriter.patch(jpeg, xml)
+        val rewrite = GoogleJpegWriter.patch(jpeg, xml, request.context)
         val exifProofs = if (oplus) session.exifComments.mapNotNull { facts ->
             when (val proof = ExifPositionIndependenceProof.prove(session.reader, facts.document.range, budget)) {
                 is CoreResult.Success -> proof.value

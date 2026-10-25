@@ -21,7 +21,7 @@ internal object VivoJpegWriter {
         val xml = XmpWriter.merge(packet, updates, context).orThrow()
         val reread = XmpReader.parse(xml, context).orThrow()
         for ((name, expected) in updates) if (reread.scalar(name.uri, name.local).orThrow() != expected) fail("POSTCONDITION_FAILED", "vivo scalar failed final readback")
-        GoogleJpegWriter.patch(jpeg, xml)
+        GoogleJpegWriter.patch(jpeg, xml, context)
     }
 
     fun cleanPlan(session: SourceSession, context: Context, budget: ParseBudget): CoreResult<JpegRewritePlan> = attemptNow {
@@ -46,7 +46,7 @@ internal object VivoJpegWriter {
         val xml = XmlWriter.write(XmlDocument(root, packet.document.nodes.map { if (it === packet.document.root) root else it }), context).orThrow()
         val fields = session.bindings.flatMap { it.ownedProperties }.filter { it != ExpandedName(CONTAINER_URI, "Directory") }.toSet()
         val clean = XmpWriter.merge(XmpReader.parse(xml, context).orThrow(), fields.associateWith { null }, context).orThrow()
-        GoogleJpegWriter.patch(jpeg, clean)
+        GoogleJpegWriter.patch(jpeg, clean, context)
     }
 
     /** Retains every ordinary node/qualifier; only the proven inline MotionPhoto item is removed. */

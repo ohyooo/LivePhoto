@@ -155,6 +155,26 @@ private fun scalarValue(property: XmpProperty): String {
 }
 
 internal object XmpWriter {
+    /** Consume/refill only outer XML whitespace; oversized/read-only packets keep relocation checks. */
+    fun fitPacket(bytes: Bytes, length: Int, context: Context): CoreResult<Bytes> = attemptNow {
+        if (length < 0 || length == bytes.size) return@attemptNow bytes
+        val document = XmpReader.parse(bytes, context).orThrow().document
+        val wrappers = document.nodes.filterIsInstance<XmlProcessingInstruction>().filter { it.target == "xpacket" }
+        val trailer = wrappers.lastOrNull()
+        if (wrappers.isNotEmpty() && (wrappers.size != 2 || !wrappers.first().content.startsWith("begin=") ||
+                trailer!!.content !in setOf("end=\"w\"", "end='w'") ||
+                document.nodes.indexOf(wrappers.first()) > document.nodes.indexOf(document.root) ||
+                document.nodes.indexOf(trailer) < document.nodes.indexOf(document.root))) return@attemptNow bytes
+        val nodes = document.nodes.filterNot { it is XmlText && it.text.all { character -> character in " \t\r\n" } }.toMutableList()
+        val canonical = XmlWriter.write(XmlDocument(document.root, nodes), context).orThrow()
+        if (canonical.size > length) return@attemptNow bytes
+        val position = if (trailer == null) nodes.indexOf(document.root) + 1 else nodes.indexOf(trailer)
+        nodes.add(position, XmlText(" ".repeat(length - canonical.size)))
+        val padded = XmlWriter.write(XmlDocument(document.root, nodes), context).orThrow()
+        if (padded.size != length) fail("POSTCONDITION_FAILED", "XMP packet does not fit its original slot", Stage.Plan)
+        padded
+    }
+
     /** Merge only explicitly named scalar properties; retain every ordinary/unknown node. */
     fun merge(packet: XmpPacket, updates: Map<ExpandedName, String?>, context: Context): CoreResult<Bytes> = attemptNow {
         if (packet.descriptions.isEmpty()) {
