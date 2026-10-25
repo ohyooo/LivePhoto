@@ -6,7 +6,8 @@ import {writeFile} from 'node:fs/promises';
 // Safari uses Apple's installed browser and driver, not Playwright WebKit.
 export async function launchBrowser(){
   const name=process.env.LIVEPHOTO_BROWSER||'chromium';
-  if(name==='chromium'||name==='firefox')return ({chromium,firefox})[name].launch({headless:true});
+  if(name==='chromium'||name==='firefox')return ({chromium,firefox})[name].launch({headless:process.env.LIVEPHOTO_HEADLESS!=='false',
+    ...(name==='firefox'?{firefoxUserPrefs:{'webgl.force-enabled':true}}:{})});
   if(name!=='safari'||process.platform!=='darwin')throw Error('Unsupported browser runner');
   const reserve=createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));
   const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
@@ -49,6 +50,9 @@ export async function launchBrowser(){
       },
       screenshot:async({path})=>writeFile(path,Buffer.from(await request('GET',`/session/${session}/screenshot`),'base64'))
     };
-    return {version:()=>version,close,newContext:async()=>({newPage:async()=>page,close:async()=>{}})};
+    return {version:()=>version,close,newContext:async(options={})=>{
+      if(options.viewport)await request('POST',`/session/${session}/window/rect`,options.viewport);
+      return {newPage:async()=>page,close:async()=>{}};
+    }};
   }catch(error){await close();throw error;}
 }

@@ -43,7 +43,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/web/verify-${{ matrix.scenario.suite }}.mjs 2>&1 | tee ci-output/web-compatibility.log
+          if [[ '${{ matrix.browser }}' == firefox && '${{ matrix.scenario.suite }}' == ui-boot ]]; then
+            LIVEPHOTO_HEADLESS=false LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a node scripts/web/verify-ui-boot.mjs 2>&1 | tee ci-output/web-compatibility.log
+          else
+            node scripts/web/verify-${{ matrix.scenario.suite }}.mjs 2>&1 | tee ci-output/web-compatibility.log
+          fi
       - name: Preserve evidence without media
         if: always()
         uses: actions/upload-artifact@v7

@@ -10,7 +10,14 @@ const server=createServer(async(req,res)=>{
     const path=resolve(root,'.'+(name==='/livephoto/'?'/index.html':name.slice('/livephoto'.length)));
     if(!path.startsWith(root+sep))throw Error('Outside app');
     res.setHeader('Content-Type',{'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.json':'application/json'}[extname(path)]||'application/octet-stream');
-    res.end(await readFile(path));
+    let body=await readFile(path);
+    if(extname(path)==='.html')body=body.toString().replace('<head>',`<head><script>
+      window.bootErrors=[];
+      addEventListener('error',e=>bootErrors.push(String(e.message)));
+      addEventListener('unhandledrejection',e=>bootErrors.push(String(e.reason?.stack||e.reason)));
+      const originalError=console.error;console.error=(...args)=>{bootErrors.push(args.map(String).join(' ').slice(0,4000));originalError(...args);};
+    </script>`);
+    res.end(body);
   }catch{res.writeHead(404).end();}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -26,7 +33,7 @@ try{
     const b=element.getBoundingClientRect();return b.width>0&&b.height>0?{x:b.x+b.width/2,y:b.y+b.height/2}:null;
   },name);
   try{await page.waitForFunction(()=>!!document.querySelector('canvas'));}
-  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
+  catch(error){console.error('UI_BOOT_STATE',await page.evaluate(()=>({errors:window.bootErrors,visibility:document.visibilityState,focus:document.hasFocus(),webgl2:!!document.createElement('canvas').getContext('webgl2'),text:document.body.innerText,html:document.body.innerHTML.slice(0,6000),resources:performance.getEntriesByType('resource').map(e=>e.name)})));await page.screenshot({path:'ci-output/web-ui-compatibility.png'});throw error;}
   await page.keyboard.press('Tab');
   await page.waitForFunction(()=>!!document.querySelector('#main-action'));
   const runtime=await page.evaluate(()=>performance.getEntriesByType('resource').some(e=>/livephoto-ui\.[a-f0-9]+\.wasm/.test(e.name)));
