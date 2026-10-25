@@ -10,7 +10,7 @@
 
 已按新设计接入“新建 / 照片工具”双页、800/1280 响应式列布局、三态主题、紧凑文件行和移除/重置确认、独立裁剪草稿与封面预览、折叠报告及显式复制。窗口变化、切页和主题切换应保留素材及编辑状态；待应用选段和失效封面阻止生成。未扩展协议、音频编码或媒体后端。
 
-当前已验收源码 `34253a7` 的 [Web CI 40148248112](https://github.com/ohyooo/LivePhoto/actions/runs/40148248112) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 811 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。真实 UI 检查还覆盖 Worker 启动、分块读取、模块加载与执行期间取消、迟到结果丢弃和重新操作。已由服务器直接下载产物并部署，保留旧版本；含独立 Worker Wasm 的全部 28 个静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，客户端返回 HTTP 200，原首页保持不变。这不代表所有浏览器/手机相册兼容。
+当前已验收源码 `3c5966a` 的 [Web CI 40149248507](https://github.com/ohyooo/LivePhoto/actions/runs/40149248507) 全部 32 个 job 通过：312 项外围检查（70 协议＋130 UI＋9 媒体＋91 播放器＋12 主题），JS/Wasm 公共 Kotlin 测试各 812 项、零失败零跳过；协议/媒体 Worker 的 42/9 项及类型化 Wasm 媒体 UI 的 18 项另列。四份正式产物的内外层哈希、同次提交身份与 32 张合成截图已核验。真实 UI 检查还覆盖 Worker 启动、分块读取、模块加载与执行期间取消、迟到结果丢弃和重新操作。已由服务器直接下载产物并部署，保留旧版本；含独立 Worker Wasm 的全部 28 个静态文件通过正常域名 HTTPS 字节哈希、类型及证书校验，客户端返回 HTTP 200，原首页保持不变。这不代表所有浏览器/手机相册兼容。
 
 用户已明确允许预发布版以修复 Popup/Dialog 关闭后无障碍 DOM 停止同步的问题（[CMP-9368](https://youtrack.jetbrains.com/issue/CMP-9368) / [CMP-10623](https://youtrack.jetbrains.com/issue/CMP-10623)）。Compose 与共享 Material3 对齐 [1.13.0-alpha02](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.13.0-alpha02)，保留现有 Kotlin、Gradle 和 SDK；已删除点击标题、额外 Tab 和动画延时的无效绕行。弹层关闭后节点自行移除、真实交互、下载与诊断已在上述 CI 验证；不关闭无障碍、不删除测试。输入测试在全选与键入之间等待框架动画帧检查点，重选后等待旧报告节点移除，不把原生视频就绪当成 Compose 报告同步完成。Alpha 仍是预发布依赖，本轮不宣称 Android/Native 回归完成。
 
@@ -51,8 +51,9 @@ UI 后台实现已在 `aae8e62` 完成上述整轮验收、产物审计与部署
 
 - [x] 固定长度 XMP 槽位及保留边界：仅在新包放得下、原包可写且无 MPF 时使用根外空白保持段长。默认 OPPO→Google V1 的转换、EXIF 原位置/原字节和视频原字节已验证；Google V2 放不下仍拒绝。未知 EXIF 关联仍为 `Unknown`，Strict/必需 MetadataPreserving 仍拒绝，MPF/Extended XMP 原门禁保留。不是任意 metadata 保真的声明。
 - [x] OPPO 显式次级 `Padding="0"` 的有限长度修复：标准厂商标记/版本、无尾标、两个目录项、单一完整物理视频及独立保真验证；预览无输出、显式应用、原视频字节和幂等已在公共测试、真实浏览器及两尺寸 UI 验证。`1`、`-1`、`00`、未知字段/尾部和歧义继续拒绝；普通 Google 规则不放宽。验收版本 `34253a7` 的 [Web CI 40148248112](https://github.com/ohyooo/LivePhoto/actions/runs/40148248112) 全部 32 个 job 成功，公共 JS/Wasm 各 811 项，正式产物已审计并更新 LAN 和 GitHub Pages。
-- [x] 独立 JS 功能库十个协议 API 的分块 IO：Kotlin BinarySource 接按需 Blob.slice，公开 File/Blob API 不变。主线程与 Worker 验证零整读、每次最多 64 KiB、预算零读取、IO_READ_FAILED 无输出及所有既有字节/保真检查，结果已包含在上述整轮 CI。FFmpeg 媒体入口仍需完整暂存。
-- [ ] 更大输入预算与流式输出。Wasm UI 七个协议入口已经按需读取 Blob，每次最多 64 KiB；修复还独立计算完整内容摘要、核对审阅方案并保留 SOURCE_CHANGED。原有保真、超预算零读取、来源定位和 IO 错误无输出检查保留。UI Worker 与取消的当前验收状态见上文，不能将旧 JS Worker 专项当作 UI 后台迁移证明。生成输入合计小于 32 MiB、已有照片单文件仍限 32 MiB；媒体原视频预处理预算 256 MiB，输出仍为 48 MiB 有界内存事务。FFmpeg 的私有内存输入仍需完整暂存，不宣称任意大文件流式、零拷贝或 64 KiB 总内存。
+- [x] 独立 JS 功能库十个协议 API 的分块 IO：Kotlin BinarySource 接按需 Blob.slice，公开 File/Blob API 不变。主线程与 Worker 验证零整读、每次最多 64 KiB、预算零读取、IO_READ_FAILED 无输出及所有既有字节/保真检查，结果已包含在上述整轮 CI。媒体输入的只读挂载另见下项。
+- [x] FFmpeg 媒体输入只读挂载：JS 功能库与 Kotlin/Wasm UI 共用 WORKERFS 适配，原始 Blob 不整读为 Kotlin 字节数组、不写入 MEMFS；Core-owned 借用区间经原输入引用及边界核验后映射对应切片，保留原文件所有权隔离。真实主线程/Worker 五操作、取消、预算、输入不变、独立音视频包及两尺寸 UI 已在上述 CI 验证。
+- [ ] 更大输入预算与流式输出。Wasm UI 七个协议入口已经按需读取 Blob，每次最多 64 KiB；修复还独立计算完整内容摘要、核对审阅方案并保留 SOURCE_CHANGED。原有保真、超预算零读取、来源定位和 IO 错误无输出检查保留。UI Worker 与取消的当前验收状态见上文，不能将旧 JS Worker 专项当作 UI 后台迁移证明。生成输入合计小于 32 MiB、已有照片单文件仍限 32 MiB；媒体原视频预处理预算 256 MiB，输出仍为 48 MiB 有界内存事务。FFmpeg 输入已只读挂载原 Blob；输出仍为私有 MEMFS 与有界内存事务，不宣称任意大文件流式、零拷贝或 64 KiB 总内存。
 - [x] 网页有限 A/B/C 编辑：原生 Video/Canvas 预览、暂停拖动、当前画面 C 截图及生成 key；上次生成结果按住播放、松开回封面。
 - [x] 网页有限媒体预处理：按需同源单线程 ffmpeg.wasm 导出 A/B copy 裁剪、显式 8-bit SDR H.264 视频转码；音频始终 copy，取消/预算/超时和输出包验证。不是桌面进程，不默认转码、不增加音频编码。
 - [x] 浏览器有限 Core MediaBackend 接入：共用 FFmpeg backend 的 probe/trim/remux/transcode/extractFrame 与验证逻辑，新增有界私有内存执行适配，实际执行标识 ffmpeg-wasm；JS 提供显式可选 createMediaBackend，Wasm 有类型化适配。默认协议库不加载媒体引擎；后端均为 Experimental，格式/轨道/metadata/色彩与时间线限制不放宽。新增代码真实验证以对应 CI 为准。
