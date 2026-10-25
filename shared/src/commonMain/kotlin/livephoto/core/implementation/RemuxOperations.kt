@@ -35,7 +35,7 @@ internal object RemuxOperations {
             if (request.video.input !is SourceSet.Single || session.bindings.isNotEmpty()) fail("INVALID_ARGUMENT", "Select an explicit video resource for a live-photo source")
             original = session.readers.single(); range = ByteRange(0uL, original.identity().orThrow().size)
         }
-        val reader = BinaryReader(if (resource == null) original.source else RangeSource(original, range), request.context)
+        val reader = BinaryReader(RangeSource(original, range), request.context)
         val video = BmffVideoProbe(reader).probe(ByteRange(0uL, range.length)).orThrow()
         val metadata = RemuxVerification.metadata(reader, video)
         session.recheck()

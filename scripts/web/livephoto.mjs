@@ -48,8 +48,10 @@ export function createMediaBackend({runtimeUrl=new URL('./media/core-runtime.mjs
   const run=async(input,action,{start=0,end=0,authorizeTranscode=false}={})=>{
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<0||start>60||end>60||typeof authorizeTranscode!=='boolean')throw new TypeError('Invalid media range or authorization');
     const data=source(input,256*1024*1024);
-    const executor=async(args,previous,name,timeout,cancelled)=>{
-      const response=await(await import(runtime.href)).executeCoreFfmpeg(args,input,previous,name,timeout,cancelled);
+    const executor=async(args,offset,length,previous,name,timeout,cancelled)=>{
+      if(!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>input.size)throw Error('Unbound media extent');
+      const view=offset===0&&length===input.size?input:input.slice(offset,offset+length);
+      const response=await(await import(runtime.href)).executeCoreFfmpeg(args,view,previous,name,timeout,cancelled);
       // Explicit opt-in only: decoder diagnostics can include private metadata.
       if(typeof onDiagnostic==='function')try{onDiagnostic({code:response.code,output:response.output.slice(0,2000),cancelled:response.cancelled,timedOut:response.timedOut,ioFailed:response.ioFailed});}catch{}
       return response;

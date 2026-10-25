@@ -59,8 +59,7 @@ internal object ProbeOperations {
             fail("CORRUPTED_CONTAINER", "Structural errors prevent decoder probing", Stage.Validate)
         val decoder = backend ?: fail("CAPABILITY_UNSUPPORTED", "No media decoder backend is configured", Stage.Validate)
         // Isolate ordinary JPEG/video or the proven closed HEIC image carrier; never a live composite/pair/item view.
-        val isolated = ResourceRef(SourceSet.Single(if (range.offset == 0uL && range.length == reader.identity().orThrow().size)
-            reader.source else RangeSource(reader, range)))
+        val isolated = ResourceRef(SourceSet.Single(RangeSource(reader, range)))
         val result = decoder.probe(ProbeRequest(isolated, decodeCheck = true, context = request.context))
         // Recheck even a backend failure: no stale success/failure may describe changed input.
         session.recheck()

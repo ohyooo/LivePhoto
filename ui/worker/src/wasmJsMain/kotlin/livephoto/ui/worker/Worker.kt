@@ -183,17 +183,21 @@ private external interface MediaProcess : JsAny {
 }
 private fun arguments(): JsAny = js("[]")
 private fun append(args: JsAny, value: String): Unit = js("{ args.push(value); }")
-private fun executeMedia(args: JsAny, input: JsAny, previous: Int8Array?, name: String, timeout: Double): Promise<MediaProcess> =
-    js("import(/* webpackIgnore: true */ new URL('../media/core-runtime.mjs', self.location.href).href).then(module => module.executeCoreFfmpeg(JSON.stringify(args),input,previous,name,timeout))")
+private fun executeMedia(args: JsAny, input: JsAny, offset: Double, length: Double, previous: Int8Array?, name: String, timeout: Double): Promise<MediaProcess> =
+    js("import(/* webpackIgnore: true */ new URL('../media/core-runtime.mjs', self.location.href).href).then(module => { if (!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||offset<0||length<0||offset+length>input.size) throw Error('Unbound media extent'); const view=offset===0&&length===input.size?input:input.slice(offset,offset+length); return module.executeCoreFfmpeg(JSON.stringify(args),view,previous,name,timeout); })")
 
 private suspend fun media(request: Request, source: BinarySource): Reply {
     val options = request.options
     val action = CoreMediaAction.entries.find { it.name == options.kind }
         ?: return failure(options.kind, CoreError(IssueCode("INVALID_ARGUMENT"), Stage.Plan, "Unknown task"), options)
     val backend = DefaultLivePhotoCore(BrowserFfmpegBackend(MemoryFfmpegExecutor { values, input, previous, name, timeout, _ ->
-        require(input === source) { "Unbound browser media source" }
+        val range = when (val resolved = browserMediaInputRange(input, source)) {
+            is CoreResult.Failure -> return@MemoryFfmpegExecutor MemoryFfmpegResult(FfmpegProcessResult(null, "", ioFailed = true))
+            is CoreResult.Success -> resolved.value
+        }
         val args = arguments(); values.forEach { append(args, it) }
-        val result = executeMedia(args, file(request.files, 0), previous?.let { Int8Array(buffer(it)) }, name, timeout.toDouble()).await()
+        val result = executeMedia(args, file(request.files, 0), range.offset.toDouble(), range.length.toDouble(),
+            previous?.let { Int8Array(buffer(it)) }, name, timeout.toDouble()).await()
         MemoryFfmpegResult(FfmpegProcessResult(result.code, result.output, result.outputLimited, result.cancelled, result.timedOut, result.ioFailed),
             result.bytes?.let { array -> Bytes(ByteArray(array.length) { byte(array, it) }) })
     }))

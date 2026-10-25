@@ -4,6 +4,7 @@ import livephoto.core.*
 import livephoto.core.binary.*
 import livephoto.core.bmff.BmffVideoProbe
 import livephoto.core.memory.MemoryBinarySource
+import livephoto.core.implementation.RangeSource
 
 // Preprocessing remains bounded independently of the final photo budget.
 public const val BROWSER_MEDIA_INPUT_LIMIT: Int = 256 * 1024 * 1024
@@ -14,6 +15,23 @@ public fun interface MemoryFfmpegExecutor {
         timeoutMillis: Long, context: Context): MemoryFfmpegResult
 }
 public data class MemoryFfmpegResult(public val process: FfmpegProcessResult, public val output: Bytes? = null)
+
+/** Resolve only Core-owned borrowed views onto the captured immutable browser input. */
+public suspend fun browserMediaInputRange(input: BinarySource, original: BinarySource): CoreResult<ByteRange> = attempt {
+    var source = input
+    var range = ByteRange(0uL, input.size().orThrow())
+    var depth = 0
+    while (source !== original) {
+        val view = source as? RangeSource
+            ?: fail("CAPABILITY_UNSUPPORTED", "Media input is not bound to the selected browser file", Stage.Read)
+        if (++depth > 64) fail("RESOURCE_LIMIT_EXCEEDED", "Too many borrowed media views", Stage.Read)
+        checkedRange(range.offset, range.length, view.range.length)
+        range = ByteRange(checkedAdd(view.range.offset, range.offset), range.length)
+        source = view.reader.source
+    }
+    checkedRange(range.offset, range.length, original.size().orThrow())
+    range
+}
 
 /** One private bounded workspace per backend instance; never a host filesystem or publication API. */
 public class MemoryFfmpegRuntime(private val executor: MemoryFfmpegExecutor) : FfmpegRuntime {

@@ -33,8 +33,11 @@ public fun processMedia(input: dynamic, action: String, executor: dynamic, start
     val ctx = Context(Limits(BROWSER_MEDIA_INPUT_LIMIT.toULong(), 48uL * 1024u * 1024u), cancellation = Cancellation(cancelled))
     val source = webSource(input, SourceId("web-media"))
     val backend = BrowserFfmpegBackend(MemoryFfmpegExecutor { args, data, previous, name, timeout, context ->
-        require(data === source) { "Unbound browser media source" }
-        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
+        val range = when (val resolved = browserMediaInputRange(data, source)) {
+            is CoreResult.Failure -> return@MemoryFfmpegExecutor MemoryFfmpegResult(FfmpegProcessResult(null, "", ioFailed = true))
+            is CoreResult.Success -> resolved.value
+        }
+        val response = awaitWeb(executor(JSON.stringify(args.toTypedArray()), range.offset.toDouble(), range.length.toDouble(), previous?.toByteArray(), name, timeout.toDouble(), { context.cancellation?.isCancelled() == true }) as Promise<dynamic>)
         MemoryFfmpegResult(FfmpegProcessResult((response.code as? Int), response.output as String,
             response.outputLimited as Boolean, response.cancelled as Boolean, response.timedOut as Boolean, response.ioFailed as Boolean),
             (response.bytes as? ByteArray)?.let(::Bytes))

@@ -4,7 +4,7 @@ import livephoto.core.*
 import livephoto.core.binary.*
 
 /** Borrowed bounded view; closing the view never closes its input. */
-internal class RangeSource(private val reader: BinaryReader, private val range: ByteRange) : BinarySource {
+internal class RangeSource(val reader: BinaryReader, val range: ByteRange) : BinarySource {
     override suspend fun identity(): CoreResult<SourceIdentity> = attempt {
         val original = reader.identity().orThrow()
         checkedRange(range.offset, range.length, original.size)

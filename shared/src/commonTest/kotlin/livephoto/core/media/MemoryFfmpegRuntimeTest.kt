@@ -4,11 +4,28 @@ import livephoto.core.*
 import livephoto.core.ffmpeg.*
 import livephoto.core.google.GoogleFixtures
 import livephoto.core.memory.MemoryBinarySource
+import livephoto.core.binary.BinaryReader
+import livephoto.core.implementation.RangeSource
 import kotlin.test.*
 
 class MemoryFfmpegRuntimeTest {
     private val context = Context(Limits(1024u, 1024u))
     private fun <T> value(result: CoreResult<T>): T = assertIs<CoreResult.Success<T>>(result).value
+    @Test fun browserMountRangesRequireTheCapturedSourceAndPreserveBorrowedOwnership(): Unit = runImmediate {
+        val original = MemoryBinarySource(Bytes(byteArrayOf(1, 2, 3)), SourceId("browser-file"))
+        val source = object : BinarySource by original {
+            override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> = error("Resolving a view must not read media bytes")
+        }
+        val view = RangeSource(BinaryReader(source, context), ByteRange(1u, 2u))
+        val nested = RangeSource(BinaryReader(view, context), ByteRange(1u, 1u))
+        assertEquals(ByteRange(0u, 3u), value(browserMediaInputRange(source, source)))
+        assertEquals(ByteRange(2u, 1u), value(browserMediaInputRange(nested, source)))
+        assertEquals("CAPABILITY_UNSUPPORTED", assertIs<CoreResult.Failure>(browserMediaInputRange(original, source)).error.code.value)
+        assertIs<CoreResult.Failure>(browserMediaInputRange(RangeSource(BinaryReader(source, context), ByteRange(2u, 2u)), source))
+        nested.close(); view.close()
+        assertIs<CoreResult.Success<SourceIdentity>>(source.identity())
+        original.close()
+    }
     @Test fun privateOutputPatchAndReadersNeverChangeTheInput(): Unit = runImmediate {
         val input = byteArrayOf(1, 2, 3)
         val runtime = MemoryFfmpegRuntime { args, bytes, _, name, timeout, _ ->
