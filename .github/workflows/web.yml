@@ -232,6 +232,7 @@ jobs:
           - {suite: media, part: storage-cleanup}
           - {suite: media, part: storage-interruption}
           - {suite: media, part: storage-failure}
+          - {suite: media, part: storage-limit}
           - {suite: media, part: worker}
           - {suite: media, part: mobile}
           - {suite: media, part: wide}

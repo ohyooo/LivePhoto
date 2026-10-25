@@ -39,6 +39,6 @@ export const testPlan=[
     'core-remux-independent-video-audio','core-trim-actual-timeline','core-transcode-explicit-audio-copy','core-extract-frame-decodes',
     'core-policy-and-malformed-no-output','core-cancel-and-budget-no-output','core-input-bytes-immutable']:[]})),
   ...['mono','surround'].flatMap(channels=>['remux','trim','transcode'].map(action=>({suite:'media',part:`aac-${channels}-${action}`,checks:[`aac-${channels}-${action}-channel-preservation`]}))),
-  ...['storage-cleanup','storage-interruption','storage-failure'].map(part=>({suite:'media',part,checks:[part]})),
+  ...['storage-cleanup','storage-interruption','storage-failure','storage-limit'].map(part=>({suite:'media',part,checks:[part]})),
 ];
 export const evidenceName=suite=>suite==='ui'?'ui-browser':suite;

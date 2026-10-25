@@ -54,6 +54,12 @@ export async function verifyStorage({page,context,origin,part}) {
     }finally{release();await context.unroute('**/media/vendor/core/ffmpeg-core.wasm');}
     if(!await page.evaluate(async()=>{const r=await storageRun();return r.code===0&&!r.ioFailed&&r.chunks?.length>0&&(await storageEntries()).length===0;}))
       throw Error('Abandoned Worker job was not recovered');
+  }else if(part==='storage-limit'){
+    if(!await page.evaluate(async()=>{
+      const r=await storageRun(['-hide_banner','-loglevel','error','-stream_loop','-1','-i','input.bin',
+        '-map','0:v:0','-c','copy','-f','mpegts','output.bin'],()=>false,120000);
+      return r.outputLimited&&!r.chunks&&!r.timedOut&&(await storageEntries()).length===0;
+    }))throw Error('Disk output budget did not stop/clean oversized output');
   }else if(part==='storage-failure'){
     const malformed=await page.evaluate(async()=>{const r=await storageRun(['-invalid-option','output.bin']);return r.code!==0&&!r.chunks&&(await storageEntries()).length===0;});
     if(!malformed)throw Error('FFmpeg failure published output or left files');
