@@ -23,7 +23,9 @@ try{
     if(!element)return null;
     const b=element.getBoundingClientRect();return b.width>0&&b.height>0?{x:b.x+b.width/2,y:b.y+b.height/2}:null;
   },name);
-  await page.waitForFunction(()=>document.querySelector('canvas')&&document.querySelector('#main-action'));
+  await page.waitForFunction(()=>!!document.querySelector('canvas'));
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(()=>!!document.querySelector('#main-action'));
   const runtime=await page.evaluate(()=>performance.getEntriesByType('resource').some(e=>/livephoto-ui\.[a-f0-9]+\.wasm/.test(e.name)));
   if(!runtime)throw Error('Kotlin/Wasm app did not load');checks.push('wasm-compose-render');
   for(const [name,selector]of [['照片工具','#tool-selector'],['新建','#main-action']]){

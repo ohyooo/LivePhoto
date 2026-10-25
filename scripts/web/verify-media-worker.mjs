@@ -5,12 +5,13 @@ import {guardMediaInput} from '/media-io.mjs';
 
 onmessage=async({data:{input}})=>{
   const checks=[];
-  const check=(name,valid)=>{if(!valid)throw Error(name);checks.push(name);};
+  const check=(name,valid,details='')=>{if(!valid)throw Error(name+': '+details);checks.push(name);};
   const digest=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer())))
     .map(value=>value.toString(16).padStart(2,'0')).join('');
   try{
     const inputSha256=await digest(input),runtimeUrl=location.origin+'/livephoto/media/core-runtime.mjs';
-    const backend=createMediaBackend({runtimeUrl}),caps=backend.capabilities();
+    const diagnostics=[];
+    const backend=createMediaBackend({runtimeUrl,onDiagnostic:entry=>diagnostics.push(entry)}),caps=backend.capabilities();
     check('worker-context-and-capabilities',typeof document==='undefined'&&self instanceof DedicatedWorkerGlobalScope&&
       caps.backendIds.join(',')==='ffmpeg-wasm'&&caps.operations.length===5&&caps.operations.every(op=>op.implementation==='Experimental'));
     const outputs={};
@@ -20,7 +21,7 @@ onmessage=async({data:{input}})=>{
       const value=await backend[action](input,options);
       check('worker-'+action,value.success&&(action==='probe'
         ? value.coverage==='Partial'&&value.issues.includes('MEDIA_DECODE_COMPLETED')&&value.blob===null
-        : value.blob instanceof Blob&&value.blob.size>0&&value.report.execution.some(e=>e.backendId==='ffmpeg-wasm')));
+        : value.blob instanceof Blob&&value.blob.size>0&&value.report.execution.some(e=>e.backendId==='ffmpeg-wasm')),JSON.stringify({value,diagnostics:diagnostics.slice(-3)}));
       outputs[action]={blob:value.blob,report:value.report};
     }
     const forbidden=await backend.transcode(input),malformed=await backend.probe(new Blob([new Uint8Array([0,1,2,3])]));
