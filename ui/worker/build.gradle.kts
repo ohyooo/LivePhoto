@@ -12,7 +12,7 @@ kotlin {
         commonMain {
             // Compile the existing application helpers; no Compose runtime or second protocol implementation.
             kotlin.srcDir("../src/commonMain/kotlin")
-            kotlin.include("**/UiOutput.kt", "**/PhotoAnalysis.kt", "**/VideoExtraction.kt", "**/CleanSplit.kt", "**/PhotoConversion.kt",
+            kotlin.include("**/UiOutput.kt", "**/PhotoCreation.kt", "**/PhotoAnalysis.kt", "**/VideoExtraction.kt", "**/CleanSplit.kt", "**/PhotoConversion.kt",
                 "**/PhotoKey.kt", "**/PhotoRepair.kt", "**/Presentation.kt", "**/CoreMediaEditing.kt")
             dependencies { implementation(project(":shared")); implementation(libs.kotlinx.coroutines) }
         }

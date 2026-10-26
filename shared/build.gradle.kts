@@ -24,10 +24,14 @@ kotlin {
     sourceSets {
         commonTest.dependencies { implementation(libs.kotlin.test) }
         val desktopTest by creating { dependsOn(commonTest.get()) }
-        nativeMain.dependencies {
-            api(libs.okio)
-            implementation(libs.kotlinx.coroutines)
+        val hostMain by creating {
+            dependsOn(commonMain.get())
+            dependencies {
+                api(libs.okio)
+                implementation(libs.kotlinx.coroutines)
+            }
         }
+        nativeMain { dependsOn(hostMain) }
         nativeTest {
             dependsOn(desktopTest)
             dependencies { implementation(libs.kotlinx.coroutines) }

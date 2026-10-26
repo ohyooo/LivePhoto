@@ -1,6 +1,6 @@
 pluginManagement {
     repositories {
-        if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true") google()
+        if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true" || providers.gradleProperty("livephoto.desktop").orNull == "true") google()
         gradlePluginPortal()
         mavenCentral()
     }
@@ -9,7 +9,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true") google()
+        if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true" || providers.gradleProperty("livephoto.desktop").orNull == "true") google()
         mavenCentral()
         if (providers.gradleProperty("livephoto.web").orNull == "true") {
             // Kotlin's pinned Binaryen optimizer, resolved centrally without
@@ -27,7 +27,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "LivePhoto"
 require(providers.gradleProperty("livephoto.jvm").orNull in setOf(null, "false")) {
-    "JVM runtime targets have been removed; select a Native host instead"
+    "Use livephoto.desktop=true for Compose Desktop or select a Native CLI host"
 }
 val androidEnabled = when (val selected = providers.gradleProperty("livephoto.android").orNull) {
     null, "false" -> false
@@ -45,7 +45,20 @@ val webUiEnabled = when (val selected = providers.gradleProperty("livephoto.webU
     else -> error("livephoto.webUi must be true or false, not $selected")
 }
 require(!webUiEnabled || webEnabled) { "Web UI requires livephoto.web=true" }
-if (webEnabled) {
+val desktopEnabled = when (val selected = providers.gradleProperty("livephoto.desktop").orNull) {
+    null, "false" -> false
+    "true" -> true
+    else -> error("livephoto.desktop must be true or false, not $selected")
+}
+require(!desktopEnabled || !webEnabled && !androidEnabled && !providers.gradleProperty("livephoto.nativeTarget").isPresent) {
+    "Build Compose Desktop, Web, Android and Native CLI separately"
+}
+if (desktopEnabled) {
+    rootProject.buildFileName = "build-desktop.gradle.kts"
+    include(":shared", ":ui", ":desktop")
+    project(":shared").buildFileName = "build-desktop.gradle.kts"
+    project(":ui").buildFileName = "build-desktop.gradle.kts"
+} else if (webEnabled) {
     require(!androidEnabled && !providers.gradleProperty("livephoto.nativeTarget").isPresent) {
         "Build Web, Android and desktop Native separately"
     }

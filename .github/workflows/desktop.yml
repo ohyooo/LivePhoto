@@ -1,0 +1,101 @@
+name: Compose Desktop
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            architecture: x64
+            runner-architecture: X64
+          - platform: macos-arm64
+            runner: macos-15
+            architecture: aarch64
+            runner-architecture: ARM64
+          - platform: windows-x64
+            runner: windows-2025
+            architecture: x64
+            runner-architecture: X64
+    env:
+      GRADLE_OPTS: -Dorg.gradle.project.livephoto.desktop=true
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate environment
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -ne '${{ matrix.runner-architecture }}') { throw 'Unexpected desktop architecture.' }
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) { throw 'Remove gradle-daemon-jvm.properties before running Gradle.' }
+          New-Item -ItemType Directory -Path ci-output -Force | Out-Null
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          architecture: ${{ matrix.architecture }}
+          cache-jdk: true
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+      - name: Linux display and media libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libasound2t64 libavcodec60 libavformat60 fonts-noto-cjk
+      - name: Prepare public protocol fixtures and real FFmpeg
+        shell: pwsh
+        run: |
+          ./scripts/prepare-protocol-fixtures.ps1
+          ./scripts/prepare-native-ffmpeg.ps1
+      - name: Compile, test and build portable application
+        shell: pwsh
+        run: |
+          $arguments = @(':verifyDesktopBuild', ':shared:desktopJvmTest', ':ui:desktopTest', ':desktop:desktopTest', ':desktop:createDistributable', '--max-workers=2', '--console=plain', '--stacktrace', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g')
+          if ($IsLinux) { & xvfb-run -a ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
+          elseif ($IsWindows) { & ./gradlew.bat @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
+          else { & ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop build or tests failed.' }
+      - name: Verify and package portable desktop
+        shell: pwsh
+        run: ./scripts/package-desktop.ps1 -Platform '${{ matrix.platform }}'
+      - name: Upload portable desktop
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhoto-Desktop-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/desktop/LivePhoto-Desktop-*.zip
+            ci-output/desktop/LivePhoto-Desktop-*.tar.gz
+            ci-output/desktop/desktop-evidence.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload desktop reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-reports-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/desktop-build.log
+            ci-output/native-ffmpeg-version.txt
+            ci-output/desktop/desktop-evidence.json
+            shared/build/test-results/desktopJvmTest/
+            ui/build/test-results/desktopTest/
+            desktop/build/test-results/desktopTest/
+            desktop/build/reports/desktop-smoke/
+          if-no-files-found: warn
+          retention-days: 14

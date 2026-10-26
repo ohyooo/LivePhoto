@@ -1,8 +1,6 @@
 package livephoto.adapters.files
 
 import kotlinx.coroutines.CancellationException
-import livephoto.adapters.process.NativeProcess
-import livephoto.adapters.process.ProcessStatus
 import livephoto.core.*
 import livephoto.core.ffmpeg.*
 import okio.Path.Companion.toPath
@@ -14,11 +12,8 @@ public data class NativeFfmpegDiscovery(public val backend: MediaBackend?,
 public class NativeFfmpeg(private val workspace: () -> String,
     private val retainedSpool: () -> ULong = { 0uL }) : FfmpegRuntime {
     public override suspend fun execute(arguments: List<String>, timeoutMillis: Long, context: Context): FfmpegProcessResult {
-        val result = try { NativeProcess.run(arguments, timeoutMillis, cancelled = { context.cancellation?.isCancelled() == true }) }
-        catch (_: CancellationException) { return FfmpegProcessResult(null, "", cancelled = true) }
-        return FfmpegProcessResult(result.exitCode, result.diagnostics,
-            outputLimited = result.status == ProcessStatus.OutputLimit, cancelled = result.status == ProcessStatus.Cancelled,
-            timedOut = result.status == ProcessStatus.TimedOut, ioFailed = result.status == ProcessStatus.IoFailed)
+        return try { executeFileFfmpeg(arguments, timeoutMillis, context) }
+        catch (_: CancellationException) { FfmpegProcessResult(null, "", cancelled = true) }
     }
     public override suspend fun openFiles(source: BinarySource, context: Context, outputName: String,
         producesOutput: Boolean): CoreResult<FfmpegFiles> =
@@ -59,3 +54,5 @@ public class NativeFfmpeg(private val workspace: () -> String,
 
 internal expect val nativeWindows: Boolean
 internal expect fun nativeExecutable(path: String): Boolean
+
+internal expect suspend fun executeFileFfmpeg(arguments: List<String>, timeoutMillis: Long, context: Context): FfmpegProcessResult

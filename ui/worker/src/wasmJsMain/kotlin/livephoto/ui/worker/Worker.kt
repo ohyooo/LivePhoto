@@ -166,8 +166,7 @@ private suspend fun execute(request: Request, disk: DiskSession): Reply {
                 val output = disk.output(context, "browser-create")
                 var operation: OperationResult? = null
                 try {
-                    val policy = if (target.protocol == ProtocolIds.Oplus) MutationPolicy(loss = LossPolicy.AllowListed,
-                        allowedLosses = listOf(MetadataLoss.OplusCameraUserComment, MetadataLoss.OplusAsciiCameraUserComment)) else MutationPolicy()
+                    val policy = uiCreationPolicy(target)
                     val edits = if (options.time.isEmpty()) null else EditSpec(keyPosition = CoverPosition.Timestamp(time, Selection.Nearest, Time(1, 1u)))
                     when (val result = core.create(CreateRequest(input, video, target, edits = edits, policy = policy, output = output, context = context))) {
                         is CoreResult.Failure -> failed(result.error)
