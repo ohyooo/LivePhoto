@@ -70,6 +70,18 @@ jobs:
           elseif ($IsWindows) { & ./gradlew.bat @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           else { & ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           if ($LASTEXITCODE -ne 0) { throw 'Desktop build or tests failed.' }
+      - name: Show packaging diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem 'desktop/build/compose/logs' -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Name; Get-Content $_.FullName }
+      - name: Release Windows Gradle cache locks
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) { throw 'Remove gradle-daemon-jvm.properties before running Gradle.' }
+          & ./gradlew.bat --stop
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to release Gradle cache locks.' }
       - name: Verify and package portable desktop
         shell: pwsh
         run: ./scripts/package-desktop.ps1 -Platform '${{ matrix.platform }}'
@@ -97,5 +109,7 @@ jobs:
             ui/build/test-results/desktopTest/
             desktop/build/test-results/desktopTest/
             desktop/build/reports/desktop-smoke/
+            desktop/build/compose/logs/
+            desktop/build/compose/tmp/*.args.txt
           if-no-files-found: warn
           retention-days: 14

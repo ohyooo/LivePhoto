@@ -180,6 +180,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Release Windows Gradle cache locks
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Recurse -File -Filter gradle-daemon-jvm.properties) { throw 'Remove gradle-daemon-jvm.properties before running Gradle.' }
+          & ./gradlew.bat --stop
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to release Gradle cache locks.' }
+
       - name: Upload Native test reports and logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v7

@@ -36,6 +36,7 @@ compose.desktop {
     application {
         from(kotlin.targets["desktop"])
         mainClass = "livephoto.desktop.MainKt"
+        jvmArgs += "--enable-native-access=ALL-UNNAMED"
         nativeDistributions {
             packageName = "LivePhoto"
             packageVersion = "0.1.0"
