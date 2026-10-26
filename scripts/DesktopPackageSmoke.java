@@ -26,7 +26,8 @@ class DesktopPackageSmoke {
                 Thread.sleep(200);
                 actual = robot.createScreenCapture(bounds);
                 changed = 0; blue = 0;
-                for (int y = 40; y < bounds.height; y++) for (int x = 0; x < bounds.width; x++) {
+                // Exclude window borders, title/menu bars and the OS dock/taskbar.
+                for (int y = 80; y < Math.min(600, bounds.height - 140); y++) for (int x = 32; x < bounds.width - 32; x++) {
                     int rgb = actual.getRGB(x, y) & 0xffffff;
                     if (rgb != (before.getRGB(x, y) & 0xffffff)) {
                         changed++;
