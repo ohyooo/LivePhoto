@@ -40,6 +40,8 @@ compose.desktop {
         nativeDistributions {
             packageName = "LivePhoto"
             packageVersion = "0.1.0"
+            // jpackage's macOS app-image requires a positive leading version component.
+            macOS { packageVersion = "1.0.0" }
             modules("java.desktop", "java.xml", "java.logging", "java.management", "java.naming", "java.net.http", "jdk.unsupported", "jdk.unsupported.desktop", "jdk.crypto.ec")
         }
     }

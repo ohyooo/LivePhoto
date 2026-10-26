@@ -2,7 +2,7 @@ package livephoto.desktop
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.awt.ComposeWindow
+import javax.swing.JFrame
 import kotlinx.coroutines.runBlocking
 import livephoto.core.*
 import livephoto.ui.CoreMediaAction
@@ -30,7 +30,7 @@ class DesktopMediaTest {
         }
         var platform: DesktopPlatform? = null
         var editor: DesktopVideoEditor? = null
-        var window: ComposeWindow? = null
+        var window: JFrame? = null
         try {
             execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
             execute("-i", video.toString(), "-frames:v", "1", image.toString())
@@ -53,16 +53,12 @@ class DesktopMediaTest {
             assertEquals("SOURCE_CHANGED", changed.error.code.value)
             Files.delete(video)
             execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
-            System.setProperty("compose.interop.blending", "true")
+            configureDesktopRendering()
             EventQueue.invokeAndWait {
                 val playback = DesktopVideoEditor(host.register(video), video, host)
                 editor = playback
-                window = ComposeWindow().apply {
-                    title = "LivePhoto CI playback"
-                    setSize(640, 420)
-                    setLocation(60, 60)
-                    setContent { playback.Player(Modifier.fillMaxSize()) {} }
-                    isVisible = true
+                window = desktopWindow("LivePhoto CI playback", 640, 420) { playback.Player(Modifier.fillMaxSize()) {} }.apply {
+                    setLocation(60, 60); isVisible = true
                 }
             }
             val playback = editor!!
@@ -87,7 +83,8 @@ class DesktopMediaTest {
             val report = Path.of("build/reports/desktop-smoke")
             Files.createDirectories(report)
             screenshot?.let { ImageIO.write(it, "png", report.resolve("video-window.png").toFile()) }
-            assertTrue(redPixels > 5000, "Native video is blank/occluded in the real Compose window: $redPixels red pixels")
+            assertNull(playback.playback.value.error)
+            assertTrue(redPixels > 5000, "Native video is blank/occluded in the real Compose window: $redPixels red pixels; ${playback.playback.value}")
             playback.seek(.8)
             assertTrue(playback.playback.value.duration in 1.9..2.1)
         } finally {

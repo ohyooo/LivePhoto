@@ -14,6 +14,7 @@ import javafx.scene.image.ImageView
 import javafx.scene.media.MediaPlayer
 import javafx.scene.media.MediaView
 import javafx.util.Duration
+import javafx.scene.input.KeyCode
 import livephoto.core.Time
 import livephoto.ui.*
 import java.nio.file.Path
@@ -25,7 +26,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     override val playback: State<VideoPlayback> get() = state
     private val panel = JFXPanel()
     private var player: MediaPlayer? = null
-    private var closed = false
+    @Volatile private var closed = false
     private var scroll: (Float) -> Unit = {}
     init {
         panel.addMouseWheelListener { scroll((it.preciseWheelRotation * 40).toFloat()) }
@@ -46,9 +47,15 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                         val cover = ImageView(FxImage(poster.toUri().toString(), true)).apply { isPreserveRatio = true; isSmooth = true }
                         cover.fitWidthProperty().bind(scene.widthProperty()); cover.fitHeightProperty().bind(scene.heightProperty())
                         content.children.add(cover); view.isVisible = false
-                        fun pausePreview() { active.pause(); view.isVisible = false; cover.isVisible = true }
-                        content.setOnMousePressed { cover.isVisible = false; view.isVisible = true; active.seek(Duration.ZERO); active.play() }
+                        var held = false
+                        fun pausePreview() { held = false; active.pause(); view.isVisible = false; cover.isVisible = true }
+                        fun playPreview() { if (!held) { held = true; cover.isVisible = false; view.isVisible = true; active.seek(Duration.ZERO); active.play() } }
+                        content.isFocusTraversable = true
+                        content.setOnMousePressed { content.requestFocus(); playPreview() }
                         content.setOnMouseReleased { pausePreview() }; content.setOnMouseExited { pausePreview() }
+                        content.setOnKeyPressed { if (it.code in setOf(KeyCode.SPACE, KeyCode.ENTER)) { playPreview(); it.consume() } }
+                        content.setOnKeyReleased { if (it.code in setOf(KeyCode.SPACE, KeyCode.ENTER)) { pausePreview(); it.consume() } }
+                        content.focusedProperty().addListener { _, _, focused -> if (!focused) pausePreview() }
                     }
                     panel.scene = scene
                     fun failed() { state.value = state.value.copy(ready = false, seeking = false, error = "本机预览不支持此媒体（${active.error?.type ?: media.error?.type ?: "MEDIA_ERROR"}）") }
