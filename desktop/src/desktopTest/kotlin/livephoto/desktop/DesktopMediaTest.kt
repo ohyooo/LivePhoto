@@ -2,7 +2,7 @@ package livephoto.desktop
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.window.ComposeWindow
+import androidx.compose.ui.awt.ComposeWindow
 import kotlinx.coroutines.runBlocking
 import livephoto.core.*
 import livephoto.ui.CoreMediaAction

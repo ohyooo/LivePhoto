@@ -140,10 +140,12 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
                             when (val extracted = prepareExtractedVideo(core, carrier)) {
                                 is CoreResult.Success -> {
                                     val previous = lastResult
-                                    lastResult = cache(created, "LivePhoto-result.jpg") to cache(extracted.value.bytes, "LivePhoto-result.${extracted.value.report.extension}")
+                                    val poster = cache(created, "LivePhoto-result.jpg")
+                                    try { lastResult = poster to cache(extracted.value.bytes, "LivePhoto-result.${extracted.value.report.extension}") }
+                                    catch (failure: Exception) { release(poster); throw failure }
                                     previous?.let { release(it.first); release(it.second) }
                                 }
-                                is CoreResult.Failure -> { lastResult = null }
+                                is CoreResult.Failure -> { lastResult?.let { release(it.first); release(it.second) }; lastResult = null }
                             }
                         } catch (_: Exception) {
                             // Saving succeeded; an optional preview must never turn that into a failed save.

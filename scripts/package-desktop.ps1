@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0 -or $output -notmatch 'LivePhoto Desktop') { throw 'Pack
 $runtime = @(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -in @('jvm.dll','libjvm.so','libjvm.dylib') })
 if ($runtime.Count -ne 1) { throw 'Expected exactly one bundled JVM.' }
 $groups = @{}
-foreach ($entry in @(@('shared','desktopJvmTest'), @('ui','desktopTest'), @('desktop','desktopTest'))) {
+foreach ($entry in @(@('shared','desktopJvmTest'), @('desktop','desktopTest'))) {
     $module,$task = $entry
     $files = @(Get-ChildItem "$module/build/test-results/$task" -Filter 'TEST-*.xml' -File)
     if ($files.Count -eq 0) { throw "Missing $module test reports." }
@@ -25,7 +25,14 @@ foreach ($entry in @(@('shared','desktopJvmTest'), @('ui','desktopTest'), @('des
         if ([int]$xml.testsuite.failures -ne 0 -or [int]$xml.testsuite.errors -ne 0 -or [int]$xml.testsuite.skipped -ne 0) { throw 'Failed or skipped desktop tests.' }
         $tests += [int]$xml.testsuite.tests
     }
-    if ($tests -eq 0) { throw 'No tests executed.' }
+    $sourceSets = if ($module -eq 'shared') { @('commonTest','desktopTest','desktopJvmTest') } else { @('desktopTest') }
+    $declared = 0
+    foreach ($sourceSet in $sourceSets) {
+        Get-ChildItem "$module/src/$sourceSet" -Recurse -File -Filter '*.kt' | ForEach-Object {
+            $declared += [regex]::Matches((Get-Content $_.FullName -Raw), '@Test\b').Count
+        }
+    }
+    if ($tests -ne $declared -or $declared -eq 0) { throw "Incomplete $module test execution: $tests / $declared" }
     $groups[$module] = $tests
 }
 $directory = 'ci-output/desktop'
