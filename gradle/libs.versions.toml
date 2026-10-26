@@ -10,8 +10,8 @@ android-test-junit = "1.3.0"
 android-activity = "1.13.0"
 compose-bom = "2026.09.00"
 # Explicitly approved prerelease: fixes Web Popup/Dialog accessibility (CMP-9368).
-compose-multiplatform = "1.13.0-alpha02"
-compose-material3 = "1.13.0-alpha02"
+compose-multiplatform = "1.13.0-beta01"
+compose-material3 = "1.13.0-beta01"
 
 [libraries]
 javafx-base = { module = "org.openjfx:javafx-base", version.ref = "javafx" }
