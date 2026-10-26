@@ -9,7 +9,7 @@ kotlin {
     sourceSets {
         named("desktopMain") { dependencies {
             implementation(project(":ui"))
-            implementation(compose.desktop.currentOs)
+            implementation(compose.desktop.common)
             implementation(libs.compose.shared.material3)
             implementation(libs.kotlinx.coroutines)
         } }
@@ -28,7 +28,7 @@ val javafxPlatform = when {
 }
 dependencies {
     listOf(libs.javafx.base, libs.javafx.graphics, libs.javafx.media, libs.javafx.swing).forEach { library ->
-        add("desktopMainImplementation", variantOf(library) { classifier(javafxPlatform) }) { isTransitive = false }
+        addProvider("desktopMainImplementation", variantOf(library) { classifier(javafxPlatform) }) { isTransitive = false }
     }
 }
 compose.desktop {
