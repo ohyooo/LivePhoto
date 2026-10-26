@@ -1,13 +1,14 @@
 # LivePhoto
 
 [![Build](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml/badge.svg)](https://github.com/ohyooo/LivePhoto/actions/workflows/build.yml)
+[![Desktop](https://github.com/ohyooo/LivePhoto/actions/workflows/desktop.yml/badge.svg)](https://github.com/ohyooo/LivePhoto/actions/workflows/desktop.yml)
 [![Android](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml/badge.svg)](https://github.com/ohyooo/LivePhoto/actions/workflows/android.yml)
 
-使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core 与命令行工具。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
+使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core、命令行工具与共享 Compose 界面。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
-**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，历史 JVM 运行时与桌面系统媒体实现已移除。Android 直接复用 Core，测试界面使用 Compose；不是 Core JNI 或桌面 JVM 发行版。iOS 和完整多平台 GUI 尚未交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
+**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，旧 JVM CLI 与桌面系统媒体实现已移除；新增 Compose Desktop 图形应用正在三平台 CI 验证，桌面 UI 单独使用 JVM。Android 直接复用 Core，测试界面使用 Compose；不是 Core JNI 或桌面 JVM 发行版。iOS 尚未接入；Compose Desktop 与 Native CLI 为独立交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Compose Desktop 接入共享 UI 与本地 FFmpeg，独立提供带运行时的便携包；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
 
 浏览器功能库与共享 Compose 界面已接入，用户已手动验证网页可用。后续能力及验收进度单独维护在 [Web 路线与 TODO](docs/web-roadmap.md)，不以旧阶段测试代替新接口验证。
 
@@ -16,6 +17,7 @@
 - [下载与运行](#下载与运行)
 - [前提与推荐](#前提与推荐)
 - [Android 测试应用](#android-测试应用)
+- [Compose Desktop 图形应用](#compose-desktop-图形应用)
 - [浏览器功能库（无 UI）](#浏览器功能库无-ui)
 - [浏览器共享界面](#浏览器共享界面)
 - [快速开始](#快速开始)
@@ -38,7 +40,7 @@ Actions 的 artifact 是外层下载包；解压后再展开里面的 `.zip` / `
 | Linux x64 | `LivePhoto-linux-x64.tar.gz` | `LivePhoto.kexe` | Kotlin/Native 原生程序 |
 | macOS ARM64 | `LivePhoto-macos-arm64.tar.gz` | `LivePhoto.kexe` | Kotlin/Native 原生程序 |
 
-不提供 Intel macOS、Windows ARM 或 Linux ARM 包。默认下载为 **Kotlin/Native 单文件程序，不携带 JVM/JRE，运行不需要 Java**。外部 FFmpeg 不在应用包内。暂不提供 MSI/DMG 安装器。历史 JVM 构建与打包流程已移除。
+不提供 Intel macOS、Windows ARM 或 Linux ARM 包。默认下载为 **Kotlin/Native 单文件程序，不携带 JVM/JRE，运行不需要 Java**。外部 FFmpeg 不在应用包内。暂不提供 MSI/DMG 安装器。旧 JVM CLI 构建与打包流程已移除；Compose Desktop 图形应用为独立交付。
 
 Windows PowerShell，在解压位置运行：
 
@@ -53,6 +55,36 @@ Linux，在解压位置运行：
 ./LivePhoto.kexe --version
 ./LivePhoto.kexe --help
 ```
+
+## Compose Desktop 图形应用
+
+桌面端复用 `ui/commonMain` 的 Compose 界面和同一 Core：新建、检查、视频提取、清理拆分、协议转换、修复、关键照片时间，以及已有有限媒体操作。图形应用使用 JVM，便携包自带 Java 运行时，用户无需另装 Java；Native CLI 继续独立提供。
+
+进入 [Compose Desktop CI](https://github.com/ohyooo/LivePhoto/actions/workflows/desktop.yml)，选择成功运行，下载 `LivePhoto-Desktop-<平台>-<run>-<attempt>`。展开 artifact 内的应用归档后，保留整个应用目录：
+
+| 平台 | 启动入口 |
+|---|---|
+| Windows x64 | `LivePhoto/LivePhoto.exe` |
+| Linux x64 | `LivePhoto/bin/LivePhoto` |
+| macOS ARM64 | `LivePhoto.app` |
+
+有重跑时按平台选择最新的应用 artifact；`desktop-reports-…` 是测试报告。没有安装器，不要只取出启动文件；其相邻应用和运行时目录也需要保留。FFmpeg 不在包内，需自行准备。文件菜单可选择其可执行文件，也支持 `--ffmpeg <完整路径>` 或 `LIVEPHOTO_FFMPEG` 环境变量；随后查找 PATH。找不到时禁用媒体编辑，纯协议生成仍可用。不自动下载后端，不调用历史系统媒体处理 API。JavaFX 只负责播放；抽帧、裁剪、重封装和转码仍走共享 Core 与本地 FFmpeg，音频只 copy，不扩大协议支持范围。
+
+源码构建需要已有 JDK 25：
+
+```sh
+./gradlew -Plivephoto.desktop=true :desktop:createDistributable
+```
+
+Windows 使用 `gradlew.bat`。便携目录位于 `desktop/build/compose/binaries/main/app/`。完整测试使用 `:shared:desktopJvmTest :desktop:desktopTest`，并提供已有 FFmpeg 的绝对路径到 `LIVEPHOTO_FFMPEG`；CI 复用编译缓存，验收测试用 `--rerun` 实际执行。禁止用系统 Gradle 替换 Wrapper；构建不会自动安装 Java。
+
+Linux 以 Ubuntu 24.04 验证，需图形桌面、GTK 3、音频/媒体运行库和中文字体；CI 使用 `libgtk-3-0`、`libasound2t64`、`libavcodec60`、`libavformat60`、`fonts-noto-cjk`。其它系统同样需要可用的中文字形。macOS 包尚未签名、公证；打包工具要求版本首位大于 0，因此 macOS 包版本为 1.0.0，不代表项目已进入稳定版。
+
+保存只创建新文件，回读验证后原子发布，不覆盖原片或已有输出；目标文件系统须支持硬链接。预览受 JavaFX 格式支持限制，能播放不代表 Core 能安全处理。桌面全屏与时间轴缩略图尚未接入，真实 GPU、声卡及手机相册兼容性不由 CI 合成测试保证。
+
+已验收 [`800a610` 的 Desktop CI](https://github.com/ohyooo/LivePhoto/actions/runs/40261196187)：每平台 **866 项共享/宿主测试＋4 项桌面测试**，最终结果零失败、零跳过；另验证便携包 `--help`、真实成品窗口和可见视频。六份当前应用/报告产物的来源、内外层哈希及全部文件已核对，三平台主窗口与视频截图均人工检查；初始窗口限制在系统可用工作区，避免任务栏挡住按钮。Windows 首次虚拟机媒体初始化出现 `UNKNOWN`，同提交重跑通过，原失败记录保留；不将它标记为已修复。
+
+`desktop-evidence.json` 记录应用归档哈希和包内清单。Unix 符号链接的 `size` 是链接自身长度，SHA-256 对应目标文件内容；归档哈希同时覆盖链接结构。
 
 ## 浏览器功能库（无 UI）
 
@@ -545,9 +577,9 @@ Apple CID inspection evidence 绑定 source/generation/role/字段位置；它�
 
 ### 构建前提
 
-仓库当前使用 Kotlin **2.4.21**、Gradle Wrapper **9.8.1**、JDK **25**；此次清理不升级工具链。需要已有的 JDK 25，将 `JAVA_HOME` 指向其根目录。项目禁用自动安装 Java；始终使用仓库 Wrapper。首次构建可下载指定的 Gradle、Kotlin/Native 编译器及依赖，但不会下载 JDK。
+仓库当前使用 Kotlin **2.4.21**、Gradle Wrapper **9.8.2**、JDK **25**；此次清理不升级工具链。需要已有的 JDK 25，将 `JAVA_HOME` 指向其根目录。项目禁用自动安装 Java；始终使用仓库 Wrapper。首次构建可下载指定的 Gradle、Kotlin/Native 编译器及依赖，但不会下载 JDK。
 
-构建工具仍使用 Java，**产品代码和发行程序不依赖 JVM/JRE**。不再使用 JAR、`installDist`、`jpackage` 或 `jlink` 打包。完整测试与打包还需要 PowerShell 7、宿主 C 编译器、创建符号链接的权限，以及已有的 FFmpeg；只有编译程序时不要求安装 FFmpeg。
+构建工具仍使用 Java，**Native CLI 和 Native 库不依赖 JVM/JRE**。Native 交付不使用 JAR 或 Java 打包；Compose Desktop 图形应用另用便携目录并携带 Java 运行时。完整测试与打包还需要 PowerShell 7、宿主 C 编译器、创建符号链接的权限，以及已有的 FFmpeg；只有编译程序时不要求安装 FFmpeg。
 
 执行 Gradle 前，检查项目中是否有 `gradle-daemon-jvm.properties`；如有，先停止并处理该配置，不要绕过。只在对应的 OS/架构构建、执行该平台程序。
 
@@ -634,11 +666,13 @@ Linux 将 Wrapper 改为 `./gradlew`、平台改为 `linux-x64`、任务 target 
 
 Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压后程序的 27 项 CLI 检查（其中 9 项真实媒体、7 项合成 HEIC），不能因没有工具而跳过。CI 安装 FFmpeg 仅用于验证，不会打入应用或由应用自动安装。
 
-所有 Action 引用均使用最新稳定主版本 `@vN`。CI 复用 JDK 缓存与 Gradle 开源 basic 缓存；Native 另按 OS/架构/工具链缓存编译器依赖。编译任务允许缓存命中，但验收用对应 Native test `--rerun` 重新执行，不把旧报告计为新测试。Native 测试成功后保存工具链缓存，即使后续产物检查失败也不重复下载已验证的工具链。
+所有 Action 引用均使用最新稳定主版本 `@vN`。CI 复用 JDK 缓存与 Gradle 开源 basic 缓存；Native 另按 OS/架构/工具链缓存编译器依赖。编译任务允许缓存命中，但验收用对应 Native/Desktop test `--rerun` 重新执行，不把旧报告计为新测试。Native 测试成功后保存工具链缓存，即使后续产物检查失败也不重复下载已验证的工具链。
 
 ## 进度、已完成与 TODO
 
-桌面完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 初始接入独立验收：[提交 `cc781d9` 的 Android CI](https://github.com/ohyooo/LivePhoto/actions/runs/38523702403)，**9 项宿主单元测试＋9 项 API 36 模拟器测试，零失败、零跳过**；APK、签名、lint、原片哈希及 MediaStore 保存回读通过，应用和报告两份产物已独立核验。不是手机相册兼容认证，不将桌面测试数当成 Android 验证。
+Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 初始接入独立验收：[提交 `cc781d9` 的 Android CI](https://github.com/ohyooo/LivePhoto/actions/runs/38523702403)，**9 项宿主单元测试＋9 项 API 36 模拟器测试，零失败、零跳过**；APK、签名、lint、原片哈希及 MediaStore 保存回读通过，应用和报告两份产物已独立核验。不是手机相册兼容认证，不将桌面测试数当成 Android 验证。
+
+共享文件 IO 与 FFmpeg 宿主适配合并后，[`6be65d9` 的 Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/40253616901) 三平台各 **939 项 shared＋44 项 CLI 测试**通过；相关 Native 业务代码与本轮源码一致。Compose Desktop 使用上文独立的 `800a610` 验收，不能用 CLI 或网页测试代替桌面窗口检查。当前提交的其它自动构建可能仍在执行，以各自 workflow 为准；本轮未开展 Android/iOS 验收。
 
 已完成的有限范围：
 
@@ -647,7 +681,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [x] 原子输出、输入不可变、metadata/样本/时间线保留证明及固定素材回归。
 - [x] 三平台 Kotlin/Native Core、共用 CLI、文件 IO、原生进程和有限 FFmpeg 后端；单文件程序不携带 Java。
 - [x] Windows/macOS/Linux 真实 FFmpeg 抽帧、remux、有限带音频裁剪、显式视频转码、封面替换及组合 Create 回归；音频只 copy。
-- [x] 迁移期 JVM 运行时代码、旧 CLI、NIO/ImageIO/Java 进程桥、Windows 历史系统媒体 API及其专项测试、旧 JVM 打包/回归流程清理；保留共用/Native 测试和全部素材。Gradle 构建仍需要 JDK。
+- [x] 旧 JVM CLI、旧 NIO/ImageIO/Java 进程桥、Windows 历史系统媒体 API及其专项测试和打包流程已清理；保留共用/Native 测试与素材。新增 Compose Desktop 使用独立 JVM 文件/进程适配，不恢复历史系统媒体后端，Native CLI 不携带 Java。
 - [x] Android 初始接入：直接引用 Core 的 APK、最小手测界面、系统选择器/有界内存输入、单张 MediaStore 保存、宿主与模拟器回归及 CI 产物。
 - [x] Kotlin/JS 基础功能库、Promise/File/Blob 适配、真实 Chromium/Worker 验收，以及复用 Android 的浏览器 Compose 界面；用户已手测网页可用。
 
@@ -659,7 +693,8 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 - [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
 - [ ] 后续移动工作：大文件/随机访问 IO、URI 生命周期、通用多资产事务、移动系统媒体后端及真机验收。iOS targets、构建/IO/媒体适配仍未实施；不复用桌面 FFmpeg 进程冒充移动支持。
 - [x] Web 有限协议接口、公共 JS/Wasm 回归、浏览器媒体后端、后台取消、有界分块 IO 与双站部署；更广格式及搁置项见 [Web 路线与 TODO](docs/web-roadmap.md)。
-- [ ] 完整 Compose Multiplatform GUI：当前 Android/Web 共享有限测试界面，更完整的工具界面仍待实现，不扩大 Core 业务范围。
+- [x] Compose Desktop 接入共享 Compose 工具界面与本地 FFmpeg，三平台便携包、原子新文件保存和 CI 窗口验证。
+- [ ] 桌面播放器全屏、时间轴缩略图及更多真实 GPU/声卡环境验收；移动端界面与系统媒体后端仍按原计划暂停，不扩大 Core 业务范围。
 
 ### 浏览器可选 Core 媒体后端
 
@@ -686,9 +721,9 @@ const encoded = await media.transcode(video, { authorizeTranscode: true });
 
 所有媒体操作共用状态、取消和诊断报告，不再要求选择内部处理路径。实现范围及真实验收以当前提交 CI 为准；移除旧版不会让 Core 原本不支持的格式自动变为可用。
 
-Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 322 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
+Web CI 只构建一次，独立浏览器场景通过 reusable workflow 并行执行：完整 UI 按新建、检查、提取、拆分、转换、修复、关键照片七组及两种尺寸拆分；播放器按尺寸和画幅、主题按尺寸、协议和媒体按主线程/Worker 分开运行。JS/Wasm 公共 Kotlin 测试也各自运行。UI 不再重复媒体专项及 API 层的完整协议矩阵，保留安全拒绝、输入不变、下载与状态隔离检查；当前外围检查 323 项，Worker 42＋9 项和 Wasm 媒体 UI 18 项另列。各组下载同次编译产物、复用缓存，缺组、失败、检查集合不符都禁止发布。场景内部有依赖的步骤不拆开，不将每条断言变成单独 job。
 
-当前界面与后台 Worker 已在源码 `59f8f1d` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/40168001397) 全部 42 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 815 项、零失败零跳过；四份正式产物哈希与 32 张合成截图已核验。网站已部署并通过全部 22 个静态文件的正常域名 HTTPS 哈希与类型检查，旧版本保留、原首页不变。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；本轮仅验证 Web，不宣称 Android/Native 回归。
+当前界面与后台 Worker 已在源码 `800a610` 的 [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/40261196188) 全部 53 个 job 通过，公共 Kotlin 测试在 JS/Wasm 下各 818 项、零失败零跳过；四份正式产物哈希与 32 张主矩阵截图及 2 张跨浏览器截图已核验。网站已部署并通过全部 23 个静态文件的正常域名 HTTPS 哈希与类型检查，旧版本保留、原首页不变。为修复浏览器弹层的无障碍同步问题，已按用户授权采用 Compose/Material3 `1.13.0-alpha02`，仍属于预发布依赖；Web 与 Compose Desktop 分开验收；Native CLI 沿用单列的已验证代码基线，Android 本轮未验收。
 
 重新设计界面可参考 [Web UI 设计交接](docs/ui-design-brief.md)：现有功能、Kotlin/API、交互边界和 UI TODO。
 
@@ -729,8 +764,10 @@ macOS 在解压目录使用实际入口（终端 CLI，无需应用 bundle）：
 
 - `shared/src/commonMain/`：公共模型、协议解析/写入、保留及原子操作逻辑。
 - `shared/src/commonTest/`、`shared/src/nativeTest/`：共用协议/素材回归与真实 Native 测试。
-- `shared/src/nativeMain/` 与各宿主 source set：文件/事务、原生进程及 FFmpeg 适配；不引入 Android 构建。
+- `shared/src/hostMain/`：Native CLI 与 Compose Desktop 复用的文件/事务和 FFmpeg 工作区。
+- `shared/src/nativeMain/` 与各宿主 source set：Native 文件系统与进程执行；`desktopJvmMain` 只用于图形应用的 JVM 适配，不进入 Web/Native 构建图。
 - `cli/`：薄 CLI 和原生入口。
+- `desktop/`：共享 Compose 界面的桌面宿主、文件选择/保存与 JavaFX 只读预览；便携包包含运行时。
 - `ui/src/commonMain/`：平台无关的 Compose 界面、选择状态和结果展示；按窗口尺寸布局，不依赖 Android Uri 或 Activity。
 - `android/`：Activity 与文件选择/元信息/相册保存适配，启动共享 UI；Core 无 JNI。
 - `scripts/`：测试素材准备、Native 打包与证据检查。
