@@ -224,7 +224,6 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                             else if (darkTheme) Color(0xff4ade80) else Color(0xff15803d))
                         report.outputName?.let { Text(it, Modifier.testTag("result-file-name")) }
                         Text("图片：${report.input.image?.let { if (it == image) imageInfo?.displayName else null } ?: "本次操作所选图片"}；目标：${ProfileNames[report.input.profile]}", style = MaterialTheme.typography.bodySmall)
-                        if (!report.failed) Text("已发起下载，实际保存状态请在浏览器中确认。")
                         if (!report.failed && platform.hasResultPreview) {
                             platform.ResultPreview(Modifier.fillMaxWidth().height(180.dp), scrolling)
                             Text("按住预览，松开回封面；空格或回车同样可用。仅应用内模拟，不代表手机相册兼容。", style = MaterialTheme.typography.bodySmall)

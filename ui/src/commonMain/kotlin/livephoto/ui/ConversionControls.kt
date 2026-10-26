@@ -36,7 +36,7 @@ internal fun ConversionControls(platform: LivePhotoUiPlatform, reference: String
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 failed = true
-                report = "转换或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查下载记录或相册，避免重复保存。"
+                report = "转换或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查保存位置和记录，避免重复保存。"
             } finally { working = false; onBusy(false) }
         }
     }, enabled = enabled && !working && reference != null, modifier = Modifier.fillMaxWidth().testTag("convert-photo")) {

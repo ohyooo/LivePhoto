@@ -53,7 +53,7 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
                         if (key == "image") imageStatus = message else videoStatus = message
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) {
-                        val message = "保存未完成或状态不确定：${error.message?.take(2000) ?: "未知异常"}；请先检查下载记录或相册，避免重复保存。另一文件的状态不受影响。"
+                        val message = "保存未完成或状态不确定：${error.message?.take(2000) ?: "未知异常"}；请先检查保存位置和记录，避免重复保存。另一文件的状态不受影响。"
                         if (key == "image") imageStatus = message else videoStatus = message
                     } finally { saving = null; onBusy(false) }
                 }

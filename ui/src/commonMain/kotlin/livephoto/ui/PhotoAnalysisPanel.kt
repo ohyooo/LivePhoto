@@ -112,7 +112,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (error: Exception) {
                                 exportFailed = true
-                                exportReport = "提取或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查下载记录或相册，避免重复保存。"
+                                exportReport = "提取或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查保存位置和记录，避免重复保存。"
                             } finally { working = false; extracting = false; onBusy(false) }
                         }
                     }, enabled = active && !working && reference != null, shape = ControlShape,

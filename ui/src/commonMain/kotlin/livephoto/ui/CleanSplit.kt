@@ -92,7 +92,7 @@ public fun formatCleanSplit(split: PreparedCleanSplit<*>): String = buildString 
     }
     append("\n协议字段变更：").append(split.preservation.changes.size).append(" 项；问题报告：").append(split.issues.size).append(" 项。")
     if (split.issues.isNotEmpty()) append("\n报告代码：").append(split.issues.take(12).joinToString { it.code.value })
-    append("\n分别保存两个文件；不是外部原子成对保存。请检查每项下载或相册记录，不代表设备兼容认证。")
+    append("\n分别保存两个文件；不是外部原子成对保存。请检查每项保存记录，不代表设备兼容认证。")
 }
 
 public fun formatCleanSplitFailure(error: CoreError): String =
