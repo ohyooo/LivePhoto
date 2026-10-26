@@ -13,6 +13,7 @@ import androidx.compose.ui.window.AwtWindow
 import androidx.compose.ui.window.application
 import kotlinx.coroutines.launch
 import livephoto.ui.*
+import java.awt.GraphicsEnvironment
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import javax.swing.*
@@ -26,7 +27,8 @@ internal fun desktopWindow(title: String, width: Int = 1280, height: Int = 840, 
     return JFrame(title).apply {
         defaultCloseOperation = WindowConstants.DO_NOTHING_ON_CLOSE
         contentPane = panel
-        setSize(width, height)
+        val usable = GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+        setBounds(usable.x, usable.y, minOf(width, usable.width), minOf(height, usable.height))
         panel.setContent(content = content)
     }
 }
