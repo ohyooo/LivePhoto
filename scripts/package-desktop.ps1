@@ -12,7 +12,7 @@ $launcher = Join-Path $root $relative
 if (-not (Test-Path -LiteralPath $launcher)) { throw 'Portable launcher missing.' }
 $output = (& $launcher --help 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0 -or $output -notmatch 'LivePhoto Desktop') { throw 'Packaged launcher failed.' }
-$runtime = @(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -in @('jvm.dll','libjvm.so','libjvm.dylib') })
+$runtime = @(Get-ChildItem $root -Recurse -File -Force | Where-Object { $_.Name -in @('jvm.dll','libjvm.so','libjvm.dylib') })
 if ($runtime.Count -ne 1) { throw 'Expected exactly one bundled JVM.' }
 $groups = @{}
 foreach ($entry in @(@('shared','desktopJvmTest'), @('desktop','desktopTest'))) {
@@ -46,7 +46,7 @@ if ($IsWindows) {
     & tar -czf $archive -C $root .
     if ($LASTEXITCODE -ne 0) { throw 'Desktop archive failed.' }
 }
-$files = @(Get-ChildItem $root -Recurse -File | ForEach-Object {
+$files = @(Get-ChildItem $root -Recurse -File -Force | ForEach-Object {
     @{ path = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\','/'); size = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
 })
 @{
