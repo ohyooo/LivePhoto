@@ -73,7 +73,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     }
     override suspend fun describe(reference: String): SelectedMediaInfo = withContext(Dispatchers.IO) {
         val entry = entries.getValue(reference)
-        SelectedMediaInfo(entry.name, Files.size(entry.path))
+        SelectedMediaInfo(entry.name, try { Files.size(entry.path) } catch (_: java.io.IOException) { null })
     }
     override fun release(reference: String) {
         entries.remove(reference)?.takeIf { it.owned }?.let { pendingDeletes.add(it.path) }
