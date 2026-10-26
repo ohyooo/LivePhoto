@@ -65,7 +65,7 @@ jobs:
       - name: Compile, test and build portable application
         shell: pwsh
         run: |
-          $arguments = @(':verifyDesktopBuild', ':shared:desktopJvmTest', ':ui:desktopTest', ':desktop:desktopTest', ':desktop:createDistributable', '--continue', '--max-workers=2', '--console=plain', '--stacktrace', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g')
+          $arguments = @(':verifyDesktopBuild', ':shared:desktopJvmTest', '--rerun', ':ui:desktopTest', ':desktop:desktopTest', '--rerun', ':desktop:createDistributable', '--continue', '--max-workers=2', '--console=plain', '--stacktrace', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g')
           if ($IsLinux) { & xvfb-run -a ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           elseif ($IsWindows) { & ./gradlew.bat @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           else { & ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
