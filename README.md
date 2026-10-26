@@ -6,7 +6,7 @@
 
 使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core、命令行工具与共享 Compose 界面。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
-**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，旧 JVM CLI 与桌面系统媒体实现已移除；新增 Compose Desktop 图形应用正在三平台 CI 验证，桌面 UI 单独使用 JVM。Android 直接复用 Core，测试界面使用 Compose；不是 Core JNI 或桌面 JVM 发行版。iOS 尚未接入；Compose Desktop 与 Native CLI 为独立交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
+**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，旧 JVM CLI 与桌面系统媒体实现已移除；新增 Compose Desktop 图形应用已完成三平台独立验收，桌面 UI 单独使用 JVM。Android 直接复用 Core，测试界面使用 Compose；不是 Core JNI 或桌面 JVM 发行版。iOS 尚未接入；Compose Desktop 与 Native CLI 为独立交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
 **当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Compose Desktop 接入共享 UI 与本地 FFmpeg，独立提供带运行时的便携包；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
 
