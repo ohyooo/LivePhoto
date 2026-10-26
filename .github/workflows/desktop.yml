@@ -84,7 +84,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Failed to release Gradle cache locks.' }
       - name: Verify and package portable desktop
         shell: pwsh
-        run: ./scripts/package-desktop.ps1 -Platform '${{ matrix.platform }}'
+        run: |
+          if ($IsLinux) { & xvfb-run -a pwsh -NoProfile -File ./scripts/package-desktop.ps1 -Platform '${{ matrix.platform }}' }
+          else { & ./scripts/package-desktop.ps1 -Platform '${{ matrix.platform }}' }
+          if ($LASTEXITCODE -ne 0) { throw 'Portable desktop validation failed.' }
       - name: Upload portable desktop
         uses: actions/upload-artifact@v7
         with:

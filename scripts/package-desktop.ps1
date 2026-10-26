@@ -14,6 +14,12 @@ $output = (& $launcher --help 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0 -or $output -notmatch 'LivePhoto Desktop') { throw 'Packaged launcher failed.' }
 $runtime = @(Get-ChildItem $root -Recurse -File -Force | Where-Object { $_.Name -in @('jvm.dll','libjvm.so','libjvm.dylib') })
 if ($runtime.Count -ne 1) { throw 'Expected exactly one bundled JVM.' }
+$smokeDirectory = 'desktop/build/reports/desktop-smoke'
+$java = Join-Path $env:JAVA_HOME $(if ($IsWindows) { 'bin/java.exe' } else { 'bin/java' })
+& $java --source 25 scripts/DesktopPackageSmoke.java $launcher $smokeDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Packaged GUI startup failed.' }
+$gui = Get-Content "$smokeDirectory/packaged-gui.json" -Raw | ConvertFrom-Json
+if (-not $gui.rendered -or -not $gui.externalJavaDisabled) { throw 'Missing real packaged GUI evidence.' }
 $groups = @{}
 foreach ($entry in @(@('shared','desktopJvmTest'), @('desktop','desktopTest'))) {
     $module,$task = $entry
@@ -54,6 +60,6 @@ $files = @(Get-ChildItem $root -Recurse -File -Force | ForEach-Object {
     platform = $Platform; launcher = $relative; bundledRuntime = $true; ffmpegBundled = $false
     tests = $groups; files = $files
     archive = @{ name = [IO.Path]::GetFileName($archive); size = (Get-Item $archive).Length; sha256 = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() }
-    launcherHelp = $output.Trim()
+    launcherHelp = $output.Trim(); packagedGuiSmoke = $gui
 } | ConvertTo-Json -Depth 10 | Set-Content "$directory/desktop-evidence.json"
 Write-Host 'DESKTOP_PORTABLE=VERIFIED'
