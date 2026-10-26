@@ -32,7 +32,7 @@ class DesktopMediaTest {
         var editor: DesktopVideoEditor? = null
         var window: ComposeWindow? = null
         try {
-            execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", video.toString())
+            execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
             execute("-i", video.toString(), "-frames:v", "1", image.toString())
             val host = DesktopPlatform { _, name -> if (name == null) null else output }
             platform = host
@@ -52,7 +52,7 @@ class DesktopMediaTest {
             val changed = assertIs<CoreResult.Failure>(host.analyze(videoRef))
             assertEquals("SOURCE_CHANGED", changed.error.code.value)
             Files.delete(video)
-            execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", video.toString())
+            execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
             System.setProperty("compose.interop.blending", "true")
             EventQueue.invokeAndWait {
                 val playback = DesktopVideoEditor(host.register(video), video, host)
