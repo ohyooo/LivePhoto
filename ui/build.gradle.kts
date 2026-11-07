@@ -9,8 +9,12 @@ kotlin {
     jvmToolchain(25)
     android {
         namespace = "livephoto.ui"
-        compileSdk { version = release(37) { minorApiLevel = 2 } }
-        minSdk = 29
+        compileSdk {
+            version = release(libs.versions.compile.sdk.get().toInt()) {
+                minorApiLevel = libs.versions.compile.minor.get().toInt()
+            }
+        }
+        minSdk = libs.versions.min.sdk.get().toInt()
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
     }
     sourceSets {

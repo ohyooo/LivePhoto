@@ -5,11 +5,15 @@ plugins {
 
 android {
     namespace = "livephoto.android"
-    compileSdk { version = release(37) { minorApiLevel = 2 } }
+    compileSdk {
+        version = release(libs.versions.compile.sdk.get().toInt()) {
+            minorApiLevel = libs.versions.compile.minor.get().toInt()
+        }
+    }
     defaultConfig {
         applicationId = "com.ohyooo.livephoto"
-        minSdk = 29
-        targetSdk = 37
+        minSdk = libs.versions.min.sdk.get().toInt()
+        targetSdk = libs.versions.target.sdk.get().toInt()
         versionCode = providers.environmentVariable("LIVEPHOTO_VERSION_CODE").map(String::toInt).orElse(1).get()
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
