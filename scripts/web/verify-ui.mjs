@@ -498,7 +498,7 @@ try {
 
     }
     if (scenario === 'repair') {
-    const repairReport=()=>text(/(?:修复预览完成|无需修改（未写入）|修复被阻止|修复失败|已应用修复并发起下载)/);
+    const repairReport=()=>page.locator('#repair-report');
     const readRepairReport=()=>driver.report(repairReport());
     // Compose canvas buttons do not expose reliable HTML disabled attributes.
     // Verify the actual hit target cannot publish or change the review instead.
