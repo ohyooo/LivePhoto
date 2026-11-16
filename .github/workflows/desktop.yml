@@ -70,10 +70,23 @@ jobs:
           elseif ($IsWindows) { & ./gradlew.bat @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           else { & ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           if ($LASTEXITCODE -ne 0) { throw 'Desktop build or tests failed.' }
-      - name: Show packaging diagnostics
+      - name: Show failed tests and packaging diagnostics
         if: failure()
         shell: pwsh
         run: |
+          $resultDirectories = @('shared/build/test-results/desktopJvmTest', 'ui/build/test-results/desktopTest', 'desktop/build/test-results/desktopTest')
+          Get-ChildItem $resultDirectories -File -Filter 'TEST-*.xml' -ErrorAction SilentlyContinue | ForEach-Object {
+            [xml]$report = Get-Content $_.FullName -Raw
+            foreach ($test in @($report.testsuite.testcase)) {
+              foreach ($failure in (@($test.failure) + @($test.error))) {
+                if ($null -ne $failure) {
+                  Write-Host "FAILED: $($test.classname).$($test.name)"
+                  Write-Host $failure.message
+                  $failure.InnerText -split '\r?\n' | Select-Object -First 80 | ForEach-Object { Write-Host $_ }
+                }
+              }
+            }
+          }
           Get-ChildItem 'desktop/build/compose/logs' -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Name; Get-Content $_.FullName }
       - name: Release Windows Gradle cache locks
         if: ${{ always() && runner.os == 'Windows' }}

@@ -12,6 +12,7 @@ import javafx.scene.media.Media
 import javafx.scene.image.Image as FxImage
 import javafx.scene.image.ImageView
 import javafx.scene.media.MediaPlayer
+import javafx.scene.media.MediaException
 import javafx.scene.media.MediaView
 import javafx.util.Duration
 import javafx.scene.input.KeyCode
@@ -91,9 +92,8 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     panel.scene = scene
                     fun failed() {
                         val failure = active.error ?: media.error
-                        val cause = failure?.cause?.javaClass?.simpleName
                         changePlayback { it.copy(ready = false, seeking = false, paused = true,
-                            error = "视频预览失败（${failure?.type ?: "MEDIA_ERROR"}${cause?.let { name -> " / $name" }.orEmpty()}）") }
+                            error = "视频预览失败（${playbackFailureDetails(failure)}）") }
                     }
                     media.setOnError { failed() }; active.setOnError { failed() }
                     fun ready() {
@@ -114,7 +114,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                 } catch (failure: Exception) {
                     player?.dispose(); player = null; panel.scene = null
                     changePlayback { it.copy(ready = false, seeking = false,
-                        error = "无法启动本机媒体预览（${failure.javaClass.simpleName}）") }
+                        error = "无法启动本机媒体预览（${playbackFailureDetails(failure)}）") }
                 }
             }
         }
@@ -203,3 +203,9 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         Platform.runLater { player?.dispose(); player = null; panel.scene = null }
     }
 }
+
+/** Types and media codes only; exception messages may contain the user's media path. */
+private fun playbackFailureDetails(error: Throwable?): String =
+    generateSequence(error) { it.cause }.take(4).joinToString(" → ") {
+        if (it is MediaException) "${it.javaClass.simpleName}/${it.type}" else it.javaClass.simpleName
+    }.ifEmpty { "MEDIA_ERROR" }
