@@ -106,10 +106,13 @@
 
 共享控件现在调用 `runTask`，不再直接展开 Core 对象。上表原有 typed 方法保留给既有宿主适配，默认桥接继续复用同一报告格式；Web 覆盖任务入口，在 Kotlin/Wasm Worker 中调用原应用 helpers 和 Core，不经过独立 JS 功能库。`UiTaskResult.saves` 是清理拆分的逐文件显式保存动作；`applyRepair` 仅在预览有安全方案时存在。不要自行构造它、绕过预览，或将取消/失败当作成功保存。
 
+新增源码使用 `UiTaskResult.cancelled` 区分已取消与普通失败，生成页显示中性取消状态且不展示旧结果预览，尚未运行验证
+
 `VideoEditor` 是唯一媒体编辑接口：
 
 ```kotlin
 val playback: State<VideoPlayback>
+val canProcess: Boolean
 fun seek(seconds: Double)
 fun togglePlayback()
 fun setVolume(volume: Double)
@@ -117,11 +120,15 @@ fun setMuted(muted: Boolean)
 fun setRate(rate: Double)
 fun setFullscreen(fullscreen: Boolean)
 suspend fun previewFrame(): String // 只读预览引用
+suspend fun previewFrameAt(seconds: Double): String // 指定位置的只读预览
+suspend fun previewTimeline(): List<String> // 时间轴预览引用
 suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit
 fun cancel()
 ```
 
 `CoreMediaAction`：`Probe / Remux / Trim / ExtractFrame / Transcode`。`CoreMediaEdit` 返回摘要，可带新图片引用或 `EditedVideo`；Probe 没有媒体输出。`VideoPlayback` 包含时长、当前时间、是否就绪/定位中、错误、尺寸、暂停、音量、静音、倍速和全屏状态。全屏按钮还要检查 `canFullscreen`。
+
+新增源码将全屏等非致命展示提示放入 `presentationWarning`，与媒体错误 `error` 分开，展示提示不阻断封面预览或媒体处理，尚未运行验证
 
 Core 的 `Time(value, timescale)` 是有理时间，不要用 UI 显示的舍入秒数覆盖原始时间。设计只需要友好显示时间，实际请求、实际边界与 key 的换算继续交给已有应用逻辑。
 

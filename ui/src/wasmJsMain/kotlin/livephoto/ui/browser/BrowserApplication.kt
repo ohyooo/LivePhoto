@@ -195,8 +195,9 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             imageName = task.imageName ?: "", videoName = task.videoName ?: "", publication = publication), file, movie)
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (files[task.input] !== file || task.video != null && files[task.video] !== movie)
-            return UiTaskResult("已取消处理：所选输入已改变。未发布旧任务输出。", true)
-        if (response.failed) return UiTaskResult(taskFailure(task.kind.name, response), true)
+            return UiTaskResult("已取消处理：所选输入已改变。未发布旧任务输出。", true, cancelled = true)
+        if (response.failed) return UiTaskResult(taskFailure(task.kind.name, response), true,
+            cancelled = response.code == "CANCELLED")
         val blob = response.bytes?.let { taskBlob(it, checkNotNull(response.mime)) }
         if (task.kind == UiTaskKind.Split) {
             val image = checkNotNull(blob)

@@ -365,19 +365,28 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     @Composable override fun ImagePreview(reference: String, modifier: Modifier, onScroll: (Float) -> Unit) {
         val path = entries[reference]?.path
         val image by produceState<ImageBitmap?>(null, path) {
+            var decoded: org.jetbrains.skia.Image? = null
             value = null
-            value = withContext(Dispatchers.IO) {
-                try {
+            try {
+                value = withContext(Dispatchers.IO) {
                     if (path == null || Files.size(path) > ANALYSIS_INPUT_LIMIT) null else {
                         // Enforce the bound while reading too: a selected file may grow after stat().
                         val encoded = Files.newInputStream(path).use { it.readNBytes(ANALYSIS_INPUT_LIMIT + 1) }
                         currentCoroutineContext().ensureActive()
                         if (encoded.size > ANALYSIS_INPUT_LIMIT) return@withContext null
-                        val decoded = org.jetbrains.skia.Image.makeFromEncoded(encoded)
-                        if (decoded.width.toLong() * decoded.height > 64_000_000) { decoded.close(); null } else decoded.toComposeImageBitmap()
+                        val source = org.jetbrains.skia.Image.makeFromEncoded(encoded)
+                        decoded = source
+                        require(source.width.toLong() * source.height <= 64_000_000) { "预览图片尺寸超过限制" }
+                        source.toComposeImageBitmap()
                     }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { null }
+                }
+                // Compose's bitmap borrows this Skia image until the preview leaves composition.
+                awaitCancellation()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { value = null }
+            finally {
+                value = null
+                decoded?.close()
             }
         }
         Box(modifier) { image?.let { Image(it, "图片预览", Modifier.matchParentSize(), contentScale = ContentScale.Fit) } ?: Text("无法预览此图片") }

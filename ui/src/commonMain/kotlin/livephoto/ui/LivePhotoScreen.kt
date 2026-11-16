@@ -106,7 +106,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
             result = try {
                 val response = platform.runTask(UiTask(UiTaskKind.Create, snapshot.image!!, snapshot.video!!, target,
                     imageName = imageName, videoName = videoName))
-                CreationReport(snapshot, response.report, response.failed, response.name)
+                CreationReport(snapshot, response.report, response.failed && !response.cancelled, response.name, response.cancelled)
             } catch (cancelled: CancellationException) {
                 result = CreationReport(snapshot, "生成已取消；如果保存或下载已经开始，请检查目标位置或下载记录。", false, cancelled = true)
                 throw cancelled
@@ -218,7 +218,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 }
             }
             val editingContent = retainedContent {
-                editor?.let { current -> VideoEditingPanel(current, busy || analysisBusy, { mediaBusy = it },
+                editor?.let { current -> VideoEditingPanel(current, busy || analysisBusy || page != 0, { mediaBusy = it },
                     onImage = ::selectImage, onVideo = {
                         selectVideo(it.reference)
                         editing.coverPosition = platform.coverPosition(image, it.reference)?.let { time -> time.value.toDouble() / time.timescale.toDouble() } ?: 0.0

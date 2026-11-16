@@ -30,6 +30,7 @@ public data class VideoPlayback(
     val width: Double = 0.0, val height: Double = 0.0,
     val paused: Boolean = true, val volume: Double = 1.0, val muted: Boolean = false,
     val rate: Double = 1.0, val fullscreen: Boolean = false,
+    val presentationWarning: String? = null,
 )
 
 public interface VideoEditor {
@@ -185,6 +186,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             player()
             if (!playback.ready && playback.error == null) Text("正在读取视频画面…")
             playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            playback.presentationWarning?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Text("可播放不代表可以安全生成或编辑。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         SectionCard("视频编辑") {

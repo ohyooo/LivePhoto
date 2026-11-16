@@ -115,8 +115,12 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         }
     }
     private fun applyFullscreen(enabled: Boolean) {
-        try { fullscreen.set(enabled) }
-        catch (_: Exception) { changePlayback { it.copy(error = "无法切换全屏，请使用普通窗口预览。") } }
+        try {
+            fullscreen.set(enabled)
+            changePlayback { it.copy(presentationWarning = null) }
+        } catch (_: Exception) {
+            changePlayback { it.copy(presentationWarning = "无法切换全屏，请使用普通窗口预览") }
+        }
     }
     private suspend fun <T> operation(action: suspend () -> T): T = coroutineScope {
         val job = currentCoroutineContext().job
