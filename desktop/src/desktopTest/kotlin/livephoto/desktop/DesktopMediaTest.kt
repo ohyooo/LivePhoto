@@ -44,6 +44,13 @@ class DesktopMediaTest {
             assertTrue(probe.summary.isNotBlank())
             val frame = host.previewFrame(videoRef, Time(1, 1u))
             assertTrue(host.describe(frame).sizeBytes!! > 0)
+            val thumbnails = host.previewFrames(videoRef, List(5) { Time(it.toLong(), 3u) })
+            assertEquals(5, thumbnails.size)
+            for (thumbnail in thumbnails) {
+                assertTrue(host.describe(thumbnail).sizeBytes!! > 0)
+                assertNull(host.coverPosition(thumbnail, videoRef), "Timeline previews must not confirm a cover")
+                host.release(thumbnail)
+            }
             val create = host.create(imageRef, videoRef, ProtocolSelector(ProtocolIds.Oplus, ProfileId("jpeg-no-tail")))
             assertIs<CoreResult.Success<*>>(create)
             assertTrue(Files.size(output) > Files.size(video))
