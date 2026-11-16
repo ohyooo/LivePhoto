@@ -114,7 +114,6 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var coverPreviewError by remember(editor) { mutableStateOf<String?>(null) }
     var coverPreviewRetry by remember(editor) { mutableIntStateOf(0) }
     val enabled = !parentBusy && !state.working && playback.ready && editor.canProcess
-    val canPreview by rememberUpdatedState(enabled)
     LaunchedEffect(editor, playback.duration) {
         if (state.end == 0.0 && playback.duration > 0 && !state.pendingTrim) state.resetRange(playback.duration)
     }
@@ -158,25 +157,27 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             finally { state.working = false; state.cancelling = false; onBusy(false) }
         }
     }
-    LaunchedEffect(editor, state.coverOpen, playback.ready, parentBusy, state.working, coverPreviewRetry) {
-        if (state.coverOpen) try {
+    LaunchedEffect(editor, state.coverOpen, enabled, coverPreviewRetry) {
+        if (!enabled) {
+            state.coverPreview = null
+            coverPreviewError = null
+        }
+        if (state.coverOpen && enabled) try {
             snapshotFlow { state.coverPosition }.collectLatest { position ->
-                if (canPreview) {
-                    state.capturing = true; onBusy(true)
-                    state.coverPreview = null
-                    coverPreviewError = null
-                    try {
-                        delay(80)
-                        state.coverPreview = withTimeout(5000) {
-                            editor.previewFrameAt(position)
-                        }
-                    } catch (_: TimeoutCancellationException) { coverPreviewError = "预览加载超时，请重试" }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { coverPreviewError = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
-                    finally { state.capturing = false; onBusy(false) }
-                }
+                state.capturing = true; onBusy(true)
+                state.coverPreview = null
+                coverPreviewError = null
+                try {
+                    delay(80)
+                    state.coverPreview = withTimeout(5000) {
+                        editor.previewFrameAt(position)
+                    }
+                } catch (_: TimeoutCancellationException) { coverPreviewError = "预览加载超时，请重试" }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { coverPreviewError = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
+                finally { state.capturing = false; onBusy(state.working) }
             }
-        } finally { state.capturing = false; onBusy(false) }
+        } finally { state.capturing = false; onBusy(state.working) }
     }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionCard("视频预览") {
