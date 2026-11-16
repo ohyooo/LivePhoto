@@ -33,6 +33,7 @@ public data class VideoPlayback(
 
 public interface VideoEditor {
     public val playback: State<VideoPlayback>
+    public val canProcess: Boolean get() = true
     public fun seek(seconds: Double)
     public val canFullscreen: Boolean get() = false
     public val thumbnail: String? get() = null
@@ -112,7 +113,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var thumbnailRetry by remember(editor) { mutableIntStateOf(0) }
     var coverPreviewError by remember(editor) { mutableStateOf<String?>(null) }
     var coverPreviewRetry by remember(editor) { mutableIntStateOf(0) }
-    val enabled = !parentBusy && !state.working && playback.ready
+    val enabled = !parentBusy && !state.working && playback.ready && editor.canProcess
     val canPreview by rememberUpdatedState(enabled)
     LaunchedEffect(editor, playback.duration) {
         if (state.end == 0.0 && playback.duration > 0 && !state.pendingTrim) state.resetRange(playback.duration)
@@ -185,6 +186,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             Text("可播放不代表可以安全生成或编辑。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         SectionCard("视频编辑") {
+            if (!editor.canProcess) Text("媒体处理后端不可用，配置完成后可继续编辑", color = MaterialTheme.colorScheme.error)
             Disclosure("裁剪范围", when {
                 state.pendingTrim -> "待应用 · ${mediaSeconds((state.end - state.start).coerceAtLeast(0.0))}"
                 state.lastAction == CoreMediaAction.Trim -> "已裁剪 · ${mediaSeconds(playback.duration)}"

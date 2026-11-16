@@ -30,6 +30,7 @@ import kotlin.math.roundToLong
 internal class DesktopVideoEditor(private val reference: String, path: Path, private val owner: DesktopPlatform, poster: Path? = null) : VideoEditor {
     private val state = mutableStateOf(VideoPlayback())
     override val playback: State<VideoPlayback> get() = state
+    override val canProcess: Boolean get() = owner.supportsVideoEditing
     private val panel = JFXPanel()
     private val resultPreview = poster != null
     private var player: MediaPlayer? = null

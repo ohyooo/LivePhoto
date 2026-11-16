@@ -76,6 +76,9 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
             core = DefaultLivePhotoCore(discovered.backend)
             mediaAvailable = discovered.backend != null
             backendName = discovered.executable?.let { "本地 FFmpeg：${Path.of(it).fileName}" } ?: "未找到 FFmpeg；图片与视频直接生成仍可用"
+            if (discovered.issues.any { it.code.value == "FFMPEG_EXPLICIT_PATH_UNAVAILABLE" }) {
+                backendName += if (mediaAvailable) "；指定路径不可用，已使用 PATH 中的 FFmpeg" else "；指定路径也不可用"
+            }
             fileSelectionError = null
         }
     }
