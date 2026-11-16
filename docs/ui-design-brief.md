@@ -113,6 +113,8 @@
 ```kotlin
 val playback: State<VideoPlayback>
 val canProcess: Boolean
+val canRetryPlayback: Boolean
+fun retryPlayback()
 fun seek(seconds: Double)
 fun togglePlayback()
 fun setVolume(volume: Double)

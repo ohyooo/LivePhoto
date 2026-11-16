@@ -358,7 +358,10 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     }
     @Composable override fun rememberVideoEditor(reference: String?): VideoEditor? {
         val entry = reference?.let(entries::get)
-        val editor = remember(reference, entry) { entry?.let { DesktopVideoEditor(reference!!, it.path, this) } }
+        var revision by remember(reference) { mutableIntStateOf(0) }
+        val editor = remember(reference, entry, revision) {
+            entry?.let { DesktopVideoEditor(reference!!, it.path, this, onRetry = { revision++ }) }
+        }
         DisposableEffect(editor) { onDispose { editor?.close() } }
         return editor
     }

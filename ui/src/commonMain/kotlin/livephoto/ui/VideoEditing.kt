@@ -36,6 +36,8 @@ public data class VideoPlayback(
 public interface VideoEditor {
     public val playback: State<VideoPlayback>
     public val canProcess: Boolean get() = true
+    public val canRetryPlayback: Boolean get() = false
+    public fun retryPlayback() {}
     public fun seek(seconds: Double)
     public val canFullscreen: Boolean get() = false
     public val thumbnail: String? get() = null
@@ -106,6 +108,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val coverFocus = remember { BringIntoViewRequester() }
+    LaunchedEffect(editor) { state.coverPreview = null }
     LaunchedEffect(state.coverFocusRequest) {
         if (state.coverFocusRequest > 0) { withFrameNanos { }; coverFocus.bringIntoView() }
     }
@@ -186,6 +189,10 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             player()
             if (!playback.ready && playback.error == null) Text("正在读取视频画面…")
             playback.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (playback.error != null && editor.canRetryPlayback) {
+                OutlinedButton(onClick = editor::retryPlayback, enabled = !parentBusy && !state.working && !state.capturing,
+                    modifier = Modifier.testTag("retry-playback"), shape = ControlShape) { Text("重新加载视频预览") }
+            }
             playback.presentationWarning?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Text("可播放不代表可以安全生成或编辑。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

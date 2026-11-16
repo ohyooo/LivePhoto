@@ -27,10 +27,18 @@ import javax.swing.SwingUtilities
 import kotlin.math.roundToLong
 
 /** Playback is a view only. Every exported frame or edited video goes through Core/FFmpeg. */
-internal class DesktopVideoEditor(private val reference: String, path: Path, private val owner: DesktopPlatform, poster: Path? = null) : VideoEditor {
+internal class DesktopVideoEditor(private val reference: String, path: Path, private val owner: DesktopPlatform,
+    poster: Path? = null, private val onRetry: (() -> Unit)? = null) : VideoEditor {
     private val state = mutableStateOf(VideoPlayback())
     override val playback: State<VideoPlayback> get() = state
     override val canProcess: Boolean get() = owner.supportsVideoEditing
+    override val canRetryPlayback: Boolean get() = !closed && onRetry != null && state.value.error != null
+    override fun retryPlayback() {
+        if (canRetryPlayback) {
+            close()
+            onRetry?.invoke()
+        }
+    }
     private val panel = JFXPanel()
     private val resultPreview = poster != null
     private var player: MediaPlayer? = null
@@ -81,7 +89,12 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                         content.focusedProperty().addListener { _, _, focused -> if (!focused) pausePreview() }
                     }
                     panel.scene = scene
-                    fun failed() { changePlayback { it.copy(ready = false, seeking = false, error = "本机预览不支持此媒体（${active.error?.type ?: media.error?.type ?: "MEDIA_ERROR"}）") } }
+                    fun failed() {
+                        val failure = active.error ?: media.error
+                        val cause = failure?.cause?.javaClass?.simpleName
+                        changePlayback { it.copy(ready = false, seeking = false,
+                            error = "视频预览失败（${failure?.type ?: "MEDIA_ERROR"}${cause?.let { name -> " / $name" }.orEmpty()}）") }
+                    }
                     media.setOnError { failed() }; active.setOnError { failed() }
                     active.setOnReady {
                         val duration = active.totalDuration.toSeconds()
@@ -91,7 +104,13 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     active.currentTimeProperty().addListener { _, _, value -> changePlayback { it.copy(current = value.toSeconds(), seeking = false) } }
                     active.statusProperty().addListener { _, _, status -> changePlayback { it.copy(paused = status != MediaPlayer.Status.PLAYING) } }
                     active.setOnEndOfMedia { changePlayback { it.copy(paused = true, current = it.duration) } }
-                } catch (_: Exception) { changePlayback { it.copy(seeking = false, error = "无法启动本机媒体预览") } }
+                    // Errors may precede installation of the asynchronous callbacks.
+                    if (active.error != null || media.error != null) failed()
+                } catch (failure: Exception) {
+                    player?.dispose(); player = null; panel.scene = null
+                    changePlayback { it.copy(ready = false, seeking = false,
+                        error = "无法启动本机媒体预览（${failure.javaClass.simpleName}）") }
+                }
             }
         }
     }
