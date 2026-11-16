@@ -1,15 +1,14 @@
 package livephoto.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
-import livephoto.core.CoreResult
 
 @Composable
 internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String?, enabled: Boolean, onBusy: (Boolean) -> Unit) {
@@ -22,14 +21,15 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
     val scope = rememberCoroutineScope()
     Text("清理拆分：先验证并准备普通图片和视频，再分别保存。不修改原片、不转码；当前仅 JPEG + MP4/MOV。")
     OutlinedButton(shape = ControlShape, onClick = {
+        if (!enabled || saving != null) return@OutlinedButton
         val selected = reference ?: return@OutlinedButton
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             onBusy(true); saving = "prepare"; prepared = null; report = null; failed = false
             imageStatus = null; videoStatus = null
             try {
                 val result = platform.runTask(UiTask(UiTaskKind.Split, selected))
                 prepared = result.takeIf { it.saves.isNotEmpty() }; report = result.report; failed = result.failed
-            } catch (cancelled: CancellationException) { throw cancelled }
+            } catch (cancelled: CancellationException) { report = "拆分准备已取消。"; throw cancelled }
             catch (error: Exception) {
                 failed = true
                 report = "清理拆分未完成：${error.message?.take(2000) ?: "未知异常"}\n未修改原片、未发起文件保存。"
@@ -46,12 +46,17 @@ internal fun CleanSplitControls(platform: LivePhotoUiPlatform, reference: String
             val status = if (key == "image") imageStatus else videoStatus
             val label = if (key == "image") "保存拆分图片" else "保存拆分视频"
             OutlinedButton(shape = ControlShape, onClick = {
-                scope.launch {
+                if (!enabled || saving != null) return@OutlinedButton
+                scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     saving = key; onBusy(true)
                     try {
                         val message = file.save()
                         if (key == "image") imageStatus = message else videoStatus = message
-                    } catch (cancelled: CancellationException) { throw cancelled }
+                    } catch (cancelled: CancellationException) {
+                        val message = "保存等待已取消；若保存已开始，请检查目标位置或下载记录。"
+                        if (key == "image") imageStatus = message else videoStatus = message
+                        throw cancelled
+                    }
                     catch (error: Exception) {
                         val message = "保存未完成或状态不确定：${error.message?.take(2000) ?: "未知异常"}；请先检查保存位置和记录，避免重复保存。另一文件的状态不受影响。"
                         if (key == "image") imageStatus = message else videoStatus = message

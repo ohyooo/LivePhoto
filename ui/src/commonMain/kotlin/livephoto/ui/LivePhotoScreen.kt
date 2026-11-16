@@ -27,11 +27,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import livephoto.core.*
 
 private data class InputSnapshot(val image: String?, val video: String?, val profile: Int)
-private data class CreationReport(val input: InputSnapshot, val text: String, val failed: Boolean, val outputName: String? = null)
+private data class CreationReport(val input: InputSnapshot, val text: String, val failed: Boolean,
+    val outputName: String? = null, val cancelled: Boolean = false)
 private val ProfileNames = listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1")
 
 @Composable
@@ -55,15 +57,21 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
     val resultFocus = remember { BringIntoViewRequester() }
     val scrolling: (Float) -> Unit = { delta -> scope.launch { scroll.scrollBy(delta) } }
     val locked = busy || analysisBusy || mediaBusy
-    val imageInfo by produceState<SelectedMediaInfo?>(null, image, platform) {
-        value = null; value = image?.let { platform.describe(it) }
+    fun selectImage(next: String) {
+        val previous = image
+        image = next
+        previous?.takeIf { it != next && it != video }?.let(platform::release)
     }
-    val videoInfo by produceState<SelectedMediaInfo?>(null, video, platform) {
-        value = null; value = video?.let { platform.describe(it) }
+    fun selectVideo(next: String) {
+        val previous = video
+        video = next
+        previous?.takeIf { it != next && it != image }?.let(platform::release)
     }
-    val imagePicker = platform.rememberPicker(MediaKind.Image) { selected -> if (selected != null) image = selected }
+    val imageInfo by rememberSelectedMediaInfo(platform, image)
+    val videoInfo by rememberSelectedMediaInfo(platform, video)
+    val imagePicker = platform.rememberPicker(MediaKind.Image) { selected -> if (selected != null) selectImage(selected) }
     val videoPicker = platform.rememberPicker(MediaKind.Video) { selected ->
-        if (selected != null) { video = selected; editing = VideoEditingState() }
+        if (selected != null) { selectVideo(selected); editing = VideoEditingState() }
     }
     val editor = platform.rememberVideoEditor(video)
     val playback = editor?.playback?.value
@@ -85,7 +93,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
         image = null; video = null; editing = VideoEditingState(); resetDialog = false
     }
     fun generate() {
-        if (locked || blocker != null) return
+        if (busy || analysisBusy || mediaBusy || blocker != null) return
         val snapshot = InputSnapshot(image, video, profile)
         val imageName = imageInfo?.displayName; val videoName = videoInfo?.displayName
         val target = when (profile) {
@@ -93,13 +101,16 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
             1 -> ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("jpeg"))
             else -> ProtocolSelector(ProtocolIds.GoogleV1, ProfileId("jpeg"))
         }
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             busy = true
             result = try {
                 val response = platform.runTask(UiTask(UiTaskKind.Create, snapshot.image!!, snapshot.video!!, target,
                     imageName = imageName, videoName = videoName))
                 CreationReport(snapshot, response.report, response.failed, response.name)
-            } catch (cancelled: CancellationException) { throw cancelled }
+            } catch (cancelled: CancellationException) {
+                result = CreationReport(snapshot, "生成已取消；如果保存或下载已经开始，请检查目标位置或下载记录。", false, cancelled = true)
+                throw cancelled
+            }
             catch (error: Exception) { CreationReport(snapshot, platform.formatFailure(error, imageName, videoName), true) }
             finally { busy = false }
             withFrameNanos { }
@@ -183,7 +194,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                             else if (isVideo) Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, ControlShape), contentAlignment = Alignment.Center) { Text("▶") }
                             else platform.ImagePreview(reference, Modifier.size(40.dp), scrolling)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("名称：${info?.displayName ?: "正在读取…"}", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                Text("名称：${info?.displayName ?: if (info == null) "正在读取…" else "未知名称"}", maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.testTag(if (isVideo) "video-name" else "image-name").clickable { fileDetails = info })
                                 Text("大小：${if (info == null) "正在读取…" else formatMediaSize(info.sizeBytes)}",
                                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag(if (isVideo) "video-size" else "image-size"))
@@ -191,7 +202,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                             TextButton(onClick = { if (isVideo) videoPicker() else imagePicker() }, enabled = !locked,
                                 modifier = Modifier.semantics { contentDescription = "重新选择$label" }, contentPadding = PaddingValues(4.dp)) { Text("更换") }
                             TextButton(onClick = {
-                                platform.release(reference)
+                                if (reference != (if (isVideo) image else video)) platform.release(reference)
                                 if (isVideo) { video = null; editing = VideoEditingState() } else image = null
                             }, enabled = !locked, modifier = Modifier.semantics { contentDescription = "移除$label" }, contentPadding = PaddingValues(4.dp)) { Text("移除") }
                         }
@@ -208,8 +219,8 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
             }
             val editingContent = retainedContent {
                 editor?.let { current -> VideoEditingPanel(current, busy || analysisBusy, { mediaBusy = it },
-                    onImage = { image = it }, onVideo = {
-                        video = it.reference
+                    onImage = ::selectImage, onVideo = {
+                        selectVideo(it.reference)
                         editing.coverPosition = platform.coverPosition(image, it.reference)?.let { time -> time.value.toDouble() / time.timescale.toDouble() } ?: 0.0
                     }, onScroll = scrolling, player = player,
                     preview = { reference, modifier -> platform.ImagePreview(reference, modifier, scrolling) }, state = editing,
@@ -220,11 +231,11 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 result?.let { report ->
                     val stale = report.input != InputSnapshot(image, video, profile)
                     SectionCard(if (stale) "上次结果 · 输入已变化" else "本次结果", Modifier.bringIntoViewRequester(resultFocus).testTag("result-card")) {
-                        Text(if (report.failed) "生成失败" else "已生成", color = if (report.failed) MaterialTheme.colorScheme.error
+                        Text(if (report.cancelled) "生成已取消" else if (report.failed) "生成失败" else "已生成", color = if (report.cancelled) MaterialTheme.colorScheme.onSurfaceVariant else if (report.failed) MaterialTheme.colorScheme.error
                             else if (darkTheme) Color(0xff4ade80) else Color(0xff15803d))
                         report.outputName?.let { Text(it, Modifier.testTag("result-file-name")) }
                         Text("图片：${report.input.image?.let { if (it == image) imageInfo?.displayName else null } ?: "本次操作所选图片"}；目标：${ProfileNames[report.input.profile]}", style = MaterialTheme.typography.bodySmall)
-                        if (!report.failed && platform.hasResultPreview) {
+                        if (!report.failed && !report.cancelled && platform.hasResultPreview) {
                             platform.ResultPreview(Modifier.fillMaxWidth().height(180.dp), scrolling)
                             Text("按住预览，松开回封面；空格或回车同样可用。仅应用内模拟，不代表手机相册兼容。", style = MaterialTheme.typography.bodySmall)
                         }

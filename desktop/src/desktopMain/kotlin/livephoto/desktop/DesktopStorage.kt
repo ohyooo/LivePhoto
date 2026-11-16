@@ -20,6 +20,10 @@ internal suspend fun chooseFile(owner: Frame?, saveName: String? = null): Path? 
     continuation.invokeOnCancellation { EventQueue.invokeLater { dialog?.dispose() } }
     EventQueue.invokeLater {
         if (continuation.isActive) {
+            if (owner != null && !owner.isDisplayable) {
+                continuation.cancel()
+                return@invokeLater
+            }
             try {
                 val picker = FileDialog(owner, if (saveName == null) "选择媒体文件" else "另存为", if (saveName == null) FileDialog.LOAD else FileDialog.SAVE)
                 dialog = picker
@@ -44,6 +48,8 @@ internal fun publishFile(target: Path, bytes: Bytes, expected: Digest, cancelled
     checkCancelled()
     val destination = target.toAbsolutePath()
     val temporary = Files.createTempFile(destination.parent, ".livephoto-", ".part")
+    var published = false
+    var failure: Throwable? = null
     try {
         FileChannel.open(temporary, StandardOpenOption.WRITE).use { channel ->
             for (offset in 0 until bytes.size step 65536) {
@@ -61,5 +67,17 @@ internal fun publishFile(target: Path, bytes: Bytes, expected: Digest, cancelled
         val actual = hash.digest().joinToString("") { "%02x".format(it) }
         check(Files.size(temporary) == bytes.size.toLong() && actual == expected.value) { "Output verification failed" }
         checkCancelled(); Files.createLink(destination, temporary)
-    } finally { Files.deleteIfExists(temporary) }
+        published = true
+    } catch (error: Throwable) {
+        failure = error
+        throw error
+    } finally {
+        try { Files.deleteIfExists(temporary) }
+        catch (cleanup: Exception) {
+            val original = failure
+            if (original != null) original.addSuppressed(cleanup)
+            else if (!published) throw cleanup
+            else System.err.println("文件已保存，但临时链接未能清理。")
+        }
+    }
 }

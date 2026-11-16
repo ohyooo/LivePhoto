@@ -288,6 +288,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         override suspend fun previewFrame(): String {
             check(surface != null && !disposed) { "播放器不可用" }
             val result = browserAwait(surface!!.capture())
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             check(!disposed) { "输入已改变" }
             val file = browserFile(result.blob, "video-cover.jpg", "image/jpeg")
             previewReference?.let { files.remove(it) }

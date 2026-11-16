@@ -1,13 +1,27 @@
 package livephoto.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.CancellationException
 import livephoto.core.*
 
 public enum class MediaKind { Image, Video, LivePhoto }
 
 /** Opaque references belong to the platform adapter, never the protocol Core. */
 public data class SelectedMediaInfo(val displayName: String? = null, val sizeBytes: Long? = null)
+
+/** File details are advisory; the explicit Core operation reports inaccessible or changed inputs. */
+@Composable
+internal fun rememberSelectedMediaInfo(platform: LivePhotoUiPlatform, reference: String?, revision: Int = 0): State<SelectedMediaInfo?> =
+    produceState<SelectedMediaInfo?>(null, platform, reference, revision) {
+        value = null
+        try { value = reference?.let { platform.describe(it) } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { value = SelectedMediaInfo() }
+    }
+
 public data class CreatedPhoto(val operation: OperationResult)
 
 /** Platform interactions only; presentation, state and layout live in commonMain. */
@@ -33,6 +47,7 @@ public interface LivePhotoUiPlatform {
     @Composable
     public fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit
     public suspend fun describe(reference: String): SelectedMediaInfo
+    /** Drop an adapter-owned reference; never delete the user's original file. Safe to repeat. */
     public fun release(reference: String) {}
     public suspend fun runTask(task: UiTask): UiTaskResult = runHostTask(task)
     public val supportsTaskCancellation: Boolean get() = false

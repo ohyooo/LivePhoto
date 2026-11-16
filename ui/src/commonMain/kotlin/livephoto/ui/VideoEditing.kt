@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -42,6 +42,14 @@ public interface VideoEditor {
     public fun setRate(rate: Double) {}
     public fun setFullscreen(fullscreen: Boolean) {}
     public suspend fun previewFrame(): String
+    /** Preview the requested position independently of an asynchronous player's previous clock. */
+    public suspend fun previewFrameAt(seconds: Double): String {
+        seek(seconds)
+        snapshotFlow { playback.value }.first {
+            it.ready && !it.seeking && kotlin.math.abs(it.current - seconds) <= 0.1
+        }
+        return previewFrame()
+    }
     public suspend fun previewTimeline(): List<String> = emptyList()
     public suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit
     public fun cancel()
@@ -98,22 +106,29 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     }
     var thumbnails by remember(editor) { mutableStateOf<List<String>>(emptyList()) }
     var thumbnailError by remember(editor) { mutableStateOf<String?>(null) }
+    var thumbnailsLoading by remember(editor) { mutableStateOf(false) }
+    var thumbnailRetry by remember(editor) { mutableIntStateOf(0) }
     val enabled = !parentBusy && !state.working && playback.ready
     val canPreview by rememberUpdatedState(enabled)
     LaunchedEffect(editor, playback.duration) {
         if (state.end == 0.0 && playback.duration > 0 && !state.pendingTrim) state.resetRange(playback.duration)
     }
-    LaunchedEffect(editor, playback.ready) {
-        if (playback.ready && thumbnails.isEmpty()) try { thumbnails = editor.previewTimeline() }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { thumbnailError = "缩略图暂不可用，仍可使用时间与范围控件。" }
+    LaunchedEffect(editor, state.trimOpen, state.coverOpen, enabled, thumbnailRetry) {
+        if (state.trimOpen && !state.coverOpen && enabled && thumbnails.isEmpty()) {
+            thumbnailsLoading = true; thumbnailError = null
+            try { thumbnails = editor.previewTimeline() }
+            catch (_: TimeoutCancellationException) { thumbnailError = "缩略图加载超时，仍可使用时间与范围控件。" }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { thumbnailError = "缩略图暂不可用，仍可使用时间与范围控件。" }
+            finally { thumbnailsLoading = false }
+        }
     }
     fun time(value: Double): Time {
         require(value.isFinite() && value >= 0 && value <= 60) { "媒体处理仅限 60 秒内视频。" }
         return Time((value * 1_000_000).roundToLong(), 1_000_000u)
     }
     fun run(action: CoreMediaAction) {
-        if (!enabled || state.capturing) return
+        if (!enabled || state.working || state.capturing) return
         focus.clearFocus()
         state.working = true; state.cancelling = false; state.lastAction = action; onBusy(true)
         val label = when (action) {
@@ -133,27 +148,26 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 result.imageReference?.let(onImage)
                 result.video?.let { state.processedVideo(); onVideo(it) }
                 state.status = result.summary
-            } catch (cancelled: CancellationException) { throw cancelled }
+            } catch (cancelled: CancellationException) { state.status = "媒体处理已取消。"; throw cancelled }
             catch (error: Exception) { state.status = "${label}失败：${error.message?.take(2000) ?: "未知错误"}。输入未替换，不自动转码或切换实现。" }
             finally { state.working = false; state.cancelling = false; onBusy(false) }
         }
     }
-    LaunchedEffect(editor, state.coverOpen) {
+    LaunchedEffect(editor, state.coverOpen, playback.ready, parentBusy, state.working) {
         if (state.coverOpen) try {
-            snapshotFlow { state.coverPosition }.conflate().collect { position ->
+            snapshotFlow { state.coverPosition }.collectLatest { position ->
                 if (canPreview) {
                     state.capturing = true; onBusy(true)
+                    state.coverPreview = null
                     try {
+                        delay(80)
                         state.coverPreview = withTimeout(5000) {
-                            editor.seek(position)
-                            snapshotFlow { editor.playback.value }.first { it.ready && !it.seeking }
-                            editor.previewFrame()
+                            editor.previewFrameAt(position)
                         }
                     } catch (_: TimeoutCancellationException) { state.status = "预览加载超时，请重试。" }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { state.status = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
                     finally { state.capturing = false; onBusy(false) }
-                    delay(80)
                 }
             }
         } finally { state.capturing = false; onBusy(false) }
@@ -180,7 +194,11 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                         }
                     }
                 }
-                thumbnailError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (thumbnailsLoading) Text("正在加载时间轴缩略图…", style = MaterialTheme.typography.bodySmall)
+                thumbnailError?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { thumbnailRetry++ }, enabled = enabled) { Text("重试缩略图") }
+                }
                 RangeSlider(value = state.start.toFloat()..state.end.toFloat(), enabled = enabled && playback.duration > 0,
                     valueRange = 0f..playback.duration.coerceAtLeast(.001).toFloat(), onValueChange = { range ->
                         val moved = if (range.start.toDouble() != state.start) range.start.toDouble() else range.endInclusive.toDouble()

@@ -1,7 +1,6 @@
 package livephoto.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -9,8 +8,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
-import livephoto.core.CoreResult
 
 @Composable
 internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?, enabled: Boolean, onBusy: (Boolean) -> Unit) {
@@ -25,17 +24,20 @@ internal fun PhotoKeyControls(platform: LivePhotoUiPlatform, reference: String?,
         enabled = enabled && !working, singleLine = true, isError = parseKeySeconds(seconds) == null,
         modifier = Modifier.fillMaxWidth().testTag("key-seconds"))
     Button(shape = ControlShape, onClick = {
-        if (working) return@Button
+        if (!enabled || working) return@Button
         val selected = reference ?: return@Button
         val requested = parseKeySeconds(seconds) ?: return@Button
         // End the editing session before temporarily disabling its input.
         focus.clearFocus()
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             working = true; onBusy(true); report = null; failed = false
             try {
                 val result = platform.runTask(UiTask(UiTaskKind.Key, selected, time = requested))
                 report = result.report; failed = result.failed
-            } catch (cancelled: CancellationException) { throw cancelled }
+            } catch (cancelled: CancellationException) {
+                report = "关键照片修改已取消；如果保存或下载已经开始，请检查目标位置或下载记录。"
+                throw cancelled
+            }
             catch (error: Exception) { failed = true; report = "关键照片修改或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查保存位置和记录，避免重复保存。" }
             finally { working = false; onBusy(false) }
         }

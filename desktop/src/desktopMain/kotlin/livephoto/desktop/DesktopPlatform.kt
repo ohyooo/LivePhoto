@@ -9,6 +9,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import livephoto.adapters.files.FileInputSession
 import livephoto.adapters.files.NativeFfmpeg
 import livephoto.core.*
@@ -22,7 +24,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToLong
 
 internal class DesktopCoreFailure(val error: CoreError) : Exception("${error.code.value} / ${error.stage}：${error.message.take(1600)}")
@@ -36,10 +37,16 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     @Volatile private var selectedFrameImage: String? = null
     private var lastResult by mutableStateOf<Pair<String, String>?>(null)
     private val pendingDeletes = ConcurrentHashMap.newKeySet<Path>()
-    private val cancellations = ConcurrentHashMap.newKeySet<AtomicBoolean>()
+    private val taskLock = Any()
+    private val tasks = mutableSetOf<Job>()
+    private var closed = false
+    private val backendLock = Mutex()
+    private val pickerLock = Mutex()
     private val root = Files.createTempDirectory("LivePhoto-")
     @Volatile private var core: LivePhotoCore = DefaultLivePhotoCore()
     var owner: Frame? = null
+    internal var playerFullscreen by mutableStateOf(false)
+    internal var fileSelectionError by mutableStateOf<String?>(null)
     var backendName by mutableStateOf("正在检查本地 FFmpeg…")
         private set
     private var mediaAvailable by mutableStateOf(false)
@@ -54,11 +61,23 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     override val supportsClipboard: Boolean = true
     override val supportsVideoEditing: Boolean get() = mediaAvailable
     override val hasResultPreview: Boolean get() = lastResult != null
-    suspend fun configureFfmpeg(explicit: String? = null) = withContext(Dispatchers.IO) {
-        val discovered = NativeFfmpeg({ root.toString() }).discover(explicit, System.getenv("PATH").orEmpty())
-        core = DefaultLivePhotoCore(discovered.backend)
-        mediaAvailable = discovered.backend != null
-        backendName = discovered.executable?.let { "本地 FFmpeg：${Path.of(it).fileName}" } ?: "未找到 FFmpeg；图片与视频直接生成仍可用"
+    suspend fun configureFfmpeg(explicit: String? = null) = task {
+        backendLock.withLock {
+            val discovered = try {
+                withContext(Dispatchers.IO) {
+                    NativeFfmpeg({ root.toString() }).discover(explicit, System.getenv("PATH").orEmpty())
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                backendName = if (mediaAvailable) "FFmpeg 检查失败，保留之前的媒体后端" else "FFmpeg 检查失败，媒体编辑暂不可用"
+                throw failure
+            }
+            currentCoroutineContext().ensureActive()
+            core = DefaultLivePhotoCore(discovered.backend)
+            mediaAvailable = discovered.backend != null
+            backendName = discovered.executable?.let { "本地 FFmpeg：${Path.of(it).fileName}" } ?: "未找到 FFmpeg；图片与视频直接生成仍可用"
+            fileSelectionError = null
+        }
     }
     internal fun register(path: Path, name: String = path.fileName.toString(), digest: Digest? = null, owned: Boolean = false): String {
         val reference = UUID.randomUUID().toString()
@@ -69,7 +88,32 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     @Composable override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit {
         val scope = rememberCoroutineScope()
         val selected by rememberUpdatedState(onResult)
-        return remember(kind) { { scope.launch { val path = picker(owner, null); if (path != null && kind == MediaKind.Image) selectedFrameImage = null; selected(path?.let { register(it) }) }; Unit } }
+        return remember(kind) { {
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                var reference: String? = null
+                try {
+                    fileSelectionError = null
+                    val path = selectFile() ?: return@launch
+                    currentCoroutineContext().ensureActive()
+                    reference = register(path)
+                    selected(reference)
+                    reference = null // Ownership has passed to the shared input state.
+                    if (kind == MediaKind.Image) selectedFrameImage = null
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { fileSelectionError = "无法选择文件，请检查系统文件访问权限后重试。" }
+                finally { reference?.let(::release) }
+            }
+            Unit
+        } }
+    }
+    internal suspend fun selectFile(saveName: String? = null): Path? = task {
+        // Ignore duplicate invocations instead of queueing a second modal window.
+        if (!pickerLock.tryLock()) return@task null
+        try {
+            val selected = picker(owner, saveName)
+            currentCoroutineContext().ensureActive()
+            selected
+        } finally { pickerLock.unlock() }
     }
     override suspend fun describe(reference: String): SelectedMediaInfo = withContext(Dispatchers.IO) {
         val entry = entries.getValue(reference)
@@ -80,17 +124,27 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         frames.remove(reference); timelines.remove(reference); if (selectedFrameImage == reference) selectedFrameImage = null
     }
     private fun discardReleasedFiles() { pendingDeletes.toList().forEach { try { Files.deleteIfExists(it); pendingDeletes.remove(it) } catch (_: Exception) {} } }
-    override fun cancelTask() { cancellations.forEach { it.set(true) } }
+    override fun cancelTask() {
+        synchronized(taskLock) { tasks.toList() }.forEach { it.cancel(CancellationException("操作已取消")) }
+    }
+    private suspend fun <T> task(action: suspend () -> T): T = coroutineScope {
+        val job = currentCoroutineContext().job
+        synchronized(taskLock) {
+            if (closed) throw CancellationException("应用正在关闭")
+            tasks.add(job)
+        }
+        try { action() }
+        finally { synchronized(taskLock) { tasks.remove(job) } }
+    }
     override suspend fun copyText(text: String): Boolean = try { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null); true } catch (_: Exception) { false }
     override fun formatFailure(error: Exception, imageName: String?, videoName: String?): String =
         if (error is DesktopCoreFailure) formatCoreFailure(error.error, imageName, videoName) else "操作失败\n未完成保存；请检查所选文件、输出位置和媒体格式。"
 
     private suspend fun <T> sources(references: List<String>, limit: Int = ANALYSIS_INPUT_LIMIT,
-        action: suspend (LivePhotoCore, List<BinarySource>, Context) -> CoreResult<T>): CoreResult<T> = withContext(Dispatchers.IO) {
+        action: suspend (LivePhotoCore, List<BinarySource>, Context) -> CoreResult<T>): CoreResult<T> = task { withContext(Dispatchers.IO) {
         discardReleasedFiles()
-        val job = currentCoroutineContext()[Job]
-        val stop = AtomicBoolean(false); cancellations.add(stop)
-        val context = Context(Limits(limit.toULong(), 48uL * 1024u * 1024u), cancellation = Cancellation { stop.get() || job?.isActive == false })
+        val job = currentCoroutineContext().job
+        val context = Context(Limits(limit.toULong(), 48uL * 1024u * 1024u), cancellation = Cancellation { !job.isActive })
         val session = FileInputSession(root.resolve("input-${UUID.randomUUID()}").toString(), context)
         val selectedCore = core
         try {
@@ -111,11 +165,11 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         catch (_: java.nio.file.FileAlreadyExistsException) { failed("OUTPUT_EXISTS", Stage.Publish, "The output exists; choose a new name") }
         catch (_: UnsupportedOperationException) { failed("ATOMIC_PUBLICATION_UNAVAILABLE", Stage.Publish, "This filesystem cannot atomically create the output") }
         catch (_: Exception) { failed("IO_WRITE_FAILED", Stage.Publish, "Unable to read or save the selected media") }
-        finally { withContext(NonCancellable) { session.close(); cancellations.remove(stop) } }
-    }
+        finally { withContext(NonCancellable) { session.close() } }
+    } }
     private suspend fun save(bytes: Bytes, digest: Digest, name: String, context: Context): Boolean {
         if (context.cancellation?.isCancelled() == true) throw DesktopCoreFailure(CoreError(IssueCode("CANCELLED"), Stage.Publish, "Save cancelled"))
-        val target = picker(owner, name) ?: return false
+        val target = selectFile(name) ?: return false
         publishFile(target, bytes, digest) { context.cancellation?.isCancelled() == true }
         return true
     }
@@ -165,12 +219,12 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         }
     }
     override suspend fun cleanSplit(reference: String): CoreResult<PreparedCleanSplit<Bytes>> = sources(listOf(reference)) { core, input, context -> prepareCleanSplit(core, input.single(), context.cancellation) }
-    override suspend fun saveSplitFile(file: SplitFile<Bytes>): String = withContext(Dispatchers.IO) {
-        val target = picker(owner, "LivePhoto-clean.${file.extension}") ?: return@withContext "保存已取消；未写入文件。"
+    override suspend fun saveSplitFile(file: SplitFile<Bytes>): String = task { withContext(Dispatchers.IO) {
+        val target = selectFile("LivePhoto-clean.${file.extension}") ?: return@withContext "保存已取消；未写入文件。"
         val job = currentCoroutineContext()[Job]
         publishFile(target, file.bytes, file.digest) { job?.isActive == false }
         "已保存${if (file.mime == "image/jpeg") "图片" else "视频"}；另一文件需单独保存。"
-    }
+    } }
     override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<ConvertedPhoto> = sources(listOf(reference)) { core, input, context ->
         when (val result = prepareConvertedPhoto(core, input.single(), target, context.cancellation)) {
             is CoreResult.Failure -> result
@@ -195,38 +249,93 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         publishFile(path, bytes, digest)
         return register(path, name, digest, owned = true)
     }
-    internal suspend fun previewFrame(reference: String, requested: Time): String = media(reference, CoreMediaAction.ExtractFrame, requested, Time.Zero, preview = true).imageReference!!
-    internal suspend fun processMedia(reference: String, action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit = media(reference, action, start, end, preview = false)
-    private suspend fun media(reference: String, action: CoreMediaAction, start: Time, end: Time, preview: Boolean): CoreMediaEdit {
-        val result = sources(listOf(reference), BROWSER_MEDIA_INPUT_LIMIT) { core, input, context ->
-            when (val result = prepareCoreMedia(core, input.single(), action, start, end, context.cancellation, BROWSER_MEDIA_INPUT_LIMIT)) {
-                is CoreResult.Failure -> result
-                is CoreResult.Success -> {
-                    val prepared = result.value
-                    val bytes = prepared.bytes
-                    if (bytes == null) CoreResult.Success(CoreMediaEdit(prepared.summary))
-                    else {
-                        val previous = timelines.getValue(reference)
-                        val selected = selectedFrameImage?.let(frames::get)
-                        val window = prepared.retainedVideoWindow
-                        if (action == CoreMediaAction.Trim && window != null && selected?.root == previous.root) {
-                            val point = selected.sourceTime - previous.origin
-                            if (point < window.start.value.toDouble() / window.start.timescale.toDouble() || point >= window.end.value.toDouble() / window.end.timescale.toDouble())
-                                return@sources failed("COVER_OUTSIDE_TRIM", Stage.Plan, "裁剪范围未包含已确认封面；输入未替换")
+    internal suspend fun previewFrame(reference: String, requested: Time): String = previewFrames(reference, listOf(requested), 960).single()
+
+    /** Capture the input once for the whole strip; never seek the visible player or confirm a cover. */
+    internal suspend fun previewFrames(reference: String, positions: List<Time>, edge: Int = 320): List<String> {
+        require(positions.size in 1..5 && edge in 1..960)
+        val prepared = mutableListOf<String>()
+        try {
+            val result = withTimeout(30_000) {
+                sources(listOf(reference), BROWSER_MEDIA_INPUT_LIMIT) { core, input, context ->
+                    for (position in positions) {
+                        currentCoroutineContext().ensureActive()
+                        when (val frame = prepareCoreMedia(core, input.single(), CoreMediaAction.ExtractFrame,
+                            position, cancellation = context.cancellation, inputLimit = BROWSER_MEDIA_INPUT_LIMIT)) {
+                            is CoreResult.Failure -> return@sources frame
+                            is CoreResult.Success -> {
+                                val bytes = checkNotNull(frame.value.bytes)
+                                val preview = desktopPreview(bytes, edge)
+                                currentCoroutineContext().ensureActive()
+                                prepared += cache(preview, "LivePhoto-preview.jpg")
+                            }
                         }
-                        val next = cache(bytes, if (prepared.mime == "image/jpeg") "LivePhoto-cover.jpg" else "LivePhoto-${action.name.lowercase()}.mp4")
-                        if (action == CoreMediaAction.ExtractFrame) {
-                            if (!preview) { val actual = prepared.actualTime!!; frames[next] = FramePosition(previous.root, previous.origin + actual.value.toDouble() / actual.timescale.toDouble()); selectedFrameImage = next }
-                            CoreResult.Success(CoreMediaEdit(prepared.summary, imageReference = next))
-                        } else {
-                            prepared.retainedVideoWindow?.let { window -> timelines[next] = Timeline(previous.root, previous.origin + window.start.value.toDouble() / window.start.timescale.toDouble()) }
-                            CoreResult.Success(CoreMediaEdit(prepared.summary, video = EditedVideo(next, prepared.summary)))
+                    }
+                    CoreResult.Success(Unit)
+                }
+            }
+            if (result is CoreResult.Failure) throw DesktopCoreFailure(result.error)
+            currentCoroutineContext().ensureActive()
+            return prepared.toList()
+        } catch (failure: Exception) {
+            // Also covers cancellation while the IO dispatcher is returning its result.
+            prepared.forEach(::release)
+            withContext(NonCancellable + Dispatchers.IO) { discardReleasedFiles() }
+            throw failure
+        }
+    }
+
+    internal suspend fun processMedia(reference: String, action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit {
+        var cached: String? = null
+        var framePosition: FramePosition? = null
+        try {
+            val result = sources(listOf(reference), BROWSER_MEDIA_INPUT_LIMIT) { core, input, context ->
+                when (val result = prepareCoreMedia(core, input.single(), action, start, end, context.cancellation, BROWSER_MEDIA_INPUT_LIMIT)) {
+                    is CoreResult.Failure -> result
+                    is CoreResult.Success -> {
+                        val prepared = result.value
+                        val bytes = prepared.bytes
+                        if (bytes == null) CoreResult.Success(CoreMediaEdit(prepared.summary))
+                        else {
+                            val previous = timelines.getValue(reference)
+                            val selected = selectedFrameImage?.let(frames::get)
+                            val window = prepared.retainedVideoWindow
+                            if (action == CoreMediaAction.Trim && window != null && selected?.root == previous.root) {
+                                val point = selected.sourceTime - previous.origin
+                                if (point < window.start.value.toDouble() / window.start.timescale.toDouble() || point >= window.end.value.toDouble() / window.end.timescale.toDouble())
+                                    return@sources failed("COVER_OUTSIDE_TRIM", Stage.Plan, "裁剪范围未包含已确认封面；输入未替换")
+                            }
+                            val next = cache(bytes, if (prepared.mime == "image/jpeg") "LivePhoto-cover.jpg" else "LivePhoto-${action.name.lowercase()}.mp4").also { cached = it }
+                            if (action == CoreMediaAction.ExtractFrame) {
+                                val actual = prepared.actualTime!!
+                                framePosition = FramePosition(previous.root, previous.origin + actual.value.toDouble() / actual.timescale.toDouble())
+                                CoreResult.Success(CoreMediaEdit(prepared.summary, imageReference = next))
+                            } else {
+                                prepared.retainedVideoWindow?.let { window -> timelines[next] = Timeline(previous.root, previous.origin + window.start.value.toDouble() / window.start.timescale.toDouble()) }
+                                CoreResult.Success(CoreMediaEdit(prepared.summary, video = EditedVideo(next, prepared.summary)))
+                            }
                         }
                     }
                 }
             }
+            currentCoroutineContext().ensureActive()
+            return when (result) {
+                is CoreResult.Failure -> throw DesktopCoreFailure(result.error)
+                is CoreResult.Success -> {
+                    framePosition?.let { position ->
+                        val next = checkNotNull(result.value.imageReference)
+                        frames[next] = position
+                        selectedFrameImage = next
+                    }
+                    result.value
+                }
+            }
+        } catch (failure: Exception) {
+            // Cancellation can arrive after caching on IO but before delivery to the UI.
+            cached?.let(::release)
+            withContext(NonCancellable + Dispatchers.IO) { discardReleasedFiles() }
+            throw failure
         }
-        return when (result) { is CoreResult.Failure -> throw DesktopCoreFailure(result.error); is CoreResult.Success -> result.value }
     }
     override fun coverWarning(image: String?, video: String?): String? {
         val frame = image?.let(frames::get) ?: return null
@@ -248,13 +357,19 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     @Composable override fun ImagePreview(reference: String, modifier: Modifier, onScroll: (Float) -> Unit) {
         val path = entries[reference]?.path
         val image by produceState<ImageBitmap?>(null, path) {
+            value = null
             value = withContext(Dispatchers.IO) {
                 try {
                     if (path == null || Files.size(path) > ANALYSIS_INPUT_LIMIT) null else {
-                        val decoded = org.jetbrains.skia.Image.makeFromEncoded(Files.readAllBytes(path))
+                        // Enforce the bound while reading too: a selected file may grow after stat().
+                        val encoded = Files.newInputStream(path).use { it.readNBytes(ANALYSIS_INPUT_LIMIT + 1) }
+                        currentCoroutineContext().ensureActive()
+                        if (encoded.size > ANALYSIS_INPUT_LIMIT) return@withContext null
+                        val decoded = org.jetbrains.skia.Image.makeFromEncoded(encoded)
                         if (decoded.width.toLong() * decoded.height > 64_000_000) { decoded.close(); null } else decoded.toComposeImageBitmap()
                     }
-                } catch (_: Exception) { null }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
             }
         }
         Box(modifier) { image?.let { Image(it, "图片预览", Modifier.matchParentSize(), contentScale = ContentScale.Fit) } ?: Text("无法预览此图片") }
@@ -268,14 +383,25 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         preview?.Player(modifier, onScroll)
     }
     override fun close() {
-        cancelTask()
-        runBlocking { withTimeoutOrNull(5000) { while (cancellations.isNotEmpty()) delay(10) } }
+        val running = synchronized(taskLock) {
+            if (closed) return
+            closed = true
+            tasks.toList()
+        }
+        running.forEach { it.cancel() }
+        val finished = runBlocking { withTimeoutOrNull(5000) { running.joinAll(); true } } == true
         try {
             val released = java.util.concurrent.CountDownLatch(1)
             javafx.application.Platform.runLater { released.countDown() }
             released.await(2, java.util.concurrent.TimeUnit.SECONDS)
         } catch (_: IllegalStateException) { }
-        Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { try { Files.deleteIfExists(it) } catch (_: Exception) {} } }
+        if (!finished) {
+            System.err.println("媒体任务尚未完全退出，保留本次临时文件，避免删除正在使用的数据。")
+            return
+        }
+        try {
+            Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { try { Files.deleteIfExists(it) } catch (_: Exception) {} } }
+        } catch (_: java.io.IOException) { System.err.println("部分临时文件未能清理。") }
     }
 }
 private fun <T> failed(code: String, stage: Stage, message: String): CoreResult<T> = CoreResult.Failure(CoreError(IssueCode(code), stage, message))

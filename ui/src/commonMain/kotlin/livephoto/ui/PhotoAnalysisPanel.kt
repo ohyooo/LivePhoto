@@ -9,7 +9,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -17,8 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
-import livephoto.core.CoreResult
 
 @Composable
 internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean, onBusy: (Boolean) -> Unit) {
@@ -39,14 +38,13 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
     var exportFailed by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val picker = platform.rememberPicker(MediaKind.LivePhoto) { selected ->
-        if (selected != null) { selectionRevision++; reference = selected; report = null; failed = false; exportReport = null; exportFailed = false }
+        if (selected != null) {
+            val previous = reference
+            selectionRevision++; reference = selected; report = null; failed = false; exportReport = null; exportFailed = false
+            previous?.takeIf { it != selected }?.let(platform::release)
+        }
     }
-    val info by produceState<SelectedMediaInfo?>(null, reference, selectionRevision, platform) {
-        value = null
-        try { value = reference?.let { platform.describe(it) } }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { /* The explicit read operation reports an inaccessible input. */ }
-    }
+    val info by rememberSelectedMediaInfo(platform, reference, selectionRevision)
     val names = listOf("检查照片", "提取原始视频", "清理拆分", "协议转换", "安全修复", "修改关键照片时间")
     val supported = listOf(platform.supportsAnalysis, platform.supportsVideoExtraction, platform.supportsCleanSplit,
         platform.supportsConversion, platform.supportsRepair, platform.supportsPhotoKey)
@@ -83,13 +81,14 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
             SectionCard(names[tool], Modifier.testTag("tool-content")) {
                 if (tool == 0) {
                 Button(onClick = {
+                    if (!active || working) return@Button
                     val selected = reference ?: return@Button
-                    scope.launch {
+                    scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         working = true; onBusy(true); report = null; failed = false
                         try {
                             val result = platform.runTask(UiTask(UiTaskKind.Analyze, selected))
                             report = result.report; failed = result.failed
-                        } catch (cancelled: CancellationException) { throw cancelled }
+                        } catch (cancelled: CancellationException) { report = "检查已取消。"; throw cancelled }
                         catch (error: Exception) {
                             failed = true
                             report = "检查未完成：${error.message?.take(2000) ?: "未知异常"}\n未修改输入、未生成文件。请重新选择文件。"
@@ -103,13 +102,17 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                 if (tool == 1 && platform.supportsVideoExtraction) {
                     Text("原始视频提取是单独操作：另存 MP4/MOV，不修改照片、不转码，不等于 Clean Split。")
                     OutlinedButton(onClick = {
+                        if (!active || working) return@OutlinedButton
                         val selected = reference ?: return@OutlinedButton
-                        scope.launch {
+                        scope.launch(start = CoroutineStart.UNDISPATCHED) {
                             working = true; extracting = true; onBusy(true); exportReport = null; exportFailed = false
                             try {
                                 val result = platform.runTask(UiTask(UiTaskKind.Extract, selected))
                                 exportReport = result.report; exportFailed = result.failed
-                            } catch (cancelled: CancellationException) { throw cancelled }
+                            } catch (cancelled: CancellationException) {
+                                exportReport = "提取已取消；如果保存或下载已经开始，请检查目标位置或下载记录。"
+                                throw cancelled
+                            }
                             catch (error: Exception) {
                                 exportFailed = true
                                 exportReport = "提取或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查保存位置和记录，避免重复保存。"

@@ -1,15 +1,14 @@
 package livephoto.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
-import livephoto.core.CoreResult
 
 @Composable
 internal fun RepairControls(platform: LivePhotoUiPlatform, reference: String?, enabled: Boolean, onBusy: (Boolean) -> Unit) {
@@ -19,14 +18,18 @@ internal fun RepairControls(platform: LivePhotoUiPlatform, reference: String?, e
     var working by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun runRepair(apply: (suspend () -> UiTaskResult)?) {
-        if (working) return
+        if (!enabled || working) return
         val selected = reference ?: return
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
             working = true; onBusy(true); result = null; report = null; failed = false
             try {
                 val response = apply?.invoke() ?: platform.runTask(UiTask(UiTaskKind.Repair, selected))
                 result = response; report = response.report; failed = response.failed
-            } catch (cancelled: CancellationException) { throw cancelled }
+            } catch (cancelled: CancellationException) {
+                report = if (apply == null) "修复预览已取消，请重新预览。"
+                    else "应用修复已取消；请先检查保存位置或下载记录，重新预览后再操作。"
+                throw cancelled
+            }
             catch (error: Exception) {
                 failed = true
                 report = "修复或保存未完成：${error.message?.take(2000) ?: "未知异常"}\n原片未修改；请先检查保存位置和记录，避免重复保存。"
