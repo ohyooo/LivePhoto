@@ -303,15 +303,25 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             var ready: BrowserPlayback? = null
             val decoder = media.player.createPlayer(file, { ready = it }, {})
             decoder.element.setAttribute("preload", "auto")
+            suspend fun awaitPosition() {
+                while (ready?.ready != true || ready?.seeking != false) {
+                    check(ready?.error == null) { ready?.error.orEmpty() }
+                    kotlinx.coroutines.delay(30)
+                }
+                check(ready?.error == null) { ready?.error.orEmpty() }
+            }
             try {
                 kotlinx.coroutines.withTimeout(15_000) {
-                    while (ready?.ready != true || ready?.seeking != false) kotlinx.coroutines.delay(30)
+                    awaitPosition()
                     val duration = ready!!.duration
+                    require(duration.isFinite() && duration > 0 && duration <= 60) { "缩略图仅限 60 秒内视频" }
                     for (index in 0..4) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         check(!disposed) { "输入已改变" }
                         decoder.seek(duration * index / 5)
-                        while (ready?.seeking != false) kotlinx.coroutines.delay(30)
+                        awaitPosition()
                         val captured = browserAwait(decoder.capture())
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         check(!disposed) { "输入已改变" }
                         val reference = "thumbnail:${next++}"
                         files[reference] = browserFile(captured.blob, "timeline.jpg", "image/jpeg")

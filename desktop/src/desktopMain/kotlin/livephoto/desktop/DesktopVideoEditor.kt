@@ -35,9 +35,9 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     private val resultPreview = poster != null
     private var player: MediaPlayer? = null
     @Volatile private var closed = false
-    private val previewLock = Any()
-    private val previewJobs = mutableSetOf<Job>()
-    private val previewMutex = Mutex()
+    private val operationLock = Any()
+    private val operationJobs = mutableSetOf<Job>()
+    private val operationMutex = Mutex()
     private var previewReference: String? = null
     private var thumbnailReferences = emptyList<String>()
     override var thumbnail: String? by mutableStateOf(null)
@@ -118,48 +118,56 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         try { fullscreen.set(enabled) }
         catch (_: Exception) { changePlayback { it.copy(error = "无法切换全屏，请使用普通窗口预览。") } }
     }
-    private suspend fun <T> preview(action: suspend () -> T): T = coroutineScope {
+    private suspend fun <T> operation(action: suspend () -> T): T = coroutineScope {
         val job = currentCoroutineContext().job
-        synchronized(previewLock) { check(!closed) { "输入已改变" }; previewJobs.add(job) }
-        try { previewMutex.withLock { currentCoroutineContext().ensureActive(); action() } }
-        finally { synchronized(previewLock) { previewJobs.remove(job) } }
+        synchronized(operationLock) {
+            if (closed) throw CancellationException("输入已改变")
+            operationJobs.add(job)
+        }
+        try { operationMutex.withLock { currentCoroutineContext().ensureActive(); action() } }
+        finally { synchronized(operationLock) { operationJobs.remove(job) } }
     }
     override suspend fun previewFrame(): String = previewFrameAt(state.value.current)
-    override suspend fun previewFrameAt(seconds: Double): String = preview {
+    override suspend fun previewFrameAt(seconds: Double): String = operation {
         require(seconds.isFinite() && seconds >= 0 && seconds <= state.value.duration)
         seek(seconds)
         val next = owner.previewFrame(reference, Time((seconds * 1_000_000).roundToLong(), 1_000_000u))
-        synchronized(previewLock) {
+        synchronized(operationLock) {
             if (closed) { owner.release(next); throw CancellationException("输入已改变") }
             previewReference?.let(owner::release)
             previewReference = next
         }
         next
     }
-    override suspend fun previewTimeline(): List<String> = preview {
-        synchronized(previewLock) { thumbnailReferences.takeIf { it.isNotEmpty() } }?.let { return@preview it }
+    override suspend fun previewTimeline(): List<String> = operation {
+        synchronized(operationLock) { thumbnailReferences.takeIf { it.isNotEmpty() } }?.let { return@operation it }
         val duration = state.value.duration
         require(duration.isFinite() && duration > 0 && duration <= 60) { "缩略图仅限 60 秒内视频" }
         val positions = List(5) { index -> Time((duration * index / 5 * 1_000_000).roundToLong(), 1_000_000u) }
         val next = owner.previewFrames(reference, positions)
-        synchronized(previewLock) {
+        synchronized(operationLock) {
             if (closed) { next.forEach(owner::release); throw CancellationException("输入已改变") }
             thumbnailReferences = next
             thumbnail = next.firstOrNull()
         }
         next
     }
-    override suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit = owner.processMedia(reference, action, start, end)
-    override fun cancel() { owner.cancelTask() }
+    override suspend fun process(action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit = operation {
+        check(canProcess) { "媒体处理后端不可用" }
+        owner.processMedia(reference, action, start, end)
+    }
+    override fun cancel() {
+        synchronized(operationLock) { operationJobs.toList() }.forEach { it.cancel() }
+    }
     @Composable override fun Player(modifier: Modifier, onScroll: (Float) -> Unit) {
         SideEffect { scroll = onScroll }
         SwingPanel(factory = { panel }, modifier = modifier, background = Color.Black)
     }
     fun close() {
-        synchronized(previewLock) {
+        synchronized(operationLock) {
             if (closed) return
             closed = true
-            previewJobs.toList().forEach { it.cancel() }
+            operationJobs.toList().forEach { it.cancel() }
             thumbnailReferences.forEach(owner::release); thumbnailReferences = emptyList(); thumbnail = null
             previewReference?.let(owner::release); previewReference = null
         }

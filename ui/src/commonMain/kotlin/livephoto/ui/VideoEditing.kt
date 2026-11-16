@@ -14,6 +14,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -134,12 +135,12 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     fun run(action: CoreMediaAction) {
         if (!enabled || state.working || state.capturing) return
         focus.clearFocus()
-        state.working = true; state.cancelling = false; state.lastAction = action; onBusy(true)
         val label = when (action) {
             CoreMediaAction.Probe -> "检查"; CoreMediaAction.Remux -> "封装"; CoreMediaAction.Trim -> "裁剪"
             CoreMediaAction.ExtractFrame -> "抽帧"; CoreMediaAction.Transcode -> "转码"
         }
-        scope.launch {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            state.working = true; state.cancelling = false; state.lastAction = action; onBusy(true)
             state.status = "正在$label；本地处理，不上传文件…"
             try {
                 require(action != CoreMediaAction.Transcode || !state.pendingTrim) { "请先应用或放弃裁剪选段，再转码。" }

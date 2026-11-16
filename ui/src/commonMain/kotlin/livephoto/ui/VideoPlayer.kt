@@ -38,18 +38,19 @@ private val PlayerBlue = Color(0xff3b82f6)
 /** Shared pointer, touch, keyboard and accessibility control. Vertical grows downwards. */
 @Composable
 public fun MediaSeekBar(value: Double, duration: Double, enabled: Boolean, label: String,
-    modifier: Modifier = Modifier, vertical: Boolean = false, onSeek: (Double) -> Unit) {
+    modifier: Modifier = Modifier, vertical: Boolean = false, keyboardStep: Double = 1.0, onSeek: (Double) -> Unit) {
     val track = MaterialTheme.colorScheme.outlineVariant
     val thumbColor = MaterialTheme.colorScheme.surface
     val current by rememberUpdatedState(value)
     val seek by rememberUpdatedState(onSeek)
     val focus = remember { FocusRequester() }
     val available = enabled && duration.isFinite() && duration > 0
+    val inset = with(LocalDensity.current) { 7.dp.toPx() }
     val fraction = if (duration > 0) (value / duration).coerceIn(0.0, 1.0).toFloat() else 0f
     fun position(offset: Offset, width: Int, height: Int): Double {
         val length = (if (vertical) height else width).toFloat()
         val coordinate = if (vertical) offset.y else offset.x
-        return (coordinate / length.coerceAtLeast(1f)).coerceIn(0f, 1f) * duration
+        return ((coordinate - inset) / (length - inset * 2).coerceAtLeast(1f)).coerceIn(0f, 1f) * duration
     }
     Canvas(modifier.focusRequester(focus).semantics {
         contentDescription = label
@@ -59,17 +60,17 @@ public fun MediaSeekBar(value: Double, duration: Double, enabled: Boolean, label
     }.onKeyEvent { event ->
         if (!available || event.type != KeyEventType.KeyDown) false else {
             val next = when (event.key) {
-                Key.DirectionRight, Key.DirectionDown -> current + 1
-                Key.DirectionLeft, Key.DirectionUp -> current - 1
+                Key.DirectionRight, Key.DirectionDown -> current + keyboardStep
+                Key.DirectionLeft, Key.DirectionUp -> current - keyboardStep
                 Key.MoveHome -> 0.0
                 Key.MoveEnd -> duration
                 else -> return@onKeyEvent false
             }
             seek(next.coerceIn(0.0, duration)); true
         }
-    }.focusable(available).pointerInput(available, duration, vertical) {
+    }.focusable(available).pointerInput(available, duration, vertical, inset) {
         if (available) detectTapGestures { focus.requestFocus(); seek(position(it, size.width, size.height)) }
-    }.pointerInput(available, duration, vertical) {
+    }.pointerInput(available, duration, vertical, inset) {
         if (available) detectDragGestures(onDragStart = { focus.requestFocus(); seek(position(it, size.width, size.height)) },
             onDrag = { change, _ -> change.consume(); seek(position(change.position, size.width, size.height)) })
     }) {
@@ -139,6 +140,10 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
     val PlayerInk = MaterialTheme.colorScheme.onSurface
     val palette = MaterialTheme.colorScheme
     val p by editor.playback
+    fun changeVolume(value: Double) {
+        editor.setVolume(value)
+        if (p.muted && value > 0) editor.setMuted(false)
+    }
     var speedMenu by remember { mutableStateOf(false) }
     var volumeOpen by remember { mutableStateOf(false) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -190,7 +195,7 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
                     }
                     if (!separateVolume) {
                         MediaSeekBar(if (p.muted) 0.0 else p.volume, 1.0, enabled, "音量",
-                            Modifier.weight(1f).height(32.dp).testTag("volume-progress"), onSeek = editor::setVolume)
+                            Modifier.weight(1f).height(32.dp).testTag("volume-progress"), keyboardStep = 0.05, onSeek = ::changeVolume)
                     }
                     TextButton(onClick = { speedMenu = !speedMenu }, enabled = enabled,
                         modifier = Modifier.width(44.dp).semantics { contentDescription = "播放倍速" }, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("${p.rate}x", fontSize = 12.sp, color = PlayerInk) }
@@ -200,7 +205,7 @@ private fun PlayerCard(editor: VideoEditor, enabled: Boolean, onScroll: (Float) 
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     PlayerButton(if (p.muted || p.volume == 0.0) "取消静音" else "静音", if (p.muted || p.volume == 0.0) "muted" else "volume", enabled) { editor.setMuted(!p.muted && p.volume > 0.0) }
                     MediaSeekBar(if (p.muted) 0.0 else p.volume, 1.0, enabled, "音量",
-                        Modifier.weight(1f).height(32.dp).testTag("volume-progress"), onSeek = editor::setVolume)
+                        Modifier.weight(1f).height(32.dp).testTag("volume-progress"), keyboardStep = 0.05, onSeek = ::changeVolume)
                 }
                 }
                 // Expanded beneath the controls, never over the picture.

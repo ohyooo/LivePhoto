@@ -168,7 +168,12 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         catch (_: java.nio.file.FileAlreadyExistsException) { failed("OUTPUT_EXISTS", Stage.Publish, "The output exists; choose a new name") }
         catch (_: UnsupportedOperationException) { failed("ATOMIC_PUBLICATION_UNAVAILABLE", Stage.Publish, "This filesystem cannot atomically create the output") }
         catch (_: Exception) { failed("IO_WRITE_FAILED", Stage.Publish, "Unable to read or save the selected media") }
-        finally { withContext(NonCancellable) { session.close() } }
+        finally {
+            withContext(NonCancellable) {
+                val cleanup = session.close()
+                if (cleanup is CoreResult.Failure) System.err.println("输入暂存清理未完成：${cleanup.error.code.value}")
+            }
+        }
     } }
     private suspend fun save(bytes: Bytes, digest: Digest, name: String, context: Context): Boolean {
         if (context.cancellation?.isCancelled() == true) throw DesktopCoreFailure(CoreError(IssueCode("CANCELLED"), Stage.Publish, "Save cancelled"))
@@ -255,7 +260,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     internal suspend fun previewFrame(reference: String, requested: Time): String = previewFrames(reference, listOf(requested), 960).single()
 
     /** Capture the input once for the whole strip; never seek the visible player or confirm a cover. */
-    internal suspend fun previewFrames(reference: String, positions: List<Time>, edge: Int = 320): List<String> {
+    internal suspend fun previewFrames(reference: String, positions: List<Time>, edge: Int = 320): List<String> = task {
         require(positions.size in 1..5 && edge in 1..960)
         val prepared = mutableListOf<String>()
         try {
@@ -279,7 +284,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
             }
             if (result is CoreResult.Failure) throw DesktopCoreFailure(result.error)
             currentCoroutineContext().ensureActive()
-            return prepared.toList()
+            prepared.toList()
         } catch (failure: Exception) {
             // Also covers cancellation while the IO dispatcher is returning its result.
             prepared.forEach(::release)
@@ -288,7 +293,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         }
     }
 
-    internal suspend fun processMedia(reference: String, action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit {
+    internal suspend fun processMedia(reference: String, action: CoreMediaAction, start: Time, end: Time): CoreMediaEdit = task {
         var cached: String? = null
         var framePosition: FramePosition? = null
         try {
@@ -322,7 +327,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
                 }
             }
             currentCoroutineContext().ensureActive()
-            return when (result) {
+            when (result) {
                 is CoreResult.Failure -> throw DesktopCoreFailure(result.error)
                 is CoreResult.Success -> {
                     framePosition?.let { position ->
@@ -393,13 +398,13 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         }
         running.forEach { it.cancel() }
         val finished = runBlocking { withTimeoutOrNull(5000) { running.joinAll(); true } } == true
-        try {
+        val mediaReleased = try {
             val released = java.util.concurrent.CountDownLatch(1)
             javafx.application.Platform.runLater { released.countDown() }
             released.await(2, java.util.concurrent.TimeUnit.SECONDS)
-        } catch (_: IllegalStateException) { }
-        if (!finished) {
-            System.err.println("媒体任务尚未完全退出，保留本次临时文件，避免删除正在使用的数据。")
+        } catch (_: IllegalStateException) { true }
+        if (!finished || !mediaReleased) {
+            System.err.println("媒体任务或播放器尚未完全退出，保留本次临时文件")
             return
         }
         try {
