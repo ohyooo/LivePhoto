@@ -80,7 +80,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                         content.children.add(cover); view.isVisible = false
                         var held = false
                         fun pausePreview() { held = false; active.pause(); view.isVisible = false; cover.isVisible = true }
-                        fun playPreview() { if (!held) { held = true; cover.isVisible = false; view.isVisible = true; active.seek(Duration.ZERO); active.play() } }
+                        fun playPreview() { if (!held && !closed && state.value.ready) { held = true; cover.isVisible = false; view.isVisible = true; active.seek(Duration.ZERO); active.play() } }
                         content.isFocusTraversable = true
                         content.setOnMousePressed { content.requestFocus(); playPreview() }
                         content.setOnMouseReleased { pausePreview() }; content.setOnMouseExited { pausePreview() }
@@ -92,20 +92,25 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     fun failed() {
                         val failure = active.error ?: media.error
                         val cause = failure?.cause?.javaClass?.simpleName
-                        changePlayback { it.copy(ready = false, seeking = false,
+                        changePlayback { it.copy(ready = false, seeking = false, paused = true,
                             error = "视频预览失败（${failure?.type ?: "MEDIA_ERROR"}${cause?.let { name -> " / $name" }.orEmpty()}）") }
                     }
                     media.setOnError { failed() }; active.setOnError { failed() }
-                    active.setOnReady {
+                    fun ready() {
+                        if (active.error != null || media.error != null) { failed(); return }
                         val duration = active.totalDuration.toSeconds()
-                        changePlayback { it.copy(duration = duration, ready = duration.isFinite() && duration > 0,
+                        val valid = duration.isFinite() && duration > 0
+                        changePlayback { it.copy(duration = if (valid) duration else 0.0, ready = valid,
+                            error = if (valid) null else "本机预览未能读取有效视频时长",
                             seeking = false, width = media.width.toDouble(), height = media.height.toDouble()) }
                     }
+                    active.setOnReady { ready() }
                     active.currentTimeProperty().addListener { _, _, value -> changePlayback { it.copy(current = value.toSeconds(), seeking = false) } }
-                    active.statusProperty().addListener { _, _, status -> changePlayback { it.copy(paused = status != MediaPlayer.Status.PLAYING) } }
+                    active.statusProperty().addListener { _, _, status -> changePlayback { it.copy(paused = it.error != null || status != MediaPlayer.Status.PLAYING) } }
                     active.setOnEndOfMedia { changePlayback { it.copy(paused = true, current = it.duration) } }
                     // Errors may precede installation of the asynchronous callbacks.
                     if (active.error != null || media.error != null) failed()
+                    else if (active.status == MediaPlayer.Status.READY) ready()
                 } catch (failure: Exception) {
                     player?.dispose(); player = null; panel.scene = null
                     changePlayback { it.copy(ready = false, seeking = false,
@@ -116,7 +121,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     }
     // FX playback callbacks and Swing fullscreen callbacks must not overwrite each other's fields.
     private fun changePlayback(change: (VideoPlayback) -> VideoPlayback) {
-        synchronized(state) { state.value = change(state.value) }
+        synchronized(state) { if (!closed) state.value = change(state.value) }
     }
     private fun update(action: (MediaPlayer) -> Unit) { Platform.runLater { if (!closed) player?.let(action) } }
     override fun seek(seconds: Double) {
