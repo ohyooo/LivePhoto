@@ -1,8 +1,9 @@
 pluginManagement {
     repositories {
         if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true" || providers.gradleProperty("livephoto.desktop").orNull == "true") google()
+        // Use Central's official CDN directly, avoiding plugin-portal redirects and runner IP throttling.
+        mavenCentral { url = uri("https://repo1.maven.org/maven2") }
         gradlePluginPortal()
-        mavenCentral()
     }
 }
 
@@ -10,7 +11,7 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         if (providers.gradleProperty("livephoto.android").orNull == "true" || providers.gradleProperty("livephoto.webUi").orNull == "true" || providers.gradleProperty("livephoto.desktop").orNull == "true") google()
-        mavenCentral()
+        mavenCentral { url = uri("https://repo1.maven.org/maven2") }
         if (providers.gradleProperty("livephoto.web").orNull == "true") {
             // Kotlin's pinned Binaryen optimizer, resolved centrally without
             // allowing plugins to inject transient project repositories.
