@@ -44,10 +44,12 @@ public interface VideoEditor {
     public suspend fun previewFrame(): String
     /** Preview the requested position independently of an asynchronous player's previous clock. */
     public suspend fun previewFrameAt(seconds: Double): String {
+        require(seconds.isFinite() && seconds >= 0 && seconds <= playback.value.duration)
         seek(seconds)
-        snapshotFlow { playback.value }.first {
-            it.ready && !it.seeking && kotlin.math.abs(it.current - seconds) <= 0.1
+        val positioned = snapshotFlow { playback.value }.first {
+            it.error != null || it.ready && !it.seeking && kotlin.math.abs(it.current - seconds) <= 0.1
         }
+        check(positioned.error == null) { positioned.error.orEmpty() }
         return previewFrame()
     }
     public suspend fun previewTimeline(): List<String> = emptyList()
@@ -108,6 +110,8 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     var thumbnailError by remember(editor) { mutableStateOf<String?>(null) }
     var thumbnailsLoading by remember(editor) { mutableStateOf(false) }
     var thumbnailRetry by remember(editor) { mutableIntStateOf(0) }
+    var coverPreviewError by remember(editor) { mutableStateOf<String?>(null) }
+    var coverPreviewRetry by remember(editor) { mutableIntStateOf(0) }
     val enabled = !parentBusy && !state.working && playback.ready
     val canPreview by rememberUpdatedState(enabled)
     LaunchedEffect(editor, playback.duration) {
@@ -153,20 +157,21 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
             finally { state.working = false; state.cancelling = false; onBusy(false) }
         }
     }
-    LaunchedEffect(editor, state.coverOpen, playback.ready, parentBusy, state.working) {
+    LaunchedEffect(editor, state.coverOpen, playback.ready, parentBusy, state.working, coverPreviewRetry) {
         if (state.coverOpen) try {
             snapshotFlow { state.coverPosition }.collectLatest { position ->
                 if (canPreview) {
                     state.capturing = true; onBusy(true)
                     state.coverPreview = null
+                    coverPreviewError = null
                     try {
                         delay(80)
                         state.coverPreview = withTimeout(5000) {
                             editor.previewFrameAt(position)
                         }
-                    } catch (_: TimeoutCancellationException) { state.status = "预览加载超时，请重试。" }
+                    } catch (_: TimeoutCancellationException) { coverPreviewError = "预览加载超时，请重试" }
                     catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { state.status = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
+                    catch (error: Exception) { coverPreviewError = "预览失败：${error.message?.take(2000) ?: "未知错误"}" }
                     finally { state.capturing = false; onBusy(false) }
                 }
             }
@@ -252,6 +257,12 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 Text("正在预览：${mediaClock(state.coverPosition)}")
                 Text("当前封面：${confirmed ?: if (hasImage) "所选图片" else "未选择"}")
                 state.coverPreview?.let { preview(it, Modifier.fillMaxWidth().height(160.dp)) }
+                if (state.capturing) Text("正在加载封面预览…", Modifier.testTag("cover-preview-loading"), style = MaterialTheme.typography.bodySmall)
+                coverPreviewError?.let { message ->
+                    Text(message, Modifier.testTag("cover-preview-error"), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { coverPreviewRetry++ }, enabled = enabled && !state.capturing,
+                        modifier = Modifier.testTag("retry-cover-preview")) { Text("重试封面预览") }
+                }
                 Text("仅预览，尚未替换封面。", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = { run(CoreMediaAction.ExtractFrame) }, enabled = enabled && !state.capturing, shape = ControlShape) { Text("使用当前画面作为封面") }
             }
