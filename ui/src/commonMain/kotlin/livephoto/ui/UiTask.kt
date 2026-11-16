@@ -53,5 +53,8 @@ private suspend fun LivePhotoUiPlatform.runHostRepair(input: String, review: Rep
             applyRepair = result.value.review?.let { approved -> { runHostRepair(input, approved) } })
     }
 
-private fun hostTaskFailure(error: CoreError, report: String): UiTaskResult =
-    UiTaskResult(report, failed = true, cancelled = error.code.value == "CANCELLED")
+private fun hostTaskFailure(error: CoreError, report: String): UiTaskResult {
+    val cancelled = error.code.value == "CANCELLED"
+    val text = if (cancelled) "已取消处理\n" + report.lineSequence().drop(1).joinToString("\n") else report
+    return UiTaskResult(text, failed = true, cancelled = cancelled)
+}

@@ -82,5 +82,6 @@ internal fun taskFailure(kind: String, response: TaskReply): String {
         else -> "无法完成后台任务，请重试。"
     }
     val stage = if (code == "RESOURCE_LIMIT_EXCEEDED") "Read" else "后台任务"
-    return "${label}失败\n错误码：$code\n阶段：$stage\n$reason\n原片未修改，未发起新的下载。"
+    val title = if (code == "CANCELLED") "已取消处理" else "${label}失败"
+    return "$title\n错误码：$code\n阶段：$stage\n$reason\n原片未修改，未发起新的下载。"
 }

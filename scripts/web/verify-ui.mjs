@@ -298,7 +298,7 @@ try {
     await click('开始检查（只读）');
     await page.waitForFunction(()=>globalThis.releaseTaskReads.length>0);
     await click('取消处理');await text(/已取消处理/).waitFor({state:'attached'});
-    const cancelledAnalysis=(await driver.report(text(/检查失败/))).includes('CANCELLED');
+    const cancelledAnalysis=(await driver.report(page.locator('#analysis-report'))).includes('CANCELLED');
     await page.evaluate(()=>{globalThis.holdTaskReads=false;globalThis.releaseTaskReads.splice(0).forEach(release=>release());});
     const recovered=await analyze(imagePath,/只读检查完成/);
     const workers=await page.evaluate(()=>globalThis.taskWorkers);
