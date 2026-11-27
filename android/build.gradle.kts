@@ -1,4 +1,7 @@
 import javax.xml.parsers.DocumentBuilderFactory
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.android.application)
@@ -72,16 +75,19 @@ dependencies {
 
 // AGP can return only a report path on a connected-test failure. Keep evidence
 // visible even when a CI driver stops after the failed Gradle invocation.
-val connectedResults = layout.buildDirectory.dir("outputs/androidTest-results/connected")
-val explainConnectedFailures = tasks.register("explainConnectedFailures") {
-    group = "verification"
-    doLast {
-        val reports = connectedResults.get().asFile.walkTopDown()
+abstract class ExplainConnectedFailures : DefaultTask() {
+    // The instrumentation task creates this directory, and startup failure may leave no report.
+    @get:Internal
+    abstract val resultsDirectory: DirectoryProperty
+
+    @TaskAction
+    fun reportFailures() {
+        val reports = resultsDirectory.get().asFile.walkTopDown()
             .filter { it.isFile && it.name.startsWith("TEST-") && it.extension == "xml" }
             .sortedBy { it.path }.toList()
         if (reports.isEmpty()) {
             logger.lifecycle("No connected Android test XML found; check emulator and test runner startup.")
-            return@doLast
+            return
         }
         val builder = DocumentBuilderFactory.newInstance().apply {
             setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
@@ -109,6 +115,10 @@ val explainConnectedFailures = tasks.register("explainConnectedFailures") {
         }
         logger.lifecycle("Connected Android results: $total test cases, $failed failures/errors (${reports.size} XML reports).")
     }
+}
+val explainConnectedFailures = tasks.register<ExplainConnectedFailures>("explainConnectedFailures") {
+    group = "verification"
+    resultsDirectory.set(layout.buildDirectory.dir("outputs/androidTest-results/connected"))
 }
 tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
     finalizedBy(explainConnectedFailures)
