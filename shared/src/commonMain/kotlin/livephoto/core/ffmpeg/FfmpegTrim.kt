@@ -7,7 +7,6 @@ import livephoto.core.implementation.planTrim
 import livephoto.core.implementation.microseconds
 import livephoto.core.implementation.videoFacts
 import livephoto.core.implementation.verifyTrimDurationHeaders
-import livephoto.core.implementation.trimTicks
 
 /** Lossless-first trim; exact encoding only with independently selected and authorized source boundaries. */
 internal object FfmpegTrim {
@@ -35,7 +34,7 @@ internal object FfmpegTrim {
                 video.tracks.flatMapIndexed { index, track -> listOf("-streamid", "$index:${track.trackId}") } +
                 plan.audio.flatMap { selection ->
                     val index = video.tracks.indexOfFirst { it.trackId == selection.track.trackId }
-                    val end = trimTicks(plan.end, selection.track.timescale) - selection.originTicks
+                    val end = selection.endTicks - selection.originTicks
                     // Packet filtering is FFmpeg's own bitstream filter, with byte modification explicitly disabled.
                     // Keep only whole AAC packets inside the disclosed video range; no hidden preroll/tail.
                     listOf("-bsf:$index", "noise=amount=0:drop='lt(pts,0)+gt(pts+duration,$end)'")

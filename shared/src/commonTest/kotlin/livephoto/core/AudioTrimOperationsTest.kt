@@ -41,6 +41,22 @@ class AudioTrimOperationsTest {
         assertEquals(48000u, plan.movieTimescale)
         assertEquals(0, plan.trackTrims[1].encoded.end.compareTo(Time(1024, 48000u)))
         assertTrue(plan.issues.any { it.code.value == "AUDIO_PACKET_BOUNDARY_GAP" })
+
+        // The upper video bound 40/1001 cannot be represented in the audio clock.
+        // A packet end can still be compared exactly to that rational bound.
+        val videoTrack = video.tracks[0].copy(timescale = 1001u, presentationTimescale = 1001u,
+            presentationDuration = Time(80, 1001u))
+        val mixedClocks = video.copy(tracks = listOf(videoTrack, video.tracks[1]))
+        val fractional = TrimSpec(TimeRange(Time.Zero, Time(40, 1001u)))
+        val fractionalPlan = planLosslessTrim(reader, mixedClocks, fractional)
+        assertEquals(Time(40, 1001u), fractionalPlan.end)
+        assertEquals(1024uL, fractionalPlan.audio.single().endTicks)
+        val audioEnd = fractionalPlan.trackTrims[1].presented.end
+        assertTrue(audioEnd < fractional.range.end && Time(2048, 48000u) > fractional.range.end)
+        assertTrue(fractionalPlan.issues.any { it.code.value == "AUDIO_PACKET_BOUNDARY_GAP" })
+        val exactMixed = attempt { planLosslessTrim(reader, mixedClocks, fractional.copy(mode = TrimMode.Exact)) }
+        assertEquals("EXACT_TRIM_UNAVAILABLE", assertIs<CoreResult.Failure>(exactMixed).error.code.value)
+
         for (mode in listOf(TrimMode.Exact, TrimMode.LosslessOnly)) {
             val backend = Backend(bytes()); val output = MemoryOutputTransaction(context, "audio-exact-$mode")
             val result = DefaultLivePhotoCore(backend).trim(request(output, source, spec.copy(mode = mode)).copy(policy = MutationPolicy(transcode = TranscodePolicy.Explicit)))
@@ -75,6 +91,8 @@ class AudioTrimOperationsTest {
         val result = attempt { planLosslessTrim(reader, edited, TrimSpec(TimeRange(Time.Zero, Time(80, 1000u)))) }
         assertEquals("LOSSLESS_TRIM_UNAVAILABLE", assertIs<CoreResult.Failure>(result).error.code.value)
         assertEquals("VALUE_NOT_REPRESENTABLE", assertIs<CoreResult.Failure>(attempt { trimTicks(Time(1, 30000u), 44100u) }).error.code.value)
+        assertEquals(Long.MAX_VALUE.toULong(), trimTicks(Time(Long.MAX_VALUE, UInt.MAX_VALUE), UInt.MAX_VALUE))
+        assertEquals("VALUE_NOT_REPRESENTABLE", assertIs<CoreResult.Failure>(attempt { trimTicks(Time(Long.MAX_VALUE, 1u), 2u) }).error.code.value)
     }
 
     private inner class Backend(private val bytes: ByteArray, private val wrong: String = "") : MediaBackend {

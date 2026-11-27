@@ -102,7 +102,9 @@ internal suspend fun planLosslessTrim(reader: BinaryReader, video: VideoStructur
     val selected = track.samples.filter { it.decodeTime >= first && it.decodeTime < last }
     val audioSelections = audio.map { entry ->
         val origin = trimTicks(time(first), entry.timescale)
-        val limit = trimTicks(time(last), entry.timescale)
+        // Packet ends are integer ticks; p <= a rational upper bound iff
+        // p <= floor(bound). This does not move either timeline or the video cut.
+        val limit = trimTicksAtOrBefore(time(last), entry.timescale)
         val kept = entry.samples.filter { it.decodeTime >= origin && checkedAdd(it.decodeTime, it.duration.toULong()) <= limit }
         if (kept.isEmpty()) fail("LOSSLESS_TRIM_UNAVAILABLE", "Trim would leave an empty audio track; dropping it is forbidden", Stage.Plan)
         val begin = kept.first().decodeTime
@@ -145,12 +147,19 @@ internal suspend fun verifyTrimDurationHeaders(reader: BinaryReader, video: Vide
     }
 }
 
-internal fun trimTicks(time: Time, scale: UInt): ULong {
+internal fun trimTicks(time: Time, scale: UInt): ULong = trimTicks(time, scale, exact = true)
+
+private fun trimTicksAtOrBefore(time: Time, scale: UInt): ULong = trimTicks(time, scale, exact = false)
+
+private fun trimTicks(time: Time, scale: UInt, exact: Boolean): ULong {
     if (time.value < 0) fail("VALUE_NOT_REPRESENTABLE", "Negative trim time", Stage.Plan)
-    val product = checkedMultiply(time.value.toULong(), scale.toULong())
-    if (product % time.timescale.toULong() != 0uL || product / time.timescale.toULong() > Long.MAX_VALUE.toULong())
+    val value = time.value.toULong()
+    val denominator = time.timescale.toULong()
+    val numerator = value % denominator * scale.toULong() // Two UInt32 factors.
+    val ticks = checkedAdd(checkedMultiply(value / denominator, scale.toULong()), numerator / denominator)
+    if (exact && numerator % denominator != 0uL || ticks > Long.MAX_VALUE.toULong())
         fail("VALUE_NOT_REPRESENTABLE", "Trim boundary cannot be expressed exactly in a retained track's ticks", Stage.Plan)
-    return product / time.timescale.toULong()
+    return ticks
 }
 
 /** Compare boundary distances exactly, including AAC clocks that do not divide microseconds. */

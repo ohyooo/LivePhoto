@@ -11,7 +11,7 @@ import kotlin.test.*
 /** Actual FFmpeg packet copy, never a synthetic writer standing in for a media backend. */
 class FfmpegAudioTrimIntegrationTest {
     private val context = Context(Limits(128_000_000uL, 128_000_000uL))
-    private suspend fun fixture(host: MediaTestHost, twoAudio: Boolean = true, directConfiguration: Boolean = false,
+    private suspend fun fixture(host: MediaTestHost, twoAudio: Boolean = true, directConfiguration: Boolean = false, frameRate: Int = 25,
         body: suspend (BinarySource, VideoStructure, BinaryReader, DefaultLivePhotoCore) -> Unit) {
         val file = host.path("video with two audio tracks.mp4")
         val videoOnly = host.path("video.mp4")
@@ -21,7 +21,7 @@ class FfmpegAudioTrimIntegrationTest {
             val process = host.execute(listOf(host.executable, "-nostdin", "-n", "-hide_banner", "-loglevel", "error", "-xerror") + arguments, 60_000L)
             assertEquals(0, process.code, process.output)
         }
-        generate(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=25", "-frames:v", "40",
+        generate(listOf("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=$frameRate", "-frames:v", "40",
             "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "3", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
             "-use_editlist", "0", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", videoOnly.toString()))
         for ((index, path) in audio.withIndex()) generate(listOf("-f", "lavfi", "-i", "sine=frequency=${440 + index * 440}:sample_rate=${if (index == 0) 44100 else 48000}:duration=1.6",
@@ -124,6 +124,47 @@ class FfmpegAudioTrimIntegrationTest {
                 assertEquals(3, result.tracks.size)
                 assertFalse(result.wasTranscoded)
             } finally { result.operation.output.assets.forEach { it.readableSource?.close() } }
+        }
+    }
+
+    @Test fun fractionalVideoEndCopiesOnlyCompleteAacPacketsWithRealFfmpeg(): Unit = runMediaTest { host ->
+        fixture(host, twoAudio = false, frameRate = 125) { source, original, input, core ->
+            // 96 ms is 12 complete video frames, but 4233.6 audio ticks at 44.1 kHz.
+            val end = Time(96, 1000u)
+            val inputRef = ResourceRef(SourceSet.Single(source))
+            val spec = TrimSpec(TimeRange(Time.Zero, end))
+            val result = core.trim(TrimRequest(inputRef, spec, MutationPolicy(preservation = PreservationPolicy.Strict),
+                MemoryOutputTransaction(context, "fractional-audio-end"), context)).orThrow()
+            try {
+                assertEquals(0, result.actualEnd.compareTo(end))
+                val audio = result.tracks.single { it.trackId.value == "4" }.presented
+                assertEquals(0, audio.start.compareTo(Time.Zero))
+                assertEquals(0, audio.end.compareTo(Time(4096, 44100u)))
+                assertTrue(result.operation.issues.any { it.code.value == "AUDIO_PACKET_BOUNDARY_GAP" })
+                assertFalse(result.wasTranscoded); assertTrue(result.wasBitstreamPreserved); assertFalse(result.retainedHiddenContent)
+                val output = result.operation.output.assets.single().readableSource!!
+                val reader = BinaryReader(output, context)
+                val actual = BmffVideoProbe(reader).probe(ByteRange(0uL, reader.identity().orThrow().size)).orThrow()
+                assertEquals(listOf(4u, 17u), actual.tracks.map { it.trackId })
+                assertEquals(12, actual.tracks.single { it.handler == "vide" }.samples.size)
+                val before = original.tracks.single { it.handler == "soun" }
+                val after = actual.tracks.single { it.handler == "soun" }
+                assertEquals(4, after.samples.size)
+                assertEquals(before.codecConfiguration, after.codecConfiguration)
+                assertEquals(before.samples.take(4).map { sha256Range(input, it.range).orThrow() },
+                    after.samples.map { sha256Range(reader, it.range).orThrow() })
+                assertTrue(core.probe(ProbeRequest(ResourceRef(SourceSet.Single(output)), true, context)).orThrow().issues.any { it.code.value == "MEDIA_DECODE_COMPLETED" })
+            } finally { result.operation.output.assets.forEach { it.readableSource?.close() } }
+
+            val exact = MemoryOutputTransaction(context, "fractional-audio-end-exact")
+            val exactRun = core.trim(TrimRequest(inputRef, spec.copy(mode = TrimMode.Exact), output = exact, context = context))
+            assertEquals("EXACT_TRIM_UNAVAILABLE", assertIs<CoreResult.Failure>(exactRun).error.code.value)
+            assertTrue(exact.committedAssets().isEmpty())
+            val nonIntegralOrigin = MemoryOutputTransaction(context, "fractional-audio-start")
+            val fractionalStart = spec.copy(range = TimeRange(Time(24, 1000u), end))
+            val startRun = core.trim(TrimRequest(inputRef, fractionalStart, output = nonIntegralOrigin, context = context))
+            assertEquals("VALUE_NOT_REPRESENTABLE", assertIs<CoreResult.Failure>(startRun).error.code.value)
+            assertTrue(nonIntegralOrigin.committedAssets().isEmpty())
         }
     }
 
