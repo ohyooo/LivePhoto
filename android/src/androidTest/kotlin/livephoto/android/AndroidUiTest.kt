@@ -293,18 +293,54 @@ class AndroidUiTest {
             compose.onNodeWithContentDescription("重新选择图片").performScrollTo().performClick() // Cancel; keep both inputs.
             assertInputSelected("image", "图片")
             assertInputSelected("video", "视频")
+            val references = compose.runOnUiThread { compose.activity.selections.snapshot().references }
+            assertTrue(references.values.toSet() == setOf("content://livephoto-ui-test/image", "content://livephoto-ui-test/video"))
             compose.activityRule.scenario.recreate()
             assertInputSelected("image", "图片")
             assertInputSelected("video", "视频")
             compose.onNodeWithTag("create").assertIsDisplayed().assertIsEnabled()
+            assertTrue(compose.runOnUiThread { compose.activity.selections.snapshot().references } == references)
         }
+    }
+
+    @Test fun pickerFlagsAndUiRemovalUseReadLeaseUntilLastSelection() {
+        val uri = Uri.parse("content://livephoto-ui-test/aliased")
+        val replacement = Uri.parse("content://livephoto-ui-test/replacement")
+        val retained = mutableListOf<String>()
+        val released = mutableListOf<String>()
+        val permissions = object : DocumentReadPermissions {
+            override fun retain(uri: String): Boolean { retained += uri; return true }
+            override fun release(uri: String) { released += uri }
+        }
+        val selections = DocumentReadLeases(permissions)
+        compose.runOnUiThread {
+            compose.activity.setContent {
+                MaterialTheme {
+                    LivePhotoScreen(selections, describe = { SelectedMediaInfo("fixture", 32) }) { _, _, _ -> error("Do not create") }
+                }
+            }
+        }
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        withPickerResults(uri, uri, replacement, flags = flags) {
+            compose.onNodeWithTag("select-image").performScrollTo().performClick()
+            openPhotoTool(0)
+            compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+            compose.onNodeWithTag("page-0").performClick()
+            compose.onNodeWithContentDescription("移除图片").performScrollTo().performClick()
+            assertTrue(compose.runOnUiThread { retained == listOf(uri.toString(), uri.toString()) && released.isEmpty() })
+            openPhotoTool(0)
+            compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
+            assertTrue(compose.runOnUiThread { released == listOf(uri.toString()) })
+        }
+        compose.runOnUiThread { selections.close() }
+        assertTrue(released == listOf(uri.toString(), replacement.toString()))
     }
 
     @Test fun selectedFileSizesAndActualParseFailureAreVisibleWithoutManualScroll() {
         compose.runOnUiThread {
             compose.activity.setContent {
                 MaterialTheme {
-                    LivePhotoScreen(describe = { uri ->
+                    LivePhotoScreen(compose.activity.selections, describe = { uri ->
                         if (uri.lastPathSegment == "image") SelectedMediaInfo("cover.jpg", 2048)
                         else SelectedMediaInfo("clip.mp4", 3145728)
                     }) { _, _, _ ->
@@ -366,7 +402,7 @@ class AndroidUiTest {
         compose.onNodeWithContentDescription("移除$label").assertExists()
     }
 
-    private fun withPickerResults(vararg results: Uri?, block: () -> Unit) {
+    private fun withPickerResults(vararg results: Uri?, flags: Int = 0, block: () -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         var position = 0
         val monitor = object : Instrumentation.ActivityMonitor() {
@@ -375,7 +411,7 @@ class AndroidUiTest {
                 check(position < results.size) { "Unexpected document picker launch" }
                 val uri = results[position++]
                 return if (uri == null) Instrumentation.ActivityResult(Activity.RESULT_CANCELED, Intent())
-                else Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(uri))
+                else Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(uri).addFlags(flags))
             }
         }
         instrumentation.addMonitor(monitor)

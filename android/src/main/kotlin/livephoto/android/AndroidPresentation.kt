@@ -16,6 +16,7 @@ internal fun formatAndroidFailure(error: Exception, imageName: String? = null, v
     append("\n原因：").append(cause.javaClass.simpleName.take(128))
     cause.message?.take(2000)?.let { append("：").append(it) }
     when (cause) {
+        is SelectedDocumentUnavailableException -> append("\n未修改原片，未生成新文件。")
         is SecurityException -> append("\n请重新选择文件并确认授权；不会覆盖原片。")
         is IllegalArgumentException -> append("\n请检查输入参数和大小；输入合计上限 32 MiB。")
         else -> append("\n请检查文件、存储空间和相册后重试；不会覆盖原片。")

@@ -9,7 +9,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import livephoto.core.*
 import livephoto.core.memory.MemoryOutputTransaction
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.util.UUID
+
+// Provider exceptions can include the complete private URI. Do not show that in the report.
+internal class SelectedDocumentUnavailableException : IOException("已选文件无法读取。请检查文件是否已移动或授权是否失效，并重新选择。")
 
 /** App orchestration only. Protocol policy and serialization remain in the shared Core. */
 class AndroidCreateController(private val android: AndroidContext, private val core: LivePhotoCore) {
@@ -147,10 +152,12 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         }
     }
 
-    private suspend fun snapshot(uri: Uri, remaining: Int): AndroidInputSnapshot =
+    private suspend fun snapshot(uri: Uri, remaining: Int): AndroidInputSnapshot = try {
         AndroidInputSnapshot.copyFrom(android.cacheDir, remaining, SourceId("android-input:${UUID.randomUUID()}")) {
-            checkNotNull(android.contentResolver.openInputStream(uri)) { "Cannot open selected input" }
+            android.contentResolver.openInputStream(uri) ?: throw SelectedDocumentUnavailableException()
         }
+    } catch (_: SecurityException) { throw SelectedDocumentUnavailableException() }
+    catch (_: FileNotFoundException) { throw SelectedDocumentUnavailableException() }
 
     private suspend fun <T> withPhotoInput(
         uri: Uri, action: suspend (BinarySource, Cancellation) -> CoreResult<T>,
@@ -160,6 +167,9 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         catch (_: InputBudgetExceededException) {
             return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
                 "Photo input exceeds 32 MiB"))
+        }
+        catch (unavailable: SelectedDocumentUnavailableException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("INPUT_UNAVAILABLE"), Stage.Read, unavailable.message.orEmpty()))
         }
         try { action(source, Cancellation { job?.isActive == false }) }
         finally { source.close() }

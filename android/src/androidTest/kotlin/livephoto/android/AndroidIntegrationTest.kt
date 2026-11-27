@@ -21,6 +21,24 @@ class AndroidIntegrationTest {
     private val context = Context(Limits(32_000_000u, 48_000_000u))
     private fun fixture(name: String): ByteArray = InstrumentationRegistry.getInstrumentation().context.assets.open("reference/$name").use { it.readBytes() }
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+
+    @Test fun contentProviderInputIsReadOnlyAndRemovedDocumentAsksForReselection() = runBlocking {
+        val original = syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1)
+        val resolver = app.contentResolver
+        val input = AndroidPhotoExporter(resolver).publish(original, "LivePhoto-uri-fixture-${UUID.randomUUID()}.jpg")
+        try {
+            val controller = AndroidCreateController(app, app.core)
+            assertIs<CoreResult.Success<AnalysisResult>>(controller.analyze(input))
+            assertContentEquals(original, resolver.openInputStream(input)!!.use { it.readBytes() })
+            assertEquals(1, resolver.delete(input, null, null))
+            val unavailable = assertIs<CoreResult.Failure>(controller.analyze(input)).error
+            assertEquals("INPUT_UNAVAILABLE", unavailable.code.value)
+            assertEquals(Stage.Read, unavailable.stage)
+            assertTrue("重新选择" in unavailable.message)
+            assertFalse(input.toString() in unavailable.message)
+        } finally { resolver.delete(input, null, null) }
+    }
+
     @Test fun controllerDiscardsSnapshotsAfterReadOnlyAnalysisAndBudgetRefusal() = runBlocking {
         fun snapshots() = app.cacheDir.listFiles()!!.filter {
             it.name.startsWith("livephoto-input-") && it.name.endsWith(".snapshot")

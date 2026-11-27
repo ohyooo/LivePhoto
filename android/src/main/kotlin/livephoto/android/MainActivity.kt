@@ -8,12 +8,18 @@ import androidx.compose.material3.MaterialTheme
 
 /** UI only: selecting inputs and presenting structured Core results. */
 class MainActivity : ComponentActivity() {
+    internal lateinit var selections: DocumentReadLeases
+        private set
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val permissions = AndroidDocumentReadPermissions(applicationContext)
+        selections = DocumentReadLeases(permissions, savedInstanceState?.getBundle(DOCUMENT_SELECTIONS).documentSelections())
+        permissions.discardOrphans(selections.snapshot().retainedReads)
         enableEdgeToEdge()
         setContent {
             MaterialTheme {
-                LivePhotoScreen(analyze = { input ->
+                LivePhotoScreen(selections, analyze = { input ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).analyze(input)
                 }, extractVideo = { input ->
                     AndroidCreateController(applicationContext, (application as LivePhotoApplication).core).extractVideo(input)
@@ -33,5 +39,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBundle(DOCUMENT_SELECTIONS, selections.snapshot().toBundle())
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onDestroy() {
+        if (isFinishing && !isChangingConfigurations) selections.close()
+        super.onDestroy()
+    }
+
+    private companion object {
+        const val DOCUMENT_SELECTIONS = "livephoto.document-selections"
     }
 }

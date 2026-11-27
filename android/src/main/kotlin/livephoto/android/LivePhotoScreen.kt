@@ -2,7 +2,6 @@ package livephoto.android
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -14,6 +13,7 @@ import livephoto.ui.MediaKind
 /** Android supplies picker/URI/storage only; all screen content and state are shared. */
 @Composable
 internal fun LivePhotoScreen(
+    selections: DocumentReadLeases,
     describe: (suspend (Uri) -> SelectedMediaInfo)? = null,
     analyze: (suspend (Uri) -> CoreResult<AnalysisResult>)? = null,
     extractVideo: (suspend (Uri) -> CoreResult<AndroidCreateController.Extracted>)? = null,
@@ -25,7 +25,7 @@ internal fun LivePhotoScreen(
     create: suspend (Uri, Uri, ProtocolSelector) -> CoreResult<AndroidCreateController.Created>,
 ) {
     val context = LocalContext.current.applicationContext
-    val platform = remember(context, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, repairPhoto, setPhotoKey, create) {
+    val platform = remember(context, selections, describe, analyze, extractVideo, cleanSplit, saveSplitFile, convertPhoto, repairPhoto, setPhotoKey, create) {
         object : LivePhotoUiPlatform {
             override val outputDescription = "Pictures/LivePhoto"
             override val supportsAnalysis = analyze != null
@@ -40,46 +40,55 @@ internal fun LivePhotoScreen(
             override val videoExportSuccessMessage = "已提取并保存到 Movies/LivePhoto。"
             @Composable
             override fun rememberPicker(kind: MediaKind, onResult: (String?) -> Unit): () -> Unit {
-                val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { onResult(it?.toString()) }
+                val launcher = rememberLauncherForActivityResult(OpenReadDocument) { document ->
+                    onResult(document?.let { selections.select(it.uri.toString(), it.mayPersistRead) })
+                }
                 return { launcher.launch(arrayOf(if (kind == MediaKind.Video) "video/*" else "image/*")) }
             }
-            override suspend fun describe(reference: String): SelectedMediaInfo =
-                describe?.invoke(Uri.parse(reference)) ?: readSelectedMediaInfo(context.contentResolver, Uri.parse(reference))
+            override fun release(reference: String) = selections.release(reference)
+
+            private fun document(reference: String): Uri =
+                selections.resolve(reference)?.let(Uri::parse) ?: throw SelectedDocumentUnavailableException()
+
+            override suspend fun describe(reference: String): SelectedMediaInfo {
+                val uri = document(reference)
+                return describe?.invoke(uri) ?: readSelectedMediaInfo(context.contentResolver, uri)
+            }
             override suspend fun analyze(reference: String): CoreResult<AnalysisResult> =
-                analyze?.invoke(Uri.parse(reference)) ?: super.analyze(reference)
+                analyze?.invoke(document(reference)) ?: super.analyze(reference)
             override suspend fun extractVideo(reference: String): CoreResult<livephoto.ui.ExtractedVideo> =
-                when (val result = extractVideo?.invoke(Uri.parse(reference))) {
+                when (val result = extractVideo?.invoke(document(reference))) {
                     null -> super.extractVideo(reference)
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }
             override suspend fun cleanSplit(reference: String): CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>> =
-                cleanSplit?.invoke(Uri.parse(reference)) ?: super.cleanSplit(reference)
+                cleanSplit?.invoke(document(reference)) ?: super.cleanSplit(reference)
             override suspend fun saveSplitFile(file: livephoto.ui.SplitFile<livephoto.core.Bytes>): String {
                 checkNotNull(saveSplitFile)(file)
                 val folder = if (file.mime == "image/jpeg") "Pictures/LivePhoto" else "Movies/LivePhoto"
                 return "${file.mime}：已保存到 $folder；另一文件需单独保存。"
             }
             override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<livephoto.ui.ConvertedPhoto> =
-                when (val result = convertPhoto?.invoke(Uri.parse(reference), target)) {
+                when (val result = convertPhoto?.invoke(document(reference), target)) {
                     null -> super.convertPhoto(reference, target)
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }
             override suspend fun setPhotoKey(reference: String, requested: Time): CoreResult<livephoto.ui.PhotoKeyReport> =
-                when (val result = setPhotoKey?.invoke(Uri.parse(reference), requested)) {
+                when (val result = setPhotoKey?.invoke(document(reference), requested)) {
                     null -> super.setPhotoKey(reference, requested)
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }
             override suspend fun repairPhoto(reference: String, review: livephoto.ui.RepairReview?): CoreResult<livephoto.ui.PhotoRepairReport> =
-                when (val result = repairPhoto?.invoke(Uri.parse(reference), review)) {
+                when (val result = repairPhoto?.invoke(document(reference), review)) {
                     null -> super.repairPhoto(reference, review)
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(result.value.report)
                 }
             override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> =
-                when (val result = create(Uri.parse(image), Uri.parse(video), target)) {
+                when (val result = create(document(image), document(video), target)) {
                     is CoreResult.Failure -> result
                     is CoreResult.Success -> CoreResult.Success(CreatedPhoto(result.value.operation))
                 }
