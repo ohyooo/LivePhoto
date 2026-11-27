@@ -8,7 +8,7 @@
 - [Compose Desktop CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955590192) 三平台各 866 项共享与 6 项桌面测试；[Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955598534) 三平台各 939 项共享与 44 项 CLI 测试。零失败、零错误、零跳过，均已逐平台复核产物。
 - Windows 播放器测试关闭后短时文件占用已增加有界重试；Safari 仅对已识别的 WebDriver 启动超时重试一次，不跳过测试或放宽断言。
 - 此轮范围不含 Apple、Android/iOS 扩展、真机相册兼容或搁置的播放器遮挡。发布记录与编译验收单独核对。
-- [ ] 本轮发布：通过主分支 Web 复验后同步 GitHub Pages，并校验公开 URL、静态文件与真实 Chromium 的生成下载。
+- [x] 本轮 GitHub Pages 发布：主分支 `421199b` 的 [Web 复验](https://github.com/ohyooo/LivePhoto/actions/runs/45958435318)、[站点同步](https://github.com/ohyooo/LivePhoto/actions/runs/45959494506)和[公开站点 Chromium 验证](https://github.com/ohyooo/livephoto-web/actions/runs/45959545233)均通过。[公开地址](https://ohyooo.github.io/livephoto-web/)的 23 个 HTTPS 静态文件与主分支产物逐一匹配 SHA-256，合成素材真实生成与下载通过。
 - [ ] 本轮独立内网站点更新及 HTTPS 验证单列；GitHub Pages 通过不代表内网站点已更新。
 
 
