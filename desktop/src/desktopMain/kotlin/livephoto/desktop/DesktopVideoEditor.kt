@@ -44,6 +44,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     private val panel = JFXPanel()
     private val resultPreview = poster != null
     private var player: MediaPlayer? = null
+    private var mediaView: MediaView? = null
     private val seekState = DesktopSeekState()
     private var seekTimeout: PauseTransition? = null
     @Volatile private var closed = false
@@ -70,6 +71,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     val active = MediaPlayer(media)
                     player = active
                     val view = MediaView(active).apply { isPreserveRatio = true; isSmooth = true }
+                    mediaView = view
                     val content = StackPane(view)
                     val scene = Scene(content, javafx.scene.paint.Color.BLACK)
                     scene.addEventFilter(KeyEvent.KEY_PRESSED) {
@@ -122,7 +124,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     else if (active.status == MediaPlayer.Status.READY) ready()
                 } catch (failure: Exception) {
                     cancelSeek()
-                    player?.dispose(); player = null; panel.scene = null
+                    disposePlayer()
                     changePlayback { it.copy(ready = false, seeking = false,
                         error = "无法启动本机媒体预览（${playbackFailureDetails(failure)}）") }
                 }
@@ -138,6 +140,20 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         seekState.cancel()
         seekTimeout?.stop()
         seekTimeout = null
+    }
+    private fun disposePlayer() {
+        val active = player
+        player = null
+        val view = mediaView
+        mediaView = null
+        try {
+            // Release the renderer's frame references before disposing the native
+            // pipeline. stop() would issue another native seek back to the start.
+            try { view?.mediaPlayer = null }
+            finally { panel.scene = null }
+        } finally {
+            active?.dispose()
+        }
     }
     private fun publishTime(seconds: Double) {
         seekTimeout?.stop()
@@ -246,12 +262,8 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
             // observe closed=true and queue its own FX barrier before this disposal.
             Platform.runLater {
                 cancelSeek()
-                try { player?.dispose() }
-                finally {
-                    player = null
-                    try { panel.scene = null }
-                    finally { owner.releaseEditor(this) }
-                }
+                try { disposePlayer() }
+                finally { owner.releaseEditor(this) }
             }
         }
     }

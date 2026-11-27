@@ -20,6 +20,7 @@ class DesktopMediaTest {
     @Test fun localFfmpegFeedsSharedTasksAndAnActualVideoWindow() = runBlocking {
         val directory = Files.createTempDirectory("LivePhoto-desktop-test-")
         val video = directory.resolve("video.mp4")
+        val playbackVideo = directory.resolve("playback.mp4")
         val image = directory.resolve("video.jpg")
         val output = directory.resolve("result.jpg")
         val ffmpeg = assertNotNull(System.getenv("LIVEPHOTO_FFMPEG"))
@@ -29,13 +30,13 @@ class DesktopMediaTest {
             try { assertTrue(process.waitFor(30, TimeUnit.SECONDS)); assertEquals(0, process.exitValue()) }
             finally { if (process.isAlive) process.destroyForcibly() }
         }
-        fun generateVideo(prefixFilter: String = "") = execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "${prefixFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
+        fun generateVideo(path: Path, prefixFilter: String = "") = execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "${prefixFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", path.toString())
         var platform: DesktopPlatform? = null
         var editor: DesktopVideoEditor? = null
         var window: JFrame? = null
         var testFailure: Throwable? = null
         try {
-            generateVideo()
+            generateVideo(video)
             execute("-i", video.toString(), "-frames:v", "1", image.toString())
             val host = DesktopPlatform { _, name -> if (name == null) null else output }
             platform = host
@@ -62,11 +63,12 @@ class DesktopMediaTest {
             val changed = assertIs<CoreResult.Failure>(host.analyze(videoRef))
             assertEquals("SOURCE_CHANGED", changed.error.code.value)
             Files.delete(video)
-            // The desktop UI must actually display a distinguishable frame after seeking.
-            generateVideo("drawbox=color=lime:t=fill:enable='gte(t,1)',")
+            // OpenJFX's macOS backend seeks in whole seconds. The same fixture on
+            // every host must show a green frame around exactly one second.
+            generateVideo(playbackVideo, "drawbox=color=lime:t=fill:enable='between(t,0.75,1.25)',")
             configureDesktopRendering()
             EventQueue.invokeAndWait {
-                val playback = DesktopVideoEditor(host.register(video), video, host)
+                val playback = DesktopVideoEditor(host.register(playbackVideo), playbackVideo, host)
                 editor = playback
                 window = desktopWindow("LivePhoto CI playback", 640, 420) { playback.Player(Modifier.fillMaxSize()) {} }.apply {
                     host.owner = this
@@ -109,12 +111,12 @@ class DesktopMediaTest {
             assertNull(playback.playback.value.error)
             // Queue two positions. The latest seek should win and pause at the green frame.
             playback.seek(.4)
-            playback.seek(1.5)
+            playback.seek(1.0)
             awaitPicture("video-seek-window.png", System.nanoTime() + TimeUnit.SECONDS.toNanos(10), { rgb ->
                 (rgb shr 16 and 255) < 80 && (rgb shr 8 and 255) > 160 && (rgb and 255) < 80
             }) {
                 val state = playback.playback.value
-                state.ready && state.paused && !state.seeking && kotlin.math.abs(state.current - 1.5) <= 0.1
+                state.ready && state.paused && !state.seeking && kotlin.math.abs(state.current - 1.0) <= 0.1
             }
             assertTrue(playback.playback.value.duration in 1.9..2.1)
             // Close the app host while the real player is still mounted. The editor's
