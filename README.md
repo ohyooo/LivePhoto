@@ -680,7 +680,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 
 Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 初始接入独立验收：[提交 `cc781d9` 的 Android CI](https://github.com/ohyooo/LivePhoto/actions/runs/38523702403)，**9 项宿主单元测试＋9 项 API 36 模拟器测试，零失败、零跳过**；APK、签名、lint、原片哈希及 MediaStore 保存回读通过，应用和报告两份产物已独立核验。不是手机相册兼容认证，不将桌面测试数当成 Android 验证。
 
-最新验收源码 `421199b`：[Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955598534) 三平台各 **939 项 shared＋44 项 CLI 测试**，零失败、零错误、零跳过；九份程序、库与报告产物经过独立哈希核验。桌面和 Web 的独立验收见上文及 [Web 路线](docs/web-roadmap.md)。该次验收不含 Android 或 iOS 的新功能和设备测试。
+此前验收基线 `421199b`：[Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955598534) 三平台各 **939 项 shared＋44 项 CLI 测试**，零失败、零错误、零跳过；九份程序、库与报告产物经过独立哈希核验。桌面和 Web 的独立验收见上文及 [Web 路线](docs/web-roadmap.md)。该次验收不含 Android 或 iOS 的新功能和设备测试。
 
 已完成的有限范围：
 

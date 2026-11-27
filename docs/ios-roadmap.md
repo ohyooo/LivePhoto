@@ -2,6 +2,8 @@
 
 Builds for iOS are opt-in and separate from Android, desktop Native, Compose Desktop, and Web. The `:shared` library uses the existing Kotlin Core on both iPhone arm64 and Apple Silicon simulator arm64. The small `:iosBridge` module exports the `LivePhotoCore` framework without exposing the full Kotlin Core API to Swift.
 
+The [iOS workflow for `4d7a8d3`](https://github.com/ohyooo/LivePhoto/actions/runs/45998747896) built both framework slices and ran 818 shared Core cases, 9 bridge cases, and 7 linked Swift smoke scenes on iOS 26.4 / Xcode 26.4.1. The Swift smoke covers regular files, explicit pairs, invalid paths, and unchanged original bytes; it does not cover a real Files-provider picker, Photos import, or a physical iPhone.
+
 ## Build and verify on an Apple Silicon Mac
 
 Install Xcode 26.4.1 with the iOS 26.4 simulator runtime, and set `JAVA_HOME` to JDK 25. CI pins this SDK family because it matches [Kotlin 2.4.21's platform libraries](https://kotlinlang.org/docs/multiplatform/multiplatform-compatibility-guide.html); Xcode 16.4 can build the Kotlin archive but did not link a Swift consumer. [Kotlin/Native's targets](https://kotlinlang.org/docs/native-target-support.html) and [Apple's Xcode tools](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference) describe the platform requirements.
