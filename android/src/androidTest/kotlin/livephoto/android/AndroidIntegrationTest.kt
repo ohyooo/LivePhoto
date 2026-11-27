@@ -25,18 +25,20 @@ class AndroidIntegrationTest {
     @Test fun contentProviderInputIsReadOnlyAndRemovedDocumentAsksForReselection() = runBlocking {
         val original = syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1)
         val resolver = app.contentResolver
+        val controller = AndroidCreateController(app, app.core)
         val input = AndroidPhotoExporter(resolver).publish(original, "LivePhoto-uri-fixture-${UUID.randomUUID()}.jpg")
         try {
-            val controller = AndroidCreateController(app, app.core)
             assertIs<CoreResult.Success<AnalysisResult>>(controller.analyze(input))
             assertContentEquals(original, resolver.openInputStream(input)!!.use { it.readBytes() })
+        } finally {
+            // Delete the fixture once. API 36 can reject a second delete after row ownership is gone.
             assertEquals(1, resolver.delete(input, null, null))
-            val unavailable = assertIs<CoreResult.Failure>(controller.analyze(input)).error
-            assertEquals("INPUT_UNAVAILABLE", unavailable.code.value)
-            assertEquals(Stage.Read, unavailable.stage)
-            assertTrue("重新选择" in unavailable.message)
-            assertFalse(input.toString() in unavailable.message)
-        } finally { resolver.delete(input, null, null) }
+        }
+        val unavailable = assertIs<CoreResult.Failure>(controller.analyze(input)).error
+        assertEquals("INPUT_UNAVAILABLE", unavailable.code.value)
+        assertEquals(Stage.Read, unavailable.stage)
+        assertTrue("重新选择" in unavailable.message)
+        assertFalse(input.toString() in unavailable.message)
     }
 
     @Test fun controllerDiscardsSnapshotsAfterReadOnlyAnalysisAndBudgetRefusal() = runBlocking {
@@ -662,8 +664,13 @@ class AndroidIntegrationTest {
         val imageName = "diagnostic-$token.jpg"
         val imageFile = app.getFileStreamPath(imageName)
         val videoFile = app.getFileStreamPath("missing-$token.mp4")
+        val original = fixture("video.jpg")
+        fun snapshots() = app.cacheDir.listFiles()!!.filter {
+            it.name.startsWith("livephoto-input-") && it.name.endsWith(".snapshot")
+        }.toSet()
+        val before = snapshots()
         try {
-            app.openFileOutput(imageName, 0).use { it.write(fixture("video.jpg")) }
+            app.openFileOutput(imageName, 0).use { it.write(original) }
             assertFalse(videoFile.exists())
             val failure = assertFailsWith<AndroidOperationFailure> {
                 AndroidCreateController(app, app.core).create(Uri.fromFile(imageFile), Uri.fromFile(videoFile),
@@ -671,8 +678,16 @@ class AndroidIntegrationTest {
             }
             assertEquals("read-video", failure.step)
             assertEquals("video", failure.inputRole)
-            assertIs<java.io.FileNotFoundException>(failure.cause)
-            assertTrue(formatAndroidFailure(failure, "cover.jpg", "clip.mp4").contains("读取所选视频"))
+            val cause = assertIs<SelectedDocumentUnavailableException>(failure.cause)
+            assertNull(cause.cause)
+            val report = formatAndroidFailure(failure, "cover.jpg", "clip.mp4")
+            assertTrue("读取所选视频" in report)
+            assertTrue("重新选择" in report)
+            assertFalse(videoFile.path in report)
+            assertFalse(Uri.fromFile(videoFile).toString() in report)
+            assertFalse(videoFile.exists())
+            assertContentEquals(original, imageFile.readBytes())
+            assertEquals(before, snapshots())
         } finally { if (imageFile.exists()) assertTrue(imageFile.delete()) }
     }
 
