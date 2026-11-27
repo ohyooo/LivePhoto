@@ -134,6 +134,7 @@ for module in counts:
 
 expected_swift_cases = [
     "ordinary-jpeg", "apple-still-only", "apple-matched-pair", "apple-mismatched-pair",
+    "file-single", "file-pair", "file-rejected",
 ]
 swift_log = Path("ci-output/ios-swift-smoke.log")
 

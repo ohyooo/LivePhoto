@@ -33,6 +33,20 @@ let singleReport = inspector.inspect(data: originalImageData)
 let pairReport = inspector.inspectPair(image: originalImageData, video: originalMovieData)
 ```
 
-The combined input limit is 32 MiB. A result can be successful but not `Live`; for example a single Apple carrier is only a candidate. The result includes the Core disposition, protocol/profile when known, pairing status, and issue codes, or a structured failure. Input bytes are read-only and copied into bounded in-memory storage. Do not mutate the input while calling the bridge.
+The combined input limit is 32 MiB. A result can be successful but not `Live`; for example a single Apple carrier is only a candidate. The result includes the Core disposition, protocol/profile when known, pairing status, and issue codes, or a structured failure. The Data API copies read-only input into bounded Kotlin memory. Do not mutate the input while calling the bridge.
 
-The Kotlin simulator regression fixtures test ordinary JPEG, a synthetic Apple JPEG/MOV pair, mismatched pairing, empty input, and the input limit. The linked Swift smoke independently exercises ordinary JPEG, a single Apple still, a matched pair, and a mismatched pair through the public bridge. These tests are not evidence for importing into Photos or handling every capture from Apple hardware. This milestone contains no SwiftUI app, Photos import/export, security-scoped file picker, AVFoundation media backend, file writes, or App Store packaging. Those require their own implementation and runtime checks.
+### Read-only file URLs
+
+For regular local files (including a caller-coordinated, readable Files URL), no full Data allocation is required:
+
+```swift
+let inspector = LivePhotoInspector()
+let singleReport = inspector.inspectFile(file: localImageURL)
+let pairReport = inspector.inspectFilePair(image: localImageURL, video: localMovieURL)
+```
+
+The adapter keeps the file handle open only during the call and uses positional reads of at most 64 KiB per adapter read. Core still uses memory for its own bounded parsing. The same combined 32 MiB budget applies. The files are never written and no paths or bookmarks are returned. A directory, alias represented as a filesystem symlink, FIFO, non-local URL, an empty file, and detected size/version changes are refused. This is not an atomic snapshot against a concurrent uncoordinated writer; the caller must prevent mutation while inspection is running.
+
+Call from a worker. [Apple's Files-provider contract](https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller) requires the caller to keep scoped access active and coordinate while reading external documents. See [the Swift smoke sample](../iosBridge/smoke/Smoke.swift) for a single coordinated read. For a pair coordinate both selected items together, using two read intents, and call `inspectFilePair` inside their accessor. Do not retain picker URLs after inspection, infer pairs from names, or use remote URLs.
+
+The Kotlin simulator suite exercises the Data bridge, URL inspection, invalid inputs, the combined budget, short reads, mutation detection and cleanup. The linked Swift smoke exercises ordinary and Apple cases via Data, and local file URL single/pair inspection, read-only input integrity and refusal. These are not evidence for importing into Photos, Files-provider picker UI or handling every capture from Apple hardware. There is no SwiftUI app, Photos import/export, AVFoundation media backend, file writes, or App Store packaging. Those require their own implementation and runtime checks.

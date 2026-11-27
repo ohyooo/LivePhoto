@@ -7,15 +7,29 @@ package livephoto.ios
 
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
+import kotlinx.coroutines.runBlocking
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import livephoto.core.Bytes
+import livephoto.core.CoreResult
+import livephoto.core.SourceId
 import platform.Foundation.NSData
+import platform.Foundation.NSFileManager
+import platform.Foundation.NSTemporaryDirectory
+import platform.Foundation.NSURL
+import platform.Foundation.NSUUID
 import platform.Foundation.create
+import platform.Foundation.writeToURL
+import platform.posix.mkfifo
+import platform.posix.mkdir
+import platform.posix.symlink
+import platform.posix.truncate
 
 class LivePhotoInspectorTest {
     private val inspector = LivePhotoInspector()
@@ -78,9 +92,84 @@ class LivePhotoInspectorTest {
         assertEquals("Read", report.errorStage)
     }
 
+    @Test
+    fun fileBridgeInspectsSingleAndExplicitApplePair() = withTemporaryDirectory { directory ->
+        val ordinary = directory.write("普通照片 no-extension", ORDINARY_JPEG.fixtureData())
+        val image = directory.write("still.txt", APPLE_JPEG.fixtureData())
+        val motion = directory.write("motion.again", APPLE_MOV.fixtureData())
+        val ordinaryReport = inspector.inspectFile(ordinary)
+        assertTrue(ordinaryReport.successful)
+        assertEquals("NonLive", ordinaryReport.disposition)
+        assertEquals("Candidate", inspector.inspectFile(image).disposition)
+        val report = inspector.inspectFilePair(image, motion)
+        assertTrue(report.successful)
+        assertEquals("apple.livephoto", report.protocolId)
+        assertEquals(true, report.pairingMatches)
+    }
+
+    @Test
+    fun fileBridgeRefusesNonRegularNonLocalAndOverBudgetInputs() = withTemporaryDirectory { directory ->
+        val image = directory.write("still", APPLE_JPEG.fixtureData())
+        val large = directory.write("sparse", ORDINARY_JPEG.fixtureData())
+        val budget = inspector.inputLimitBytes.toLong()
+        assertEquals(0, truncate(requireNotNull(large.path), budget))
+        assertEquals("RESOURCE_LIMIT_EXCEEDED", inspector.inspectFilePair(image, large).errorCode)
+        assertEquals(0, truncate(requireNotNull(large.path), budget + 1))
+        assertEquals("RESOURCE_LIMIT_EXCEEDED", inspector.inspectFile(large).errorCode)
+        assertEquals(0, truncate(requireNotNull(large.path), 0L))
+        assertEquals("INVALID_ARGUMENT", inspector.inspectFile(large).errorCode)
+
+        assertEquals("INVALID_ARGUMENT", inspector.inspectFile(NSURL.fileURLWithPath(directory)).errorCode)
+        assertEquals("IO_READ_FAILED", inspector.inspectFile(NSURL.fileURLWithPath("$directory/missing")).errorCode)
+        assertEquals("INVALID_ARGUMENT", inspector.inspectFile(requireNotNull(NSURL.URLWithString("https://example.invalid/photo"))).errorCode)
+
+        val alias = "$directory/link"
+        assertEquals(0, symlink(requireNotNull(image.path), alias))
+        assertEquals("INVALID_ARGUMENT", inspector.inspectFile(NSURL.fileURLWithPath(alias)).errorCode)
+        // Opening a FIFO must not hang awaiting a producer.
+        val fifo = "$directory/fifo"
+        assertEquals(0, mkfifo(fifo, 384u))
+        assertEquals("INVALID_ARGUMENT", inspector.inspectFile(NSURL.fileURLWithPath(fifo)).errorCode)
+    }
+
+    @Test
+    fun fileSourceShortReadsChangesAndCloseHaveExplicitSemantics() = runBlocking {
+        withTemporaryDirectory { directory ->
+            val bytes = ByteArray(96 * 1024) { (it % 251).toByte() }
+            val url = directory.write("chunk-input", bytes.toNSData())
+            val source = IosReadOnlyFileSource.openFile(url, SourceId("test-file"))
+            try {
+                val first = assertIs<CoreResult.Success<Bytes>>(source.readAt(7uL, UInt.MAX_VALUE)).value
+                assertEquals(64 * 1024, first.size)
+                assertEquals(bytes[7], first.toByteArray()[0])
+                val last = assertIs<CoreResult.Success<Bytes>>(source.readAt((bytes.size - 1).toULong(), 1024u)).value
+                assertEquals(listOf(bytes.last()), last.toByteArray().toList())
+                assertEquals(0, truncate(requireNotNull(url.path), 1L))
+                assertEquals("SOURCE_CHANGED", assertIs<CoreResult.Failure>(source.readAt(0uL, 1u)).error.code.value)
+            } finally {
+                source.close()
+                source.close()
+            }
+            assertEquals("IO_READ_FAILED", assertIs<CoreResult.Failure>(source.identity()).error.code.value)
+        }
+    }
+
     private fun String.fixtureData(): NSData = Base64.decode(this).toNSData()
     private fun ByteArray.toNSData(): NSData =
         usePinned { NSData.create(bytes = it.addressOf(0), length = size.toULong()) }
+
+    private fun String.write(name: String, data: NSData): NSURL =
+        NSURL.fileURLWithPath("$this/$name").also { assertTrue(data.writeToURL(it, atomically = false)) }
+
+    private inline fun <T> withTemporaryDirectory(block: (String) -> T): T {
+        val directory = NSTemporaryDirectory().trimEnd('/') + "/livephoto-" + NSUUID().UUIDString
+        assertEquals(0, mkdir(directory, 448u))
+        try {
+            return block(directory)
+        } finally {
+            assertTrue(NSFileManager.defaultManager.removeItemAtPath(directory, error = null))
+        }
+    }
 }
 
 // Synthetic bytes generated by shared commonTest's GoogleFixtures.jpeg(),
