@@ -4,6 +4,7 @@
 
 ## 2026-11-27 验收记录
 
+- [x] 公开站已同步 `7bc15a2`：[53 个 Web CI 作业](https://github.com/ohyooo/LivePhoto/actions/runs/45996272557)全部通过，[公开 Pages Chromium](https://github.com/ohyooo/livephoto-web/actions/runs/45997995727)通过实际生成和下载，另独立核对全部 23 个 HTTPS 文件。Web 生成报告按 Core 错误区分目标不支持的 AAC 音轨和非 JPEG 图片，明确给出另存副本建议；不放宽格式，不做隐式转换。
 - [x] 公开站已同步主分支 `9c4c6c2` 的 [Web CI 45983127991](https://github.com/ohyooo/LivePhoto/actions/runs/45983127991)。[Pages CI 45993576739](https://github.com/ohyooo/livephoto-web/actions/runs/45993576739) 验证 23 个 HTTPS 文件及 Chromium 合成素材生成、下载；另独立核对全部线上文件的 SHA-256。这一版修复结果预览快速松开并重新按住时偶发的误停播放。
 - [Web CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955582150) 的 `421199b` 第 2 次运行全绿。审计四份正式归档的来源与哈希、产品包内 23 个网页文件和 10 个 JS 库文件、JS/Wasm 各 818 项 JUnit 测试（各 117 份报告，零失败与跳过），以及 323 项外围检查和 Firefox/Safari 的 10 个独立场景。协议 Worker 42 项、媒体 Worker 9 项、Wasm 媒体界面 18 项单列。第 1 次的两项失败发生在 Playwright 依赖安装，重跑通过，不是产品测试失败。
 - [Compose Desktop CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955590192) 三平台各 866 项共享与 6 项桌面测试；[Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955598534) 三平台各 939 项共享与 44 项 CLI 测试。零失败、零错误、零跳过，均已逐平台复核产物。
