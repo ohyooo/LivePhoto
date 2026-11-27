@@ -1,4 +1,6 @@
 $ErrorActionPreference = 'Stop'
+# Check native exit codes ourselves so adb's actual failure is kept in CI logs.
+$PSNativeCommandUseErrorActionPreference = $false
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $adb = Join-Path $env:ANDROID_HOME 'platform-tools/adb'
 $package = 'com.ohyooo.livephoto'
@@ -8,7 +10,13 @@ foreach ($variant in @('release', 'debug')) {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot stop the test application.' }
     $apk = "android/build/outputs/apk/$variant/android-$variant.apk"
     $installed = (& $adb install -r $apk 2>&1) -join "`n"
-    if ($LASTEXITCODE -ne 0 -or $installed -notmatch '(?m)^Success\s*$') { throw "Cannot upgrade to $variant APK." }
+    $installExit = $LASTEXITCODE
+    if ($installExit -ne 0 -or $installed -notmatch '(?m)^Success\s*$') {
+        $detail = ($installed -split '\r?\n' | Select-Object -Last 8 | ForEach-Object {
+            $_.Substring(0, [Math]::Min(400, $_.Length))
+        }) -join "`n"
+        throw "Cannot upgrade to $variant APK (adb exit $installExit).`n$detail"
+    }
     $launch = (& $adb shell am start -W -n "$package/livephoto.android.MainActivity" 2>&1) -join "`n"
     $launchExit = $LASTEXITCODE
     $launch | Set-Content "ci-output/android-$variant-launch.log" -Encoding utf8
