@@ -5,6 +5,8 @@ import {resolve,join,sep,extname,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {composeDriver} from './ui-interaction.mjs';
+import {checkResultPreviewLifecycle} from './result-preview-checks.mjs';
+import {testPlan} from './test-cases.mjs';
 
 const part=process.env.LIVEPHOTO_TEST_PART;
 if(!/^(mobile|wide)-(landscape|portrait|square)$/.test(part||''))throw Error('Select player viewport and shape');
@@ -13,11 +15,22 @@ const ffmpeg=process.env.LIVEPHOTO_FFMPEG;if(!ffmpeg)throw Error('Existing FFmpe
 const cases=[['landscape','320x180','30'],['portrait','180x320','30000/1001'],['square','160x160','30']];
 for(const [shape,size,rate] of cases)execFileSync(ffmpeg,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i',`testsrc2=size=${size}:rate=${rate}`,'-t','3',
   ...(shape==='square'?['-vf',"select='not(mod(n,2))+not(mod(n,5))'",'-fps_mode','vfr']:[]),'-c:v','libx264','-threads','1','-bf','0','-pix_fmt','yuv420p','-video_track_timescale','90000','-movflags','+faststart',join(fixtures,shape+'.mp4')],{timeout:60000});
-const server=createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname;if(!path.startsWith('/livephoto/'))throw Error();const file=resolve(root,'.'+(path==='/livephoto/'?'/index.html':path.slice('/livephoto'.length)));if(!file.startsWith(root+sep))throw Error();res.setHeader('Content-Type',{'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.wasm':'application/wasm'}[extname(file)]??'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}});
+const server=createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname;
+  if(path==='/livephoto/__result-preview-test__'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Result preview lifecycle</title>');return;}
+  if(!path.startsWith('/livephoto/'))throw Error();const file=resolve(root,'.'+(path==='/livephoto/'?'/index.html':path.slice('/livephoto'.length)));if(!file.startsWith(root+sep))throw Error();res.setHeader('Content-Type',{'.html':'text/html','.js':'application/javascript','.mjs':'application/javascript','.wasm':'application/wasm'}[extname(file)]??'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin=`http://127.0.0.1:${server.address().port}`,browser=await chromium.launch({headless:true}),checks=[];
 const check=(name,valid)=>{if(!valid)throw Error(name);checks.push(name);};let lastPage;
 try {
+  if(part==='wide-landscape'){
+    const page=await browser.newPage();
+    try{
+      await page.goto(origin+'/livephoto/__result-preview-test__');
+      const proof=await checkResultPreviewLifecycle(page,'/livephoto/media/player.mjs',[...await readFile(join(fixtures,'landscape.mp4'))]);
+      console.log('Result preview lifecycle:',proof);
+      check('result-preview-hold-lifecycle',proof.length===6);
+    }finally{await page.close();}
+  }
   const ffprobe=join(dirname(ffmpeg),process.platform==='win32'?'ffprobe.exe':'ffprobe');
   const pts=JSON.parse(execFileSync(ffprobe,['-v','error','-select_streams','v:0','-show_entries','packet=pts_time','-of','json',join(fixtures,'square.mp4')],{timeout:30000})).packets.map(p=>Number(p.pts_time));
   if(part==='mobile-square')check('vfr-source-independently-confirmed',new Set(pts.slice(1).map((p,i)=>Math.round((p-pts[i])*1000))).size>1);
@@ -115,7 +128,7 @@ try {
     check(label+':range-handles-select-inner-segment',values.length===2&&values[0]>0&&values[0]<values[1]&&values[1]<await video.evaluate(v=>v.duration));
     if(shape==='landscape')await page.screenshot({path:`ci-output/web-ui-tools-${size}.png`});await context.close();
   }
-  if(checks.length!==(part==='mobile-square'?16:15)||new Set(checks).size!==checks.length)throw Error('Incomplete player evidence');
+  if(checks.length!==testPlan.find(plan=>plan.suite==='player'&&plan.part===part).checks.length||new Set(checks).size!==checks.length)throw Error('Incomplete player evidence');
   await writeFile(`ci-output/web-player-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,scope:'shared-kotlin-compose-controls-real-browser-pointer-keys-fullscreen-live-cover-preview'},null,2)+'\n');
   console.log(`WEB_PLAYER_EVIDENCE=SUCCESS ${checks.length} checks; ${part}`);
 }catch(error){console.error('Player failure after checks:',checks,error);if(lastPage&&!lastPage.isClosed()){

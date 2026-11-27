@@ -63,9 +63,22 @@ export function resultPreview(photo,movie,scroll){
   element.style.cssText='width:100%;height:100%;background:#111;border-radius:12px;overflow:hidden;touch-action:none';
   image.alt='上次生成的封面';image.src=imageURL;video.src=videoURL;image.style.cssText=video.style.cssText='width:100%;height:100%;object-fit:contain';
   video.hidden=true;video.playsInline=true;video.loop=true;video.preload='metadata';video.setAttribute('aria-label','生成结果动态预览');
-  let holding=false,disposed=false;
-  const stop=()=>{holding=false;video.pause();video.currentTime=0;video.hidden=true;image.hidden=false;};
-  const start=()=>{if(disposed||holding)return;holding=true;video.hidden=false;image.hidden=true;video.play().then(()=>{if(!holding)video.pause();}).catch(()=>{stop();element.title='浏览器无法播放此视频';});};
+  let hold=null,disposed=false;
+  const stop=()=>{
+    if(!hold)return;
+    hold=null;video.pause();video.currentTime=0;video.hidden=true;image.hidden=false;
+  };
+  const start=()=>{
+    if(disposed||hold)return;
+    const attempt={};hold=attempt;
+    element.removeAttribute('title');video.hidden=false;image.hidden=true;
+    video.play().catch(()=>{
+      // pause()/load() can reject a pending play(). A previous hold (or a
+      // disposed preview) no longer owns this video or its visible error.
+      if(hold!==attempt)return;
+      stop();element.title='浏览器无法播放此视频';
+    });
+  };
   element.onpointerdown=event=>{event.preventDefault();element.setPointerCapture(event.pointerId);start();};
   element.onpointerup=element.onpointercancel=element.onlostpointercapture=stop;
   element.onkeydown=event=>{if([' ','Enter'].includes(event.key)){event.preventDefault();start();}};
@@ -73,5 +86,9 @@ export function resultPreview(photo,movie,scroll){
   element.onblur=stop;element.oncontextmenu=event=>event.preventDefault();
   const visibility=()=>{if(document.hidden)stop();};window.addEventListener('blur',stop);document.addEventListener('visibilitychange',visibility);
   const release=forwardWheel(element,scroll);element.append(image,video);
-  return {element,dispose(){disposed=true;stop();release();window.removeEventListener('blur',stop);document.removeEventListener('visibilitychange',visibility);video.removeAttribute('src');video.load();URL.revokeObjectURL(imageURL);URL.revokeObjectURL(videoURL);}};
+  return {element,dispose(){
+    if(disposed)return;
+    disposed=true;stop();release();window.removeEventListener('blur',stop);document.removeEventListener('visibilitychange',visibility);
+    video.removeAttribute('src');video.load();URL.revokeObjectURL(imageURL);URL.revokeObjectURL(videoURL);
+  }};
 }

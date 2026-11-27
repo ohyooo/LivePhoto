@@ -32,7 +32,8 @@ const sizes=['mobile','wide'];
 export const testPlan=[
   ...Object.entries(uiCases).flatMap(([scenario,cases])=>sizes.map(viewport=>({suite:'ui',part:scenario+'-'+viewport,scenario,viewport,checks:cases.map(c=>viewport+':'+c)}))),
   ...sizes.flatMap(size=>['landscape','portrait','square'].map(shape=>({suite:'player',part:size+'-'+shape,
-    checks:[...(size==='mobile'&&shape==='square'?['vfr-source-independently-confirmed']:[]),...playerCases.map(c=>size+':'+shape+':'+c)]}))),
+    checks:[...(size==='mobile'&&shape==='square'?['vfr-source-independently-confirmed']:[]),
+      ...(size==='wide'&&shape==='landscape'?['result-preview-hold-lifecycle']:[]),...playerCases.map(c=>size+':'+shape+':'+c)]}))),
   ...sizes.map(size=>({suite:'theme',part:size,checks:themeCases.map(c=>size+':'+c)})),
   {suite:'browser',part:'main',checks:browserCases}, {suite:'browser',part:'worker',checks:['module-worker-round-trip']},
   ...['main','worker',...sizes].map(part=>({suite:'media',part,checks:part==='main'?['invalid-range-rejected','core-probe-decode-partial',
