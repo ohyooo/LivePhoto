@@ -693,18 +693,20 @@ Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https:/
 - [x] Android 初始接入：直接引用 Core 的 APK、最小手测界面、系统选择器/有界随机访问快照、单张 MediaStore 保存、宿主与模拟器回归及 CI 产物。
 - [x] Kotlin/JS 基础功能库、Promise/File/Blob 适配、真实 Chromium/Worker 验收，以及复用 Android 的浏览器 Compose 界面；用户已手测网页可用。
 
-后续 TODO（当前不扩展这些业务范围）：
-
-- [ ] 真机验收：更多未编辑厂商原片及设备/OS/相册/导入方式证据，验证动态播放、声音与 key；合成和解码测试不能代替。
-- [ ] 更多有规范证据的媒体时间线、容器/codec、AAC priming/复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
-- [ ] 其它显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
-- [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
+- [x] [真实设备验收清单和证据模板](docs/device-acceptance.md)已就绪；清单不代表已在真机运行。
 - [x] Android 私有缓存随机读取、同签名双向安装及 [Android 目标的 818 项宿主 JVM Core 回归](https://github.com/ohyooo/LivePhoto/actions/runs/45972581300)；iOS 只读 Core 的两个 XCFramework 切片和 Kotlin 模拟器测试已分别验证。
-- [ ] 后续移动工作：更大文件预算、持久 URI 生命周期、通用多资产事务、移动系统媒体后端与真机验收。不会用桌面 FFmpeg 进程冒充移动支持。
 - [x] Web 有限协议接口、公共 JS/Wasm 回归、浏览器媒体后端、后台取消、有界分块 IO；更广格式及搁置项见 [Web 路线与 TODO](docs/web-roadmap.md)。
 - [x] Compose Desktop 接入共享 Compose 工具界面与本地 FFmpeg，三平台便携包、原子新文件保存和 CI 窗口验证。
 - [x] 桌面全屏往返、按需时间轴缩略图、取消保存后的恢复及便携应用启动和视频播放，已完成三平台 CI 验收。
-- [ ] 更多真实 GPU／声卡、手机相册与设备兼容性，不由 CI 合成素材代替。
+
+尚待验收与实现：
+
+- [ ] [真实设备验收](docs/device-acceptance.md)：手机相册需要未编辑的厂商原片及设备、系统、相册和导入路径证据，分别核对动态识别、播放、声音和 key；桌面和浏览器还需要真实 GPU 和音频设备。没有实际记录不算通过，合成素材或解码检查不能代替。
+- [ ] 移动端更大文件预算、持久 URI 生命周期、通用多资产事务及移动系统媒体后端。不会用桌面 FFmpeg 进程冒充移动支持。
+- [ ] 有规范证据的更多媒体时间线、容器/codec、AAC priming、复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
+- [ ] 更多显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
+
+已暂停、不当作已实现：Apple 复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata，以及 CID 与普通文本的跨工具兼容；保留已有能力与测试。
 
 ### 浏览器可选 Core 媒体后端
 
