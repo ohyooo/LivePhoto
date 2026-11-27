@@ -4,7 +4,7 @@ Builds for iOS are opt-in and separate from Android, desktop Native, Compose Des
 
 ## Build and verify on an Apple Silicon Mac
 
-Install Xcode, its command-line tools and an iPhone simulator runtime, and set `JAVA_HOME` to JDK 25. [Kotlin/Native's targets](https://kotlinlang.org/docs/native-target-support.html) and [Apple's Xcode tools](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference) describe the platform requirements.
+Install Xcode 26.4.1 with the iOS 26.4 simulator runtime, and set `JAVA_HOME` to JDK 25. CI pins this SDK family because it matches [Kotlin 2.4.21's platform libraries](https://kotlinlang.org/docs/multiplatform/multiplatform-compatibility-guide.html); Xcode 16.4 can build the Kotlin archive but did not link a Swift consumer. [Kotlin/Native's targets](https://kotlinlang.org/docs/native-target-support.html) and [Apple's Xcode tools](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference) describe the platform requirements.
 
 ```sh
 # Builds both XCFramework slices, runs Core/bridge simulator tests, and
