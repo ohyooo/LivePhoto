@@ -1,0 +1,73 @@
+name: iOS Core
+
+on:
+  push:
+    branches: [dot/livephoto-ios-core]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ios.yml'
+      - 'settings.gradle.kts'
+      - 'build-ios.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'shared/**'
+      - 'iosBridge/**'
+      - 'scripts/verify-ios.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-core-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ios-core:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '25'
+          java-package: jdk
+          architecture: aarch64
+          cache-jdk: true
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+      - name: Compile device and simulator slices and run the iOS simulator tests
+        shell: bash
+        run: bash scripts/verify-ios.sh
+      - name: Archive the validated XCFramework
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent iosBridge/build/XCFrameworks/debug/LivePhotoCore.xcframework ci-output/LivePhotoCore-ios-debug.zip
+          shasum -a 256 ci-output/LivePhotoCore-ios-debug.zip > ci-output/LivePhotoCore-ios-debug.zip.sha256
+      - name: Upload verified framework and checksum
+        uses: actions/upload-artifact@v7
+        with:
+          name: LivePhotoCore-iOS-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-output/LivePhotoCore-ios-debug.zip*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve test evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-core-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/ios-verification.log
+            ci-output/ios-evidence.json
+            shared/build/test-results/iosSimulatorArm64Test/*.xml
+            iosBridge/build/test-results/iosSimulatorArm64Test/*.xml
+          if-no-files-found: warn
+          retention-days: 14
