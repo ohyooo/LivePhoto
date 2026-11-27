@@ -10,15 +10,33 @@ class DesktopSeekStateTest {
         val seek = DesktopSeekState()
         assertEquals(0.4, seek.observe(0.4))
         val first = seek.request(0.8)
+        assertSame(first, seek.submit())
         assertNull(seek.observe(0.41))
         val latest = seek.request(1.5)
         assertNull(seek.observe(0.81))
         assertNull(seek.expire(first, 0.81))
         assertSame(latest, seek.pending)
+        assertSame(latest, seek.submit())
         assertEquals(1.48, seek.observe(1.48))
         assertNull(seek.pending)
         assertNull(seek.expire(latest, 0.81))
         assertEquals(1.55, seek.observe(1.55))
+    }
+
+    @Test fun onlyLatestRequestIsSubmittedAndClockCannotSettleItBeforePause() {
+        val seek = DesktopSeekState()
+        assertEquals(0.2, seek.observe(0.2))
+        seek.request(0.4)
+        val latest = seek.request(1.0)
+        assertNull(seek.observe(1.0))
+        assertSame(latest, seek.pending)
+        assertSame(latest, seek.submit())
+        assertNull(seek.submit())
+        assertEquals(1.0, seek.observe(1.0))
+        assertNull(seek.submit())
+        val expiresWhilePausing = seek.request(1.6)
+        assertEquals(0.9, seek.expire(expiresWhilePausing, 0.9))
+        assertNull(seek.submit())
     }
 
     @Test fun timeoutUsesNativeClockOrLastConfirmedValueAndNeverClosesCancelledSeek() {

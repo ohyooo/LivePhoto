@@ -111,7 +111,7 @@ class DesktopMediaTest {
             }
             awaitPicture("video-window.png", deadline, { rgb ->
                 (rgb shr 16 and 255) > 160 && (rgb shr 8 and 255) < 80 && (rgb and 255) < 80
-            })
+            }) { !playback.playback.value.paused }
             assertNull(playback.playback.value.error)
             // Queue two positions. The latest seek should win and pause at the green frame.
             playback.seek(.4)

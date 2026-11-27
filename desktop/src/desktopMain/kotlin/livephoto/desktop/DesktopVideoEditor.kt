@@ -47,6 +47,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     private var mediaView: MediaView? = null
     private val seekState = DesktopSeekState()
     private var seekTimeout: PauseTransition? = null
+    private var awaitingSeekPause = false
     @Volatile private var closed = false
     private val operationLock = Any()
     private val operationJobs = mutableSetOf<Job>()
@@ -114,7 +115,13 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     active.currentTimeProperty().addListener { _, _, value ->
                         seekState.observe(value.toSeconds())?.let(::publishTime)
                     }
-                    active.statusProperty().addListener { _, _, status -> changePlayback { it.copy(paused = it.error != null || status != MediaPlayer.Status.PLAYING) } }
+                    active.statusProperty().addListener { _, _, status ->
+                        changePlayback { it.copy(paused = it.error != null || status != MediaPlayer.Status.PLAYING) }
+                        if (status == MediaPlayer.Status.PAUSED) {
+                            awaitingSeekPause = false
+                            submitPausedSeek(active)
+                        }
+                    }
                     active.setOnEndOfMedia {
                         // An old end callback must not move the clock past a newer seek.
                         if (seekState.pending == null) changePlayback { it.copy(paused = true, current = it.duration) }
@@ -138,6 +145,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     private fun update(action: (MediaPlayer) -> Unit) { Platform.runLater { if (!closed) player?.let(action) } }
     private fun cancelSeek() {
         seekState.cancel()
+        awaitingSeekPause = false
         seekTimeout?.stop()
         seekTimeout = null
     }
@@ -156,11 +164,17 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         }
     }
     private fun publishTime(seconds: Double) {
+        awaitingSeekPause = false
         seekTimeout?.stop()
         seekTimeout = null
         changePlayback { value ->
             if (value.ready) value.copy(current = seconds.coerceAtMost(value.duration), seeking = false) else value
         }
+    }
+    private fun submitPausedSeek(active: MediaPlayer) {
+        if (closed || active !== player || !state.value.ready) return
+        if (active.status != MediaPlayer.Status.PAUSED && active.status != MediaPlayer.Status.READY) return
+        seekState.submit()?.let { active.seek(Duration.seconds(it.seconds)) }
     }
     override fun seek(seconds: Double) {
         if (!seconds.isFinite() || !state.value.ready) return
@@ -168,9 +182,8 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
             val playback = state.value
             if (!playback.ready) return@update
             val position = seconds.coerceIn(0.0, playback.duration)
-            val alreadyThere = seekState.pending == null && active.currentTime.toSeconds() == position
-            active.pause()
-            if (alreadyThere) {
+            if (seekState.pending == null && active.currentTime.toSeconds() == position) {
+                active.pause()
                 changePlayback { it.copy(paused = true, current = position, seeking = false) }
                 return@update
             }
@@ -181,7 +194,14 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                 setOnFinished { seekState.expire(request, active.currentTime.toSeconds())?.let(::publishTime) }
                 play()
             }
-            active.seek(Duration.seconds(position))
+            // JavaFX acknowledges pause asynchronously and disables clock updates
+            // in that callback. Do not send a seek into the preceding active playback.
+            if (active.status == MediaPlayer.Status.PAUSED || active.status == MediaPlayer.Status.READY) {
+                submitPausedSeek(active)
+            } else if (!awaitingSeekPause) {
+                awaitingSeekPause = true
+                active.pause()
+            }
         }
     }
     override fun togglePlayback() { update { if (state.value.paused) { if (state.value.current >= state.value.duration) it.seek(Duration.ZERO); it.play() } else it.pause() } }
