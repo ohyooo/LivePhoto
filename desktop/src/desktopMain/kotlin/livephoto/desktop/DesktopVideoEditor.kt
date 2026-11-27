@@ -29,7 +29,7 @@ import kotlin.math.roundToLong
 
 /** Playback is a view only. Every exported frame or edited video goes through Core/FFmpeg. */
 internal class DesktopVideoEditor(private val reference: String, path: Path, private val owner: DesktopPlatform,
-    poster: Path? = null, private val onRetry: (() -> Unit)? = null) : VideoEditor {
+    poster: Path? = null, private val onRetry: (() -> Unit)? = null) : VideoEditor, RememberObserver {
     private val state = mutableStateOf(VideoPlayback())
     override val playback: State<VideoPlayback> get() = state
     override val canProcess: Boolean get() = owner.supportsVideoEditing
@@ -55,11 +55,11 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         changePlayback { it.copy(fullscreen = active) }
         owner.playerFullscreen = active
     }
-    override val canFullscreen: Boolean get() = !resultPreview && owner.owner is JFrame
+    override val canFullscreen: Boolean get() = !closed && !resultPreview && owner.owner is JFrame
     private var scroll: (Float) -> Unit = {}
     init {
         panel.addMouseWheelListener { scroll((it.preciseWheelRotation * 40).toFloat()) }
-        Platform.runLater {
+        if (owner.retainEditor(this)) Platform.runLater {
             Platform.setImplicitExit(false)
             if (!closed) {
                 try {
@@ -117,7 +117,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                         error = "无法启动本机媒体预览（${playbackFailureDetails(failure)}）") }
                 }
             }
-        }
+        } else closed = true
     }
     // FX playback callbacks and Swing fullscreen callbacks must not overwrite each other's fields.
     private fun changePlayback(change: (VideoPlayback) -> VideoPlayback) {
@@ -191,6 +191,10 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         SideEffect { scroll = onScroll }
         SwingPanel(factory = { panel }, modifier = modifier, background = Color.Black)
     }
+    override fun onRemembered() = Unit
+    override fun onForgotten() = close()
+    override fun onAbandoned() = close()
+
     fun close() {
         synchronized(operationLock) {
             if (closed) return
@@ -198,9 +202,18 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
             operationJobs.toList().forEach { it.cancel() }
             thumbnailReferences.forEach(owner::release); thumbnailReferences = emptyList(); thumbnail = null
             previewReference?.let(owner::release); previewReference = null
+            SwingUtilities.invokeLater { applyFullscreen(false) }
+            // Keep these enqueues under the close lock: a concurrent shutdown must not
+            // observe closed=true and queue its own FX barrier before this disposal.
+            Platform.runLater {
+                try { player?.dispose() }
+                finally {
+                    player = null
+                    try { panel.scene = null }
+                    finally { owner.releaseEditor(this) }
+                }
+            }
         }
-        SwingUtilities.invokeLater { applyFullscreen(false) }
-        Platform.runLater { player?.dispose(); player = null; panel.scene = null }
     }
 }
 

@@ -39,6 +39,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     private val pendingDeletes = ConcurrentHashMap.newKeySet<Path>()
     private val taskLock = Any()
     private val tasks = mutableSetOf<Job>()
+    private val editors = mutableSetOf<DesktopVideoEditor>()
     private var closed = false
     private val backendLock = Mutex()
     private val pickerLock = Mutex()
@@ -61,6 +62,12 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     override val supportsClipboard: Boolean = true
     override val supportsVideoEditing: Boolean get() = mediaAvailable
     override val hasResultPreview: Boolean get() = lastResult != null
+    internal fun retainEditor(editor: DesktopVideoEditor): Boolean = synchronized(taskLock) {
+        !closed && editors.add(editor)
+    }
+    internal fun releaseEditor(editor: DesktopVideoEditor) {
+        synchronized(taskLock) { editors.remove(editor) }
+    }
     suspend fun configureFfmpeg(explicit: String? = null) = task {
         backendLock.withLock {
             val discovered = try {
@@ -359,11 +366,9 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     @Composable override fun rememberVideoEditor(reference: String?): VideoEditor? {
         val entry = reference?.let(entries::get)
         var revision by remember(reference) { mutableIntStateOf(0) }
-        val editor = remember(reference, entry, revision) {
+        return remember(reference, entry, revision) {
             entry?.let { DesktopVideoEditor(reference!!, it.path, this, onRetry = { revision++ }) }
         }
-        DisposableEffect(editor) { onDispose { editor?.close() } }
-        return editor
     }
     @Composable override fun ImagePreview(reference: String, modifier: Modifier, onScroll: (Float) -> Unit) {
         val path = entries[reference]?.path
@@ -399,15 +404,17 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
         val poster = result?.first?.let(entries::get)
         val movie = result?.second?.let(entries::get)
         val preview = remember(result) { if (poster == null || movie == null) null else DesktopVideoEditor(result!!.second, movie.path, this, poster.path) }
-        DisposableEffect(preview) { onDispose { preview?.close() } }
         preview?.Player(modifier, onScroll)
     }
     override fun close() {
-        val running = synchronized(taskLock) {
+        val (running, activeEditors) = synchronized(taskLock) {
             if (closed) return
             closed = true
-            tasks.toList()
+            tasks.toList() to editors.toList()
         }
+        // Composition may still own an editor during application shutdown. Enqueue its
+        // disposal before the FX barrier and do not rely on DisposableEffect ordering.
+        activeEditors.forEach(DesktopVideoEditor::close)
         running.forEach { it.cancel() }
         val finished = runBlocking { withTimeoutOrNull(5000) { running.joinAll(); true } } == true
         val mediaReleased = try {

@@ -67,6 +67,7 @@ class DesktopMediaTest {
                 val playback = DesktopVideoEditor(host.register(video), video, host)
                 editor = playback
                 window = desktopWindow("LivePhoto CI playback", 640, 420) { playback.Player(Modifier.fillMaxSize()) {} }.apply {
+                    host.owner = this
                     setLocation(60, 60); isVisible = true
                 }
             }
@@ -96,13 +97,18 @@ class DesktopMediaTest {
             assertTrue(redPixels > 5000, "Native video is blank/occluded in the real Compose window: $redPixels red pixels; ${playback.playback.value}")
             playback.seek(.8)
             assertTrue(playback.playback.value.duration in 1.9..2.1)
+            // Close the app host while the real player is still mounted. The editor's
+            // Compose disposal must not be required to release native playback.
+            assertTrue(playback.canFullscreen)
+            host.close()
+            assertFalse(playback.canFullscreen, "Closing the host must close its still-mounted video editor")
         } catch (failure: Throwable) {
             testFailure = failure
             throw failure
         } finally {
             try {
-                EventQueue.invokeAndWait { editor?.close(); window?.dispose() }
                 platform?.close()
+                EventQueue.invokeAndWait { window?.dispose() }
                 deleteMediaTestDirectory(directory)
             } catch (cleanupFailure: Exception) {
                 val original = testFailure ?: throw cleanupFailure
