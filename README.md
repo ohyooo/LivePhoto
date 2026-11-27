@@ -6,9 +6,9 @@
 
 使用 Kotlin Multiplatform 实现的 Live Photo / Motion Photo Core、命令行工具与共享 Compose 界面。可检测、检查、验证、创建、转换、提取和拆分支持范围内的动态照片，并提供有限的修复、关键帧位置修改及媒体处理能力。
 
-**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，旧 JVM CLI 与桌面系统媒体实现已移除；新增 Compose Desktop 图形应用已完成三平台独立验收，桌面 UI 单独使用 JVM。Android 直接复用 Core，测试界面使用 Compose；不是 Core JNI 或桌面 JVM 发行版。iOS 尚未接入；Compose Desktop 与 Native CLI 为独立交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
+**当前为开发中的实验性版本，不是全厂商、全格式兼容工具。** Core 与 CLI、文件路径及具体媒体库解耦；桌面提供三平台 Kotlin/Native 库和原生 CLI，旧 JVM CLI 与桌面系统媒体实现已移除；新增 Compose Desktop 图形应用已完成三平台独立验收，桌面 UI 单独使用 JVM。Android 直接复用 Core，测试界面使用 Compose；不是 Core JNI 或桌面 JVM 发行版。iOS 新增可选的只读 Core 构建与 Swift 接口，尚未完成 Xcode 编译及模拟器验收；没有 iOS App 或相册集成。Compose Desktop 与 Native CLI 为独立交付。能力以运行时返回的 `implementation`、`conditions`、`coverage` 和保留报告为准，不能把 `Experimental`、`Planned` 或 `Partial` 理解为全面支持。
 
-**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Compose Desktop 接入共享 UI 与本地 FFmpeg，独立提供带运行时的便携包；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。其它业务扩展暂不实施，Apple 新功能暂停。** 见[进度与 TODO](#进度已完成与-todo)。
+**当前进度：桌面 Native、真实 FFmpeg、旧 JVM/系统媒体代码清理已完成三平台验证；Compose Desktop 接入共享 UI 与本地 FFmpeg，独立提供带运行时的便携包；Android 初始应用、素材回归、单张照片保存及 APK CI 已通过独立验证，等待真机手测。暂不提供移动端媒体编解码。iOS 的阶段范围见 [iOS 只读 Core](#ios-只读-core)。** 见[进度与 TODO](#进度已完成与-todo)。
 
 浏览器功能库与共享 Compose 界面已接入，用户已手动验证网页可用。后续能力及验收进度单独维护在 [Web 路线与 TODO](docs/web-roadmap.md)，不以旧阶段测试代替新接口验证。
 
@@ -17,6 +17,7 @@
 - [下载与运行](#下载与运行)
 - [前提与推荐](#前提与推荐)
 - [Android 测试应用](#android-测试应用)
+- [iOS 只读 Core](#ios-只读-core)
 - [Compose Desktop 图形应用](#compose-desktop-图形应用)
 - [浏览器功能库（无 UI）](#浏览器功能库无-ui)
 - [浏览器共享界面](#浏览器共享界面)
@@ -186,6 +187,13 @@ pwsh -File scripts/package-web-ui.ps1
 CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性、错误展示、三个协议实际下载，并独立解析下载结果及核对视频字节。报告截图只使用临时合成素材，不上传媒体原片或生成成品。
 
 网页包附带 [Noto Sans SC](https://github.com/notofonts/noto-cjk/releases/tag/Sans2.004) 中文字体及 OFL 许可，首次打开会从同一静态站点预加载约 8 MiB 字体，避免中文缺字或依赖外部字体服务。源码构建后用 `scripts/package-web-ui.ps1` 完成字体与许可打包；打包时需要联网，运行时不向外部字体服务发请求。
+
+## iOS 只读 Core
+
+使用 `-Plivephoto.ios=true` 选择独立 iOS 构建。它复用共享 Core，提供 iPhone arm64 和 Apple Silicon 模拟器 arm64 两个目标，以及面向 Swift 的只读 `LivePhotoInspector` 接口。可传入单份图片数据或显式传入图片与视频配对，检查识别结果和诊断；不写入文件或相册。
+
+在 Apple Silicon Mac 上安装 Xcode、iPhone 模拟器和 JDK 25 后，运行 `bash scripts/verify-ios.sh`。当前只完成 Linux 上的 Gradle 配置检查，未实测 Xcode 编译、Swift 导入或模拟器运行。详见 [iOS 构建与接口说明](docs/ios-roadmap.md)。
+
 
 ## Android 测试应用
 
@@ -672,7 +680,7 @@ Build 三平台成功共 9 个 artifacts，全部要求真实 FFmpeg 和解压�
 
 Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https://github.com/ohyooo/LivePhoto/actions/runs/38511616570)，每平台 **911 项测试，零失败、零跳过**；解压后的程序另通过 **27 项 CLI 检查**，含 9 项真实媒体检查，九份产物已独立核验。Android 初始接入独立验收：[提交 `cc781d9` 的 Android CI](https://github.com/ohyooo/LivePhoto/actions/runs/38523702403)，**9 项宿主单元测试＋9 项 API 36 模拟器测试，零失败、零跳过**；APK、签名、lint、原片哈希及 MediaStore 保存回读通过，应用和报告两份产物已独立核验。不是手机相册兼容认证，不将桌面测试数当成 Android 验证。
 
-最新验收源码 `421199b`：[Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955598534) 三平台各 **939 项 shared＋44 项 CLI 测试**，零失败、零错误、零跳过；九份程序、库与报告产物经过独立哈希核验。桌面和 Web 的独立验收见上文及 [Web 路线](docs/web-roadmap.md)。未开展 Android/iOS 新功能或设备验收。
+最新验收源码 `421199b`：[Native CI](https://github.com/ohyooo/LivePhoto/actions/runs/45955598534) 三平台各 **939 项 shared＋44 项 CLI 测试**，零失败、零错误、零跳过；九份程序、库与报告产物经过独立哈希核验。桌面和 Web 的独立验收见上文及 [Web 路线](docs/web-roadmap.md)。该次验收不含 Android 或 iOS 的新功能和设备测试。
 
 已完成的有限范围：
 
@@ -691,7 +699,7 @@ Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https:/
 - [ ] 更多有规范证据的媒体时间线、容器/codec、AAC priming/复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
 - [ ] 其它显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
 - [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
-- [ ] 后续移动工作：大文件/随机访问 IO、URI 生命周期、通用多资产事务、移动系统媒体后端及真机验收。iOS targets、构建/IO/媒体适配仍未实施；不复用桌面 FFmpeg 进程冒充移动支持。
+- [ ] 后续移动工作：大文件/随机访问 IO、URI 生命周期、通用多资产事务、移动系统媒体后端及真机验收。iOS 新增只读 Swift 接口，仍需在 Apple Silicon Mac 上验收框架与模拟器测试；不复用桌面 FFmpeg 进程冒充移动支持。
 - [x] Web 有限协议接口、公共 JS/Wasm 回归、浏览器媒体后端、后台取消、有界分块 IO；更广格式及搁置项见 [Web 路线与 TODO](docs/web-roadmap.md)。
 - [x] Compose Desktop 接入共享 Compose 工具界面与本地 FFmpeg，三平台便携包、原子新文件保存和 CI 窗口验证。
 - [x] 桌面全屏往返、按需时间轴缩略图、取消保存后的恢复及便携应用启动和视频播放，已完成三平台 CI 验收。

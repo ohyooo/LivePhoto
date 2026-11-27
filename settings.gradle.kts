@@ -30,6 +30,11 @@ rootProject.name = "LivePhoto"
 require(providers.gradleProperty("livephoto.jvm").orNull in setOf(null, "false")) {
     "Use livephoto.desktop=true for Compose Desktop or select a Native CLI host"
 }
+val iosEnabled = when (val selected = providers.gradleProperty("livephoto.ios").orNull) {
+    null, "false" -> false
+    "true" -> true
+    else -> error("livephoto.ios must be true or false, not $selected")
+}
 val androidEnabled = when (val selected = providers.gradleProperty("livephoto.android").orNull) {
     null, "false" -> false
     "true" -> true
@@ -54,7 +59,15 @@ val desktopEnabled = when (val selected = providers.gradleProperty("livephoto.de
 require(!desktopEnabled || !webEnabled && !androidEnabled && !providers.gradleProperty("livephoto.nativeTarget").isPresent) {
     "Build Compose Desktop, Web, Android and Native CLI separately"
 }
-if (desktopEnabled) {
+if (iosEnabled) {
+    require(!desktopEnabled && !webEnabled && !androidEnabled &&
+        !providers.gradleProperty("livephoto.nativeTarget").isPresent) {
+        "Build the iOS framework separately with -Plivephoto.ios=true"
+    }
+    rootProject.buildFileName = "build-ios.gradle.kts"
+    include(":shared", ":iosBridge")
+    project(":shared").buildFileName = "build-ios.gradle.kts"
+} else if (desktopEnabled) {
     rootProject.buildFileName = "build-desktop.gradle.kts"
     include(":shared", ":ui", ":desktop")
     project(":shared").buildFileName = "build-desktop.gradle.kts"
@@ -80,7 +93,7 @@ if (desktopEnabled) {
 } else {
     require(providers.gradleProperty("livephoto.nativeTarget").orNull in
         setOf("linux-x64", "macos-arm64", "windows-x64")) {
-        "Select -Plivephoto.nativeTarget=<host> or -Plivephoto.android=true"
+        "Select -Plivephoto.nativeTarget=<host>, -Plivephoto.android=true, or -Plivephoto.ios=true"
     }
     include(":shared", ":cli")
 }
