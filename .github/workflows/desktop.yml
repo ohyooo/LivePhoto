@@ -54,9 +54,14 @@ jobs:
           validate-wrappers: true
       - name: Linux display and media libraries
         if: runner.os == 'Linux'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libgtk-3-0 libasound2t64 libavcodec60 libavformat60 fonts-noto-cjk
+          # All packages below come from Ubuntu. Unrelated runner repositories must not block this step.
+          ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+          test -s "$ubuntu_sources"
+          apt_sources=(-o "Dir::Etc::sourcelist=$ubuntu_sources" -o 'Dir::Etc::sourceparts=-')
+          sudo apt-get "${apt_sources[@]}" update
+          sudo apt-get "${apt_sources[@]}" install -y xvfb libgtk-3-0 libasound2t64 libavcodec60 libavformat60 fonts-noto-cjk
       - name: Prepare public protocol fixtures and real FFmpeg
         shell: pwsh
         run: |
