@@ -6,21 +6,23 @@ import android.net.Uri
 import android.provider.MediaStore
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import livephoto.core.Bytes
 import java.io.InputStream
+import java.io.OutputStream
 
 /** One app-created photo/video row only; not a multi-asset filesystem transaction. */
 class AndroidPhotoExporter(private val resolver: ContentResolver) {
-    suspend fun publish(bytes: ByteArray, displayName: String): Uri = publishMedia(bytes, displayName,
+    suspend fun publish(bytes: Bytes, displayName: String): Uri = publishMedia(bytes, displayName,
         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), "image/jpeg", "Pictures/LivePhoto")
 
-    suspend fun publishVideo(bytes: ByteArray, displayName: String, mime: String): Uri {
+    suspend fun publishVideo(bytes: Bytes, displayName: String, mime: String): Uri {
         require(mime in setOf("video/mp4", "video/quicktime")) { "Only identified MP4/MOV extraction can be saved here" }
         return publishMedia(bytes, displayName, MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
             mime, "Movies/LivePhoto")
     }
 
-    private suspend fun publishMedia(bytes: ByteArray, displayName: String, collection: Uri, mime: String, relativePath: String): Uri {
-        require(bytes.isNotEmpty() && bytes.size <= AndroidCreateController.MAX_OUTPUT_BYTES)
+    private suspend fun publishMedia(bytes: Bytes, displayName: String, collection: Uri, mime: String, relativePath: String): Uri {
+        require(bytes.size in 1..AndroidCreateController.MAX_OUTPUT_BYTES)
         require(displayName.isNotBlank() && '/' !in displayName && '\\' !in displayName && '\u0000' !in displayName)
         currentCoroutineContext().ensureActive()
         val values = ContentValues().apply {
@@ -33,13 +35,7 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
         var published = false
         try {
             checkNotNull(resolver.openOutputStream(uri, "w")) { "Cannot open pending output" }.use { stream ->
-                var position = 0
-                while (position < bytes.size) {
-                    currentCoroutineContext().ensureActive()
-                    val count = minOf(64 * 1024, bytes.size - position)
-                    stream.write(bytes, position, count)
-                    position += count
-                }
+                writeMediaChunks(stream, bytes) { currentCoroutineContext().ensureActive() }
                 stream.flush()
             }
             checkNotNull(resolver.openInputStream(uri)) { "Cannot verify pending photo" }.use {
@@ -65,9 +61,22 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
     }
 }
 
+private const val MEDIA_CHUNK_BYTES = 64 * 1024
+
+/** Keep the committed Core pages immutable and avoid flattening the whole output. */
+internal suspend fun writeMediaChunks(stream: OutputStream, bytes: Bytes, checkCancelled: suspend () -> Unit) {
+    var offset = 0
+    while (offset < bytes.size) {
+        checkCancelled()
+        val end = offset + minOf(MEDIA_CHUNK_BYTES, bytes.size - offset)
+        stream.write(bytes.slice(offset, end).toByteArray())
+        offset = end
+    }
+}
+
 /** Compare exactly the Core bytes with one bounded scratch buffer. Never retain a second output copy. */
-internal suspend fun requireMatchingMedia(stream: InputStream, expected: ByteArray, checkCancelled: suspend () -> Unit) {
-    val buffer = ByteArray(minOf(expected.size, 64 * 1024))
+internal suspend fun requireMatchingMedia(stream: InputStream, expected: Bytes, checkCancelled: suspend () -> Unit) {
+    val buffer = ByteArray(minOf(expected.size, MEDIA_CHUNK_BYTES))
     var offset = 0
     while (offset < expected.size) {
         checkCancelled()

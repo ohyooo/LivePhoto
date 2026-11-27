@@ -29,7 +29,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 currentCoroutineContext().ensureActive()
-                val uri = AndroidPhotoExporter(android.contentResolver).publish(result.value.bytes.toByteArray(), "LivePhoto-key-${UUID.randomUUID()}.jpg")
+                val uri = AndroidPhotoExporter(android.contentResolver).publish(result.value.bytes, "LivePhoto-key-${UUID.randomUUID()}.jpg")
                 CoreResult.Success(Keyed(uri, result.value.report))
             }
         }
@@ -42,7 +42,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
             is CoreResult.Success -> {
                 val uri = result.value.bytes?.let { repaired ->
                     currentCoroutineContext().ensureActive()
-                    AndroidPhotoExporter(android.contentResolver).publish(repaired.toByteArray(), "LivePhoto-repaired-${UUID.randomUUID()}.jpg")
+                    AndroidPhotoExporter(android.contentResolver).publish(repaired, "LivePhoto-repaired-${UUID.randomUUID()}.jpg")
                 }
                 CoreResult.Success(Repaired(uri, result.value.report))
             }
@@ -55,7 +55,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
             is CoreResult.Success -> {
                 currentCoroutineContext().ensureActive()
                 val prepared = result.value
-                val uri = AndroidPhotoExporter(android.contentResolver).publish(prepared.bytes.toByteArray(), "LivePhoto-converted-${UUID.randomUUID()}.jpg")
+                val uri = AndroidPhotoExporter(android.contentResolver).publish(prepared.bytes, "LivePhoto-converted-${UUID.randomUUID()}.jpg")
                 CoreResult.Success(Converted(uri, prepared.report))
             }
         }
@@ -71,8 +71,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         val exporter = AndroidPhotoExporter(android.contentResolver)
         val name = "LivePhoto-clean-${UUID.randomUUID()}.${file.extension}"
         when (file.mime) {
-            "image/jpeg" -> { require(file.extension == "jpg"); exporter.publish(file.bytes.toByteArray(), name) }
-            "video/mp4", "video/quicktime" -> exporter.publishVideo(file.bytes.toByteArray(), name, file.mime)
+            "image/jpeg" -> { require(file.extension == "jpg"); exporter.publish(file.bytes, name) }
+            "video/mp4", "video/quicktime" -> exporter.publishVideo(file.bytes, name, file.mime)
             else -> error("Only prepared JPEG/MP4/MOV outputs may be saved")
         }
     }
@@ -84,7 +84,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
                 currentCoroutineContext().ensureActive()
                 val video = result.value
                 val name = "LivePhoto-video-${UUID.randomUUID()}.${video.report.extension}"
-                val uri = AndroidPhotoExporter(android.contentResolver).publishVideo(video.bytes.toByteArray(), name, video.report.mime)
+                val uri = AndroidPhotoExporter(android.contentResolver).publishVideo(video.bytes, name, video.report.mime)
                 CoreResult.Success(Extracted(uri, video.report))
             }
         }
@@ -135,7 +135,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
                     }
                     val uri = androidOperation("save-output", "output") {
                         currentCoroutineContext().ensureActive()
-                        val bytes = output.committedAssets().getValue(asset.id).toByteArray()
+                        val bytes = output.committedAssets().getValue(asset.id)
                         AndroidPhotoExporter(android.contentResolver).publish(bytes, "LivePhoto-$token.jpg")
                     }
                     // Return the published URI, not a memory handle closed by this session.

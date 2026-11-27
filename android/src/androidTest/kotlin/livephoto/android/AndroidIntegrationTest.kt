@@ -26,7 +26,7 @@ class AndroidIntegrationTest {
         val original = syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1)
         val resolver = app.contentResolver
         val controller = AndroidCreateController(app, app.core)
-        val input = AndroidPhotoExporter(resolver).publish(original, "LivePhoto-uri-fixture-${UUID.randomUUID()}.jpg")
+        val input = AndroidPhotoExporter(resolver).publish(Bytes(original), "LivePhoto-uri-fixture-${UUID.randomUUID()}.jpg")
         try {
             assertIs<CoreResult.Success<AnalysisResult>>(controller.analyze(input))
             assertContentEquals(original, resolver.openInputStream(input)!!.use { it.readBytes() })

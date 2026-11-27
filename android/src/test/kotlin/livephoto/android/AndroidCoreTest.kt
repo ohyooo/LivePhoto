@@ -6,6 +6,7 @@ import livephoto.core.*
 import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.memory.MemoryOutputTransaction
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import kotlin.test.*
 
@@ -46,14 +47,14 @@ class AndroidCoreTest {
                 return super.read(buffer, offset, minOf(length, 9001))
             }
         }
-        requireMatchingMedia(stream, bytes) {}
+        requireMatchingMedia(stream, Bytes.fromChunks(bytes.asSequence().chunked(31003).map { it.toByteArray() })) {}
         assertTrue(readCalls > 3)
     }
     @Test fun pendingReadbackRejectsTruncationExtraBytesAndChangedBytes() = runBlocking<Unit> {
         val expected = ByteArray(64 * 1024 + 1) { it.toByte() }
         for (received in listOf(expected.copyOf(expected.size - 1), expected + 0,
             expected.copyOf().apply { this[lastIndex] = 1 })) {
-            assertFailsWith<IllegalStateException> { requireMatchingMedia(ByteArrayInputStream(received), expected) {} }
+            assertFailsWith<IllegalStateException> { requireMatchingMedia(ByteArrayInputStream(received), Bytes(expected)) {} }
         }
     }
     @Test fun pendingReadbackRejectsZeroProgress() = runBlocking<Unit> {
@@ -61,22 +62,46 @@ class AndroidCoreTest {
             override fun read(): Int = 0
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int = 0
         }
-        assertFailsWith<IllegalStateException> { requireMatchingMedia(stream, ByteArray(100)) {} }
+        assertFailsWith<IllegalStateException> { requireMatchingMedia(stream, Bytes(ByteArray(100))) {} }
     }
     @Test fun pendingReadbackHonorsCancellationBetweenChunksAndBeforeEof() = runBlocking<Unit> {
         val expected = ByteArray(64 * 1024 + 1)
         val stream = ByteArrayInputStream(expected)
         var polls = 0
         assertFailsWith<CancellationException> {
-            requireMatchingMedia(stream, expected) { if (++polls == 2) throw CancellationException("test") }
+            requireMatchingMedia(stream, Bytes(expected)) { if (++polls == 2) throw CancellationException("test") }
         }
         assertEquals(1, stream.available())
         assertFailsWith<CancellationException> {
-            requireMatchingMedia(ByteArrayInputStream(byteArrayOf(7)), byteArrayOf(7)) {
+            requireMatchingMedia(ByteArrayInputStream(byteArrayOf(7)), Bytes(byteArrayOf(7))) {
                 if (++polls == 4) throw CancellationException("test")
             }
         }
         assertEquals(4, polls)
+    }
+    @Test fun writesAnUnalignedPagedOutputVerbatimInBoundedChunks() = runBlocking<Unit> {
+        val bytes = ByteArray(2 * 64 * 1024 + 23) { (it % 251).toByte() }
+        val paged = Bytes.fromChunks(bytes.asSequence().chunked(31003).map { it.toByteArray() })
+        val writes = mutableListOf<Int>()
+        val output = object : ByteArrayOutputStream() {
+            override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                writes += length
+                super.write(buffer, offset, length)
+            }
+        }
+        writeMediaChunks(output, paged.slice(7, bytes.size - 5)) {}
+        assertEquals(listOf(64 * 1024, 64 * 1024, 11), writes)
+        assertContentEquals(bytes.copyOfRange(7, bytes.size - 5), output.toByteArray())
+    }
+    @Test fun pendingWriteChecksCancellationBeforeAnotherChunk() = runBlocking<Unit> {
+        val output = ByteArrayOutputStream()
+        var polls = 0
+        assertFailsWith<CancellationException> {
+            writeMediaChunks(output, Bytes(ByteArray(64 * 1024 + 1))) {
+                if (++polls == 2) throw CancellationException("test")
+            }
+        }
+        assertEquals(64 * 1024, output.size())
     }
     @Test fun memoryPublicationBudgetDoesNotExposePartialAssets() = runBlocking<Unit> {
         val context = Context(Limits(3u, 2u))

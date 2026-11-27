@@ -30,8 +30,8 @@ function Test-Reports([string]$Directory, [int]$Expected) {
     return $count
 }
 $coreHostTests = Test-Reports 'shared/build/test-results/testAndroidHostTest' 818
-$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 54
-$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 54
+$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 56
+$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 56
 $deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 43
 $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
