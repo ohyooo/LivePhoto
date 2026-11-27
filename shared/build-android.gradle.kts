@@ -16,7 +16,12 @@ kotlin {
         }
         minSdk = libs.versions.min.sdk.get().toInt()
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+        // Runs commonTest against the Android-compiled Core on the host JVM.
+        withHostTest { }
     }
-    // Desktop FFmpeg test hosts are deliberately not wired into Android.
-    // Android integration is exercised by :android unit/instrumentation tests.
+    sourceSets {
+        commonTest.dependencies { implementation(libs.kotlin.test) }
+        named("androidHostTest") { dependencies { implementation(libs.kotlin.test.junit) } }
+    }
+    // Desktop FFmpeg tests and Android application/device tests are separate.
 }

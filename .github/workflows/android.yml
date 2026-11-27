@@ -118,11 +118,11 @@ jobs:
             printf 'LIVEPHOTO_SIGNING_KEY_ALIAS=livephoto-ci\n'
           } >> "$GITHUB_ENV"
 
-      - name: Build Release AAB, debug and test APKs, unit tests and lint
+      - name: Build Release AAB, debug and test APKs, Core and app host tests, and lint
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          ./gradlew :verifyAndroidBuild :android:bundleRelease :android:assembleDebug :android:assembleDebugAndroidTest :android:testDebugUnitTest --rerun :android:testReleaseUnitTest --rerun :android:lintDebug :android:lintRelease --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | Tee-Object -FilePath ci-output/android-build.log
+          ./gradlew :verifyAndroidBuild :shared:testAndroidHostTest --rerun :android:bundleRelease :android:assembleDebug :android:assembleDebugAndroidTest :android:testDebugUnitTest --rerun :android:testReleaseUnitTest --rerun :android:lintDebug :android:lintRelease --max-workers=2 --console=plain --warning-mode=all --stacktrace '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m' 2>&1 | Tee-Object -FilePath ci-output/android-build.log
           if ($LASTEXITCODE -ne 0) { throw 'Android compilation, unit tests or lint failed.' }
 
       - name: Generate four signed ABI APKs from AAB
