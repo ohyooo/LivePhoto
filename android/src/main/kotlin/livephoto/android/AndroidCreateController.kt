@@ -91,8 +91,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     }
 
     /** Read-only input adapter. No exporter, transaction, decoder or gallery write. */
-    suspend fun analyze(input: Uri): CoreResult<AnalysisResult> = withPhotoInput(input) { source, cancellation ->
-        livephoto.ui.analyzeSelectedPhoto(core, source, cancellation)
+    suspend fun analyze(input: Uri): CoreResult<AnalysisResult> = withPhotoInput(input, ANDROID_INSPECTION_INPUT_LIMIT) { source, cancellation ->
+        inspectAndroidPhoto(core, source, cancellation)
     }
 
     suspend fun create(image: Uri, video: Uri, target: ProtocolSelector): CoreResult<Created> = withContext(Dispatchers.IO) {
@@ -160,13 +160,13 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     catch (_: FileNotFoundException) { throw SelectedDocumentUnavailableException() }
 
     private suspend fun <T> withPhotoInput(
-        uri: Uri, action: suspend (BinarySource, Cancellation) -> CoreResult<T>,
+        uri: Uri, limit: Int = MAX_INPUT_BYTES, action: suspend (BinarySource, Cancellation) -> CoreResult<T>,
     ): CoreResult<T> = withContext(Dispatchers.IO) {
         val job = currentCoroutineContext()[Job]
-        val source = try { snapshot(uri, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        val source = try { snapshot(uri, limit) }
         catch (_: InputBudgetExceededException) {
             return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
-                "Photo input exceeds 32 MiB"))
+                "Photo input exceeds ${limit / (1024 * 1024)} MiB"))
         }
         catch (unavailable: SelectedDocumentUnavailableException) {
             return@withContext CoreResult.Failure(CoreError(IssueCode("INPUT_UNAVAILABLE"), Stage.Read, unavailable.message.orEmpty()))

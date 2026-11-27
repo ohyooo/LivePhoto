@@ -30,6 +30,8 @@ public interface LivePhotoUiPlatform {
     public val successMessage: String get() = "已保存到 $outputDescription。"
     public val supportsVideoEditing: Boolean get() = false
     public val supportsAnalysis: Boolean get() = false
+    /** Presentation only; the host must enforce its own read-only limit. */
+    public val photoInspectionInputLimitBytes: Int get() = ANALYSIS_INPUT_LIMIT
     public val supportsVideoExtraction: Boolean get() = false
     public val supportsCleanSplit: Boolean get() = false
     public val supportsConversion: Boolean get() = false

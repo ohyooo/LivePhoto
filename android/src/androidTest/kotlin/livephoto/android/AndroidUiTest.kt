@@ -324,6 +324,8 @@ class AndroidUiTest {
         withPickerResults(uri, uri, replacement, flags = flags) {
             compose.onNodeWithTag("select-image").performScrollTo().performClick()
             openPhotoTool(0)
+            compose.onNodeWithText("只读检查单文件上限 64 MiB；其它照片工具仍限 32 MiB，不修改原片。")
+                .performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
             compose.onNodeWithTag("page-0").performClick()
             compose.onNodeWithContentDescription("移除图片").performScrollTo().performClick()

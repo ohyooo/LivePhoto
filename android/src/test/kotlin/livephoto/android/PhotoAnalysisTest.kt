@@ -22,6 +22,44 @@ class PhotoAnalysisTest {
         assertEquals(Stage.Read, result.error.stage)
     }
 
+    @Test fun androidInspectionRaisesOnlyTheBorrowedInputLimit() = runBlocking {
+        val requests = mutableListOf<AnalyzeRequest>()
+        val sentinel = CoreResult.Failure(CoreError(IssueCode("TEST_ANALYZE"), Stage.Inspect, "Recorded"))
+        val cancellation = Cancellation { false }
+        val core = object : LivePhotoCore by AndroidCoreFactory.create() {
+            override suspend fun analyze(request: AnalyzeRequest): CoreResult<AnalysisResult> {
+                requests += request
+                return sentinel
+            }
+        }
+        fun sizeOnly(bytes: Int) = object : BinarySource {
+            override suspend fun size(): CoreResult<ULong> = CoreResult.Success(bytes.toULong())
+            override suspend fun identity(): CoreResult<SourceIdentity> = error("Only the parser can read an identity")
+            override suspend fun readAt(offset: ULong, length: UInt): CoreResult<Bytes> = error("Only the parser can read bytes")
+            override suspend fun close() = error("The inspection entry only borrows the source")
+        }
+
+        val original = sizeOnly(ANALYSIS_INPUT_LIMIT)
+        val extended = sizeOnly(ANDROID_INSPECTION_INPUT_LIMIT)
+        assertSame(sentinel, inspectAndroidPhoto(core, original, cancellation))
+        assertSame(sentinel, inspectAndroidPhoto(core, extended, cancellation))
+        val rejected = assertIs<CoreResult.Failure>(inspectAndroidPhoto(core, sizeOnly(ANDROID_INSPECTION_INPUT_LIMIT + 1), cancellation))
+        assertEquals("RESOURCE_LIMIT_EXCEEDED", rejected.error.code.value)
+        assertEquals(Stage.Read, rejected.error.stage)
+        assertEquals(2, requests.size)
+        val normal = requests[0]
+        assertSame(original, assertIs<SourceSet.Single>(normal.input).source)
+        assertEquals(ANALYSIS_INPUT_LIMIT.toULong(), normal.context.limits.maxSpoolBytes)
+        val large = requests[1]
+        assertSame(extended, assertIs<SourceSet.Single>(large.input).source)
+        assertEquals(ANDROID_INSPECTION_INPUT_LIMIT.toULong(), large.context.limits.maxSpoolBytes)
+        assertEquals(ANALYSIS_INPUT_LIMIT.toULong(), large.context.limits.maxMetadataBytes)
+        assertEquals(0uL, large.context.limits.maxOutputBytes)
+        assertEquals(normal.layers, large.layers)
+        assertSame(cancellation, large.context.cancellation)
+        assertEquals(32 * 1024 * 1024, AndroidCreateController.MAX_INPUT_BYTES)
+    }
+
     @Test fun presentationKeepsUnknownSeparateFromZeroAndShowsPartialCoverage() = runBlocking {
         val result = assertIs<CoreResult.Success<AnalysisResult>>(analyzeSelectedPhoto(AndroidCoreFactory.create(), byteArrayOf(0))).value
         assertTrue(formatPhotoAnalysis(result).contains("关键照片位置：未知（不等于 0）"))

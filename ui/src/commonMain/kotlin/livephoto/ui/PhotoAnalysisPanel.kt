@@ -53,7 +53,9 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
         val wide = maxWidth >= 800.dp
         val input = retainedContent {
             SectionCard("选择已有动态照片") {
-            Text("已有照片单文件上限 32 MiB，不修改原片。")
+            val inspectionLimit = platform.photoInspectionInputLimitBytes
+            if (inspectionLimit == ANALYSIS_INPUT_LIMIT) Text("已有照片单文件上限 32 MiB，不修改原片。")
+            else Text("只读检查单文件上限 ${inspectionLimit / (1024 * 1024)} MiB；其它照片工具仍限 32 MiB，不修改原片。")
             Text("选择已有动态照片或普通照片。独立于新建素材；选择文件后不会自动执行处理。")
             OutlinedButton(onClick = { picker() }, enabled = active && !working, shape = ControlShape,
                 modifier = Modifier.fillMaxWidth().testTag("select-analysis").semantics {

@@ -29,6 +29,7 @@ internal fun LivePhotoScreen(
         object : LivePhotoUiPlatform {
             override val outputDescription = "Pictures/LivePhoto"
             override val supportsAnalysis = analyze != null
+            override val photoInspectionInputLimitBytes = ANDROID_INSPECTION_INPUT_LIMIT
             override val supportsVideoExtraction = extractVideo != null
             override val supportsCleanSplit = cleanSplit != null && saveSplitFile != null
             override val supportsConversion = convertPhoto != null

@@ -53,13 +53,42 @@ class AndroidIntegrationTest {
             assertContentEquals(original, input.readBytes())
             assertEquals(before, snapshots())
             java.io.RandomAccessFile(input, "rw").use {
-                it.setLength(AndroidCreateController.MAX_INPUT_BYTES.toLong() + 1)
+                it.setLength(ANDROID_INSPECTION_INPUT_LIMIT.toLong() + 1)
             }
             val refused = assertIs<CoreResult.Failure>(controller.analyze(Uri.fromFile(input)))
             assertEquals("RESOURCE_LIMIT_EXCEEDED", refused.error.code.value)
             assertEquals(Stage.Read, refused.error.stage)
-            assertEquals(AndroidCreateController.MAX_INPUT_BYTES.toLong() + 1, input.length())
+            assertEquals(ANDROID_INSPECTION_INPUT_LIMIT.toLong() + 1, input.length())
             assertEquals(before, snapshots())
+        } finally { input.delete() }
+    }
+
+    @Test fun exactInspectionLimitAcceptsLargerMotionPhotoWithoutExpandingOtherTools() = runBlocking {
+        val input = app.getFileStreamPath("large-readonly-${UUID.randomUUID()}.jpg")
+        fun snapshots() = app.cacheDir.listFiles()!!.filter { it.name.startsWith("livephoto-input-") && it.name.endsWith(".snapshot") }.toSet()
+        val before = snapshots()
+        try {
+            val videoLength = writeLargeGoogleV1Fixture(input, conversionImage(), fractionalAudioVideo(), ANDROID_INSPECTION_INPUT_LIMIT)
+            val original = fixtureFileDigest(input)
+            val uri = Uri.fromFile(input)
+            val controller = AndroidCreateController(app, app.core)
+            val analysis = success(controller.analyze(uri)).inspection
+            assertEquals(Disposition.Live, analysis.detection.disposition)
+            assertEquals(ProtocolIds.GoogleV1, analysis.detection.primaryProtocol?.protocol)
+            assertEquals(videoLength.toULong(), analysis.layout.regions.single { it.kind == ResourceKind.Video }.range.length)
+            val source = analysis.snapshot.identities.single()
+            assertEquals(ANDROID_INSPECTION_INPUT_LIMIT.toULong(), source.size)
+            assertEquals(original, source.digest?.value)
+            assertEquals(before, snapshots())
+
+            for (result in listOf(controller.extractVideo(uri), controller.repairPhoto(uri))) {
+                val refused = assertIs<CoreResult.Failure>(result).error
+                assertEquals("RESOURCE_LIMIT_EXCEEDED", refused.code.value)
+                assertEquals(Stage.Read, refused.stage)
+                assertTrue("32 MiB" in refused.message)
+            }
+            assertEquals(before, snapshots())
+            assertEquals(original, fixtureFileDigest(input))
         } finally { input.delete() }
     }
 
