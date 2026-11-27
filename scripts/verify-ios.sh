@@ -21,12 +21,15 @@ select_simulator() {
   python3 -c '
 import json, os, re, sys
 requested = os.environ.get("IOS_SIMULATOR_UDID", "")
+prefix = tuple(int(v) for v in os.environ.get("IOS_SIMULATOR_RUNTIME_PREFIX", "").split(".") if v)
 candidates = []
 for runtime, devices in json.load(sys.stdin).get("devices", {}).items():
     match = re.search(r"\.iOS-(\d+(?:-\d+)*)$", runtime)
     if not match:
         continue
     version = tuple(int(v) for v in match.group(1).split("-"))
+    if prefix and version[:len(prefix)] != prefix:
+        continue
     for device in devices:
         if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
             candidates.append((version, device.get("state") == "Shutdown", device["udid"]))
@@ -36,7 +39,7 @@ if requested:
         sys.exit(0)
     sys.exit("IOS_SIMULATOR_UDID must identify an available iPhone simulator.")
 if not candidates:
-    sys.exit("Install an iOS runtime and add an iPhone simulator in Xcode.")
+    sys.exit("Install a matching iOS runtime and add an iPhone simulator in Xcode.")
 print(max(candidates)[2])
 '
 }
@@ -154,12 +157,12 @@ def run_smoke_command(command, timeout):
     return run.stdout
 
 
-def simulator_state():
+def selected_simulator():
     devices = json.loads(subprocess.check_output(
         ["xcrun", "simctl", "list", "devices", "available", "--json"],
         text=True, timeout=30,
     ))["devices"]
-    return next(device["state"] for group in devices.values() for device in group
+    return next((runtime, device["state"]) for runtime, group in devices.items() for device in group
                 if device["udid"] == simulator)
 
 
@@ -173,20 +176,20 @@ with tempfile.TemporaryDirectory(prefix="livephoto-swift-smoke-") as temp:
         "xcrun", "--sdk", "iphonesimulator", "swiftc",
         "-sdk", sdk, "-target", "arm64-apple-ios15.0-simulator",
         "-F", str(simulator_framework.parent), "-framework", "LivePhotoCore",
-        "-Xlinker", "-ObjC", "-lc++", "iosBridge/smoke/main.swift",
+        "-Xlinker", "-dead_strip", "-lc++", "iosBridge/smoke/main.swift",
         "iosBridge/smoke/SimulatorFixtures.swift", "-o", str(executable),
     ], 120)
     linked = run_smoke_command(["xcrun", "vtool", "-show-build", str(executable)], 30)
     if not re.search(r"^\s*platform\s+IOSSIMULATOR\s*$", linked, re.MULTILINE):
         raise SystemExit("Swift smoke did not link as an iOS Simulator executable")
-    state_before = simulator_state()
+    runtime, state_before = selected_simulator()
     try:
         swift_output = run_smoke_command([
             "xcrun", "simctl", "spawn", "--standalone", simulator, str(executable), "--",
         ], 180)
     finally:
         # On timeout/interruption, only stop a simulator this smoke started.
-        if state_before == "Shutdown" and simulator_state() != "Shutdown":
+        if state_before == "Shutdown" and selected_simulator()[1] != "Shutdown":
             subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=True, timeout=60)
     swift_executable_hash = hashlib.sha256(executable.read_bytes()).hexdigest()
 
@@ -200,6 +203,11 @@ summary = {
     "swiftTypecheck": sorted(records),
     "swiftSimulatorSmoke": {
         "target": "arm64-apple-ios15.0-simulator",
+        "runtime": runtime,
+        "sdkVersion": subprocess.check_output(
+            ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True,
+        ).strip(),
+        "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).splitlines(),
         "cases": swift_cases,
         "executableSha256": swift_executable_hash,
     },
