@@ -29,6 +29,7 @@ function Test-Reports([string]$Directory, [int]$Expected) {
     if ($count -ne $Expected) { throw "Incomplete Android test execution: $count / $Expected" }
     return $count
 }
+$coreHostTests = Test-Reports 'shared/build/test-results/testAndroidHostTest' 818
 $hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 49
 $releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 49
 $deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 40
@@ -36,6 +37,8 @@ $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
 if ($compile -notmatch 'BUILD SUCCESSFUL' -or $device -notmatch 'BUILD SUCCESSFUL' -or
     $compile -notmatch 'Android projects: \[:, :android, :shared, :ui\]' -or $compile -notmatch 'android:androidJvm' -or
+    $compile -notmatch ':shared:testAndroidHostTest(?:\s|$)' -or
+    $compile -match ':shared:testAndroidHostTest (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)' -or
     $compile -notmatch ':android:testDebugUnitTest(?:\s|$)' -or
     $compile -match ':android:testDebugUnitTest (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)' -or
     $compile -notmatch ':android:testReleaseUnitTest(?:\s|$)' -or
@@ -110,6 +113,7 @@ $summary = [ordered]@{
     compileSdk = 37
     compileSdkMinor = 2
     deviceApi = 36
+    coreHostTests = $coreHostTests
     hostTests = $hostTests
     releaseHostTests = $releaseHostTests
     deviceTests = $deviceTests
@@ -128,4 +132,4 @@ $summary = [ordered]@{
     scope = 'android-app-direct-shared-core-saf-cache-random-access-media-store-single-jpeg-no-mobile-decoder-no-gallery-certification'
 }
 $summary | ConvertTo-Json -Depth 5 | Set-Content 'ci-output/android-evidence.json' -Encoding utf8
-Write-Host "ANDROID_EVIDENCE=SUCCESS debugHost=$hostTests releaseHost=$releaseHostTests device=$deviceTests same-signature"
+Write-Host "ANDROID_EVIDENCE=SUCCESS coreHost=$coreHostTests debugHost=$hostTests releaseHost=$releaseHostTests device=$deviceTests same-signature"
