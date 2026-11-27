@@ -34,24 +34,49 @@ class AndroidCoreTest {
             assertContentEquals(byteArrayOf(1, 2, 3), assertIs<CoreResult.Success<Bytes>>(source.readAt(0u, 3u)).value.toByteArray())
         } finally { source.close() }
     }
-    @Test fun boundedReadAcceptsExactlyTheLimit() = runBlocking<Unit> {
-        val bytes = ByteArray(100) { it.toByte() }
-        assertContentEquals(bytes, readBounded(ByteArrayInputStream(bytes), bytes.size) {})
+    @Test fun pendingReadbackUsesOneBoundedBufferAndAcceptsShortReads() = runBlocking<Unit> {
+        val bytes = ByteArray(2 * 64 * 1024 + 17) { (it % 251).toByte() }
+        var bufferSeen: ByteArray? = null
+        var readCalls = 0
+        val stream = object : ByteArrayInputStream(bytes) {
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                assertTrue(length in 1..64 * 1024)
+                if (bufferSeen == null) bufferSeen = buffer else assertSame(bufferSeen, buffer)
+                readCalls++
+                return super.read(buffer, offset, minOf(length, 9001))
+            }
+        }
+        requireMatchingMedia(stream, bytes) {}
+        assertTrue(readCalls > 3)
     }
-    @Test fun boundedReadRejectsOverflowBeforeStoringIt() = runBlocking<Unit> {
-        assertFailsWith<IllegalArgumentException> { readBounded(ByteArrayInputStream(ByteArray(100)), 99) {} }
+    @Test fun pendingReadbackRejectsTruncationExtraBytesAndChangedBytes() = runBlocking<Unit> {
+        val expected = ByteArray(64 * 1024 + 1) { it.toByte() }
+        for (received in listOf(expected.copyOf(expected.size - 1), expected + 0,
+            expected.copyOf().apply { this[lastIndex] = 1 })) {
+            assertFailsWith<IllegalStateException> { requireMatchingMedia(ByteArrayInputStream(received), expected) {} }
+        }
     }
-    @Test fun boundedReadRejectsZeroProgress() = runBlocking<Unit> {
+    @Test fun pendingReadbackRejectsZeroProgress() = runBlocking<Unit> {
         val stream = object : InputStream() {
             override fun read(): Int = 0
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int = 0
         }
-        assertFailsWith<IllegalStateException> { readBounded(stream, 100) {} }
+        assertFailsWith<IllegalStateException> { requireMatchingMedia(stream, ByteArray(100)) {} }
     }
-    @Test fun boundedReadHonorsCancellation() = runBlocking<Unit> {
+    @Test fun pendingReadbackHonorsCancellationBetweenChunksAndBeforeEof() = runBlocking<Unit> {
+        val expected = ByteArray(64 * 1024 + 1)
+        val stream = ByteArrayInputStream(expected)
+        var polls = 0
         assertFailsWith<CancellationException> {
-            readBounded(ByteArrayInputStream(ByteArray(100)), 100) { throw CancellationException("test") }
+            requireMatchingMedia(stream, expected) { if (++polls == 2) throw CancellationException("test") }
         }
+        assertEquals(1, stream.available())
+        assertFailsWith<CancellationException> {
+            requireMatchingMedia(ByteArrayInputStream(byteArrayOf(7)), byteArrayOf(7)) {
+                if (++polls == 4) throw CancellationException("test")
+            }
+        }
+        assertEquals(4, polls)
     }
     @Test fun memoryPublicationBudgetDoesNotExposePartialAssets() = runBlocking<Unit> {
         val context = Context(Limits(3u, 2u))

@@ -18,6 +18,8 @@ import livephoto.core.SourceIdentity
 import livephoto.core.SourceId
 import livephoto.core.Stage
 
+internal class InputBudgetExceededException : IllegalArgumentException("Input byte budget exceeded")
+
 /**
  * The picker may return a provider pipe or a file that changes after selection. Copy at the
  * adapter boundary so the Core has a stable, seekable view without keeping the whole input

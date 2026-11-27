@@ -6,7 +6,6 @@ import android.net.Uri
 import android.provider.MediaStore
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
 /** One app-created photo/video row only; not a multi-asset filesystem transaction. */
@@ -43,10 +42,9 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
                 }
                 stream.flush()
             }
-            val copied = checkNotNull(resolver.openInputStream(uri)) { "Cannot verify pending photo" }.use {
-                readBounded(it, bytes.size) { currentCoroutineContext().ensureActive() }
+            checkNotNull(resolver.openInputStream(uri)) { "Cannot verify pending photo" }.use {
+                requireMatchingMedia(it, bytes) { currentCoroutineContext().ensureActive() }
             }
-            check(bytes.contentEquals(copied)) { "Pending photo differs from the verified Core output" }
             currentCoroutineContext().ensureActive()
             check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) == 1) {
                 "Photo publication result is uncertain; check the gallery before retrying"
@@ -67,22 +65,19 @@ class AndroidPhotoExporter(private val resolver: ContentResolver) {
     }
 }
 
-/** Unknown length is bounded while reading, with no whole-input unbounded readBytes(). */
-internal class InputBudgetExceededException : IllegalArgumentException("Input byte budget exceeded")
-
-internal suspend fun readBounded(stream: InputStream, limit: Int, checkCancelled: suspend () -> Unit): ByteArray {
-    require(limit >= 0)
-    val output = ByteArrayOutputStream(minOf(limit, 64 * 1024))
-    val buffer = ByteArray(64 * 1024)
-    var total = 0
-    while (true) {
+/** Compare exactly the Core bytes with one bounded scratch buffer. Never retain a second output copy. */
+internal suspend fun requireMatchingMedia(stream: InputStream, expected: ByteArray, checkCancelled: suspend () -> Unit) {
+    val buffer = ByteArray(minOf(expected.size, 64 * 1024))
+    var offset = 0
+    while (offset < expected.size) {
         checkCancelled()
-        val count = stream.read(buffer)
-        if (count == -1) break
-        check(count > 0) { "Input stream made no progress" }
-        if (count > limit - total) throw InputBudgetExceededException()
-        output.write(buffer, 0, count)
-        total += count
+        val requested = minOf(buffer.size, expected.size - offset)
+        val count = stream.read(buffer, 0, requested)
+        check(count in 1..requested && (0 until count).all { buffer[it] == expected[offset + it] }) {
+            "Pending photo differs from the verified Core output"
+        }
+        offset += count
     }
-    return output.toByteArray()
+    checkCancelled()
+    check(stream.read() == -1) { "Pending photo differs from the verified Core output" }
 }
