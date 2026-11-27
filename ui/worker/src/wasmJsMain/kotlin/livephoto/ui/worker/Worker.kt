@@ -102,7 +102,7 @@ private var reviewed: Triple<String, String, RepairReview>? = null
 private val core = DefaultLivePhotoCore()
 
 private fun failure(kind: String, error: CoreError, options: Options): Reply = reply(when (kind) {
-    "Create" -> formatCoreFailure(error, options.imageName, options.videoName)
+    "Create" -> formatCoreFailure(error, options.imageName, options.videoName, targetProtocol = options.protocol)
     "Analyze" -> formatPhotoAnalysisFailure(error)
     "Extract" -> formatVideoExtractionFailure(error)
     "Split" -> formatCleanSplitFailure(error)

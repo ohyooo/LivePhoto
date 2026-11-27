@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-import { resolve, sep, join, extname } from 'node:path';
+import { resolve, sep, join, extname, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import {composeDriver} from './ui-interaction.mjs';
@@ -235,6 +235,49 @@ try {
     }
     await choose('重新选择图片',imagePath);
     check(label+':malformed-input-error-visible',malformedVisible&&ioFailuresNoOutput&&errors.length===0);
+
+    // Exercise the actual UI -> Worker -> Core request, not filename checks
+    // or browser decoder errors. Core's diagnostic controls the visible hint.
+    const surroundAudioPath=join(fixtures,'surround.m4a'),surroundPath=join(fixtures,'surround.mp4'),pngPath=join(fixtures,'cover.png');
+    generate(['-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=3','-c:a','aac','-ac','6',
+      '-flags:a','+bitexact','-use_editlist','0','-fflags','+bitexact','-write_btrt','0',surroundAudioPath]);
+    generate(['-i',videoPath,'-i',surroundAudioPath,'-map','0:v','-map','1:a','-c','copy','-use_editlist','0','-map_metadata','-1',
+      '-fflags','+bitexact','-write_btrt','0','-movflags','+faststart',surroundPath]);
+    generate(['-f','lavfi','-i','color=c=red:s=64x64','-frames:v','1','-threads','1','-update','1',pngPath]);
+    const ffprobe=join(dirname(ffmpeg),process.platform==='win32'?'ffprobe.exe':'ffprobe');
+    const audio=JSON.parse(execFileSync(ffprobe,['-v','error','-select_streams','a:0','-show_entries','stream=codec_name,channels,sample_rate',
+      '-of','json',surroundPath],{timeout:30000})).streams[0];
+    const beforeFormats=downloads;
+    const status=page.locator('#status');
+    const collapsed=()=>status.evaluate(e=>e.getAttribute('aria-label')||e.textContent||'');
+    await driver.selectProtocol('Google Motion Photo V2');
+    await page.locator('#livephoto-video-input').setInputFiles(surroundPath);
+    await text('名称：surround.mp4').waitFor({state:'attached'});
+    await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
+    await click('生成动态照片');
+    await text(/AUDIO_CODEC_NOT_SUPPORTED/).waitFor({state:'attached'});
+    const audioSummary=await collapsed();
+    const audioReport=await driver.report(status);
+    const audioHint=audio.codec_name==='aac'&&audio.channels===6&&audio.sample_rate==='48000'&&
+      audioSummary.includes('AAC 单声道或双声道（44.1 或 48 kHz）')&&audioSummary.includes('页面不会转换音轨')&&
+      audioReport.includes('关联对象：视频输入（surround.mp4）')&&audioReport.includes('阶段：Plan')&&audioReport.includes('轨道：2')&&
+      audioReport.includes('Video does not satisfy the implemented Google target track/audio constraints')&&
+      !audioReport.includes('真正的 JPEG');
+
+    await page.locator('#livephoto-image-input').setInputFiles({name:'renamed-png.jpg',mimeType:'image/jpeg',buffer:await readFile(pngPath)});
+    await page.locator('#livephoto-video-input').setInputFiles(videoPath);
+    await text('名称：renamed-png.jpg').waitFor({state:'attached'});
+    await text('名称：clip.mp4').waitFor({state:'attached'});
+    await click('生成动态照片');
+    await text(/UNSUPPORTED_CONTAINER/).waitFor({state:'attached'});
+    const imageSummary=await collapsed();
+    const imageReport=await driver.report(status);
+    check(label+':create-format-specific-guidance',audioHint&&imageSummary.includes('真正的 JPEG 图片副本')&&
+      imageSummary.includes('只改扩展名不会改变格式')&&imageReport.includes('关联对象：图片输入（renamed-png.jpg）')&&
+      imageReport.includes('Create requires a supported JPEG frame structure')&&!imageReport.includes('AAC 单声道或双声道')&&
+      downloads===beforeFormats&&errors.length===0);
+
+    await choose('重新选择图片',imagePath);
     const beforeReset=downloads;await click('移除视频');
     const removed=await text('视频：未选择').count()===1&&await text('名称：cover.jpg').count()===1;
     await click('重置输入');await click('取消');

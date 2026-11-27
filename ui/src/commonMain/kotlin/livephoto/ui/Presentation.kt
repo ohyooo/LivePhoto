@@ -3,6 +3,8 @@ package livephoto.ui
 import livephoto.core.CoreError
 import livephoto.core.Value
 import livephoto.core.OperationResult
+import livephoto.core.ProtocolIds
+import livephoto.core.Stage
 
 public fun formatCreatedPhoto(operation: OperationResult, publication: String): String = buildString {
     val issues = (operation.issues + operation.validation.issues).distinct()
@@ -28,14 +30,32 @@ public fun formatMediaSize(bytes: Long?): String {
 }
 
 /** Preserve the actual structured failure; error codes alone cannot explain a rejected MP4. */
-public fun formatCoreFailure(error: CoreError, imageName: String? = null, videoName: String? = null): String = buildString {
+public fun formatCoreFailure(
+    error: CoreError,
+    imageName: String? = null,
+    videoName: String? = null,
+    targetProtocol: String? = null,
+): String = buildString {
+    val step = (error.details["livephoto.step"] as? Value.Text)?.value
+    val role = (error.details["livephoto.inputRole"] as? Value.Text)?.value
     append("生成失败")
-    appendFailureContext((error.details["livephoto.step"] as? Value.Text)?.value,
-        (error.details["livephoto.inputRole"] as? Value.Text)?.value, imageName, videoName)
+    appendFailureContext(step, role, imageName, videoName)
     append("\n错误码：").append(error.code.value.take(128))
     append("\n阶段：").append(error.stage)
     append("\n具体原因：").append(error.message.take(4000))
-    if (error.code.value == "UNSUPPORTED_CONTAINER") {
+    val advice = when {
+        role == "image" && step == "inspect-image" && error.code.value == "UNSUPPORTED_CONTAINER" ->
+            "请另存真正的 JPEG 图片副本，再重新选择；只改扩展名不会改变格式。"
+        role == "video" && step == "check-video-profile" && error.stage == Stage.Plan &&
+            error.code.value == "AUDIO_CODEC_NOT_SUPPORTED" &&
+            (targetProtocol == ProtocolIds.GoogleV2.value || targetProtocol == ProtocolIds.Oplus.value) ->
+            "当前目标的生成可用无音轨视频；如需保留声音，请另存 AAC 单声道或双声道（44.1 或 48 kHz）的视频副本。页面不会转换音轨。"
+        else -> null
+    }
+    // Keep actionable format guidance in the collapsed failure summary,
+    // without replacing the actual Core error or making compatibility promises.
+    if (advice != null) append(" 建议：").append(advice)
+    else if (error.code.value == "UNSUPPORTED_CONTAINER") {
         append("\n说明：当前解析器不支持这份文件中的某种容器、轨道或编码配置；JPG/MP4 扩展名不代表内部结构一定受支持。不会自动转码。")
     }
     error.location?.let { location ->
