@@ -72,22 +72,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Desktop build or tests failed.' }
       - name: Show failed tests and packaging diagnostics
         if: failure()
+        timeout-minutes: 2
         shell: pwsh
         run: |
           $resultDirectories = @('shared/build/test-results/desktopJvmTest', 'ui/build/test-results/desktopTest', 'desktop/build/test-results/desktopTest')
-          Get-ChildItem $resultDirectories -File -Filter 'TEST-*.xml' -ErrorAction SilentlyContinue | ForEach-Object {
-            [xml]$report = Get-Content $_.FullName -Raw
-            foreach ($test in @($report.testsuite.testcase)) {
-              foreach ($failure in (@($test.failure) + @($test.error))) {
-                if ($null -ne $failure) {
-                  Write-Host "FAILED: $($test.classname).$($test.name)"
-                  Write-Host $failure.message
-                  $failure.InnerText -split '\r?\n' | Select-Object -First 80 | ForEach-Object { Write-Host $_ }
+          $remaining = 20
+          foreach ($file in Get-ChildItem $resultDirectories -File -Filter 'TEST-*.xml' -ErrorAction SilentlyContinue) {
+            if ($remaining -le 0) { break }
+            try { [xml]$report = Get-Content $file.FullName -Raw }
+            catch { Write-Warning "Could not read $($file.Name)"; continue }
+            foreach ($test in $report.SelectNodes('/testsuite/testcase[failure or error]')) {
+              if ($remaining -le 0) { break }
+              $remaining--
+              foreach ($failure in $test.SelectNodes('failure|error')) {
+                Write-Host "FAILED: $($test.GetAttribute('classname')).$($test.GetAttribute('name'))"
+                $message = $failure.GetAttribute('message')
+                Write-Host $message.Substring(0, [Math]::Min($message.Length, 2048))
+                $failure.InnerText -split '\r?\n' | Select-Object -First 40 | ForEach-Object {
+                  Write-Host $_.Substring(0, [Math]::Min($_.Length, 2048))
                 }
               }
             }
           }
-          Get-ChildItem 'desktop/build/compose/logs' -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Name; Get-Content $_.FullName }
+          Get-ChildItem 'desktop/build/compose/logs' -Recurse -File -ErrorAction SilentlyContinue |
+            Select-Object -First 8 | ForEach-Object {
+              Write-Host $_.Name
+              Get-Content $_.FullName -Tail 50 | ForEach-Object {
+                Write-Host $_.Substring(0, [Math]::Min($_.Length, 2048))
+              }
+            }
       - name: Release Windows Gradle cache locks
         if: ${{ always() && runner.os == 'Windows' }}
         shell: pwsh
