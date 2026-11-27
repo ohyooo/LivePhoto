@@ -34,7 +34,7 @@ $mediaTests = 0
 $mediaSuites = @{
     FfmpegIntegrationTest = 1; FfmpegFrameIntegrationTest = 3
     FfmpegReplaceIntegrationTest = 1; FfmpegCreateTrimIntegrationTest = 1
-    FfmpegCreateReplacementIntegrationTest = 1; FfmpegAudioTrimIntegrationTest = 4
+    FfmpegCreateReplacementIntegrationTest = 1; FfmpegAudioTrimIntegrationTest = 5
     FfmpegTrimIntegrationTest = 2; FfmpegRemuxIntegrationTest = 5
     FfmpegTranscodeIntegrationTest = 2
     HeifDecodePreservationIntegrationTest = 1; SamsungRemuxRepairIntegrationTest = 1
@@ -53,15 +53,19 @@ foreach ($file in $reports) {
     if ($file.Name -match 'ProtocolCompatibilityFixtureTest') { $fixtureTests += [int]$suite.tests }
     foreach ($name in $mediaSuites.Keys) {
         if ($suite.name -eq "${Target}Test.livephoto.core.media.$name") {
-            if ($seenMedia.ContainsKey($name) -or [int]$suite.tests -ne $mediaSuites[$name]) {
-                throw "Duplicate or incomplete real media suite: $name"
+            if ($seenMedia.ContainsKey($name)) {
+                throw "Duplicate real media suite: $name"
+            }
+            if ([int]$suite.tests -ne $mediaSuites[$name]) {
+                throw "Unexpected real media suite count for ${name}: $($suite.tests) executed, $($mediaSuites[$name]) expected."
             }
             $seenMedia[$name] = $true
             $mediaTests += [int]$suite.tests
         }
     }
 }
-if ($mediaTests -ne 23 -or $seenMedia.Count -ne $mediaSuites.Count) { throw 'Mandatory common real media regressions must all execute on Native.' }
+$expectedMediaTests = ($mediaSuites.Values | Measure-Object -Sum).Sum
+if ($mediaTests -ne $expectedMediaTests -or $seenMedia.Count -ne $mediaSuites.Count) { throw 'Mandatory common real media regressions must all execute on Native.' }
 $dispatch = @($reports | Where-Object { $_.Name -eq "TEST-${Target}Test.livephoto.core.media.MediaBackendDispatchTest.xml" })
 if ($dispatch.Count -ne 1) { throw 'Missing/duplicate shared backend dispatch suite.' }
 [xml]$dispatchXml = Get-Content $dispatch[0].FullName -Raw
