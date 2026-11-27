@@ -92,6 +92,27 @@ jobs:
           "LIVEPHOTO_SIGNING_KEY_ALIAS=$env:SIGNING_KEY_ALIAS" | Add-Content $env:GITHUB_ENV
           'LIVEPHOTO_EXPECTED_SIGNER=4a010b28ce4c266c3720fe3628d145b777c9960ade5d0b0f2e9f70f4efbfbcd8' | Add-Content $env:GITHUB_ENV
 
+      - name: Create one shared test-only signing key
+        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          dir=$(mktemp -d "$RUNNER_TEMP/livephoto-signing.XXXXXX")
+          keystore="$dir/ci.p12"
+          LIVEPHOTO_CI_KEY_PASSWORD=$(openssl rand -hex 24)
+          export LIVEPHOTO_CI_KEY_PASSWORD
+          echo "::add-mask::$LIVEPHOTO_CI_KEY_PASSWORD"
+          keytool -genkeypair -storetype PKCS12 -keystore "$keystore" \
+            -storepass:env LIVEPHOTO_CI_KEY_PASSWORD -alias livephoto-ci \
+            -keyalg RSA -keysize 2048 -validity 365 -dname 'CN=LivePhoto CI only'
+          {
+            printf 'LIVEPHOTO_SIGNING_KEYSTORE=%s\n' "$keystore"
+            printf 'LIVEPHOTO_SIGNING_STORE_PASSWORD=%s\n' "$LIVEPHOTO_CI_KEY_PASSWORD"
+            printf 'LIVEPHOTO_SIGNING_KEY_PASSWORD=%s\n' "$LIVEPHOTO_CI_KEY_PASSWORD"
+            printf 'LIVEPHOTO_SIGNING_KEY_ALIAS=livephoto-ci\n'
+          } >> "$GITHUB_ENV"
+
       - name: Build Release AAB, debug and test APKs, unit tests and lint
         shell: pwsh
         run: |

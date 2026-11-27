@@ -21,6 +21,30 @@ class AndroidIntegrationTest {
     private val context = Context(Limits(32_000_000u, 48_000_000u))
     private fun fixture(name: String): ByteArray = InstrumentationRegistry.getInstrumentation().context.assets.open("reference/$name").use { it.readBytes() }
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+    @Test fun controllerDiscardsSnapshotsAfterReadOnlyAnalysisAndBudgetRefusal() = runBlocking {
+        fun snapshots() = app.cacheDir.listFiles()!!.filter {
+            it.name.startsWith("livephoto-input-") && it.name.endsWith(".snapshot")
+        }.map { it.name }.toSet()
+        val before = snapshots()
+        val input = app.getFileStreamPath("analysis-snapshot-${UUID.randomUUID()}.jpg")
+        try {
+            val original = syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1)
+            input.writeBytes(original)
+            val controller = AndroidCreateController(app, app.core)
+            assertIs<CoreResult.Success<AnalysisResult>>(controller.analyze(Uri.fromFile(input)))
+            assertContentEquals(original, input.readBytes())
+            assertEquals(before, snapshots())
+            java.io.RandomAccessFile(input, "rw").use {
+                it.setLength(AndroidCreateController.MAX_INPUT_BYTES.toLong() + 1)
+            }
+            val refused = assertIs<CoreResult.Failure>(controller.analyze(Uri.fromFile(input)))
+            assertEquals("RESOURCE_LIMIT_EXCEEDED", refused.error.code.value)
+            assertEquals(Stage.Read, refused.error.stage)
+            assertEquals(AndroidCreateController.MAX_INPUT_BYTES.toLong() + 1, input.length())
+            assertEquals(before, snapshots())
+        } finally { input.delete() }
+    }
+
     @Test fun controllerSetsOnlyKeyMetadataAndPublishesVerifiedJpegForGoogleProfiles() = runBlocking {
         val file = app.getFileStreamPath("key-${UUID.randomUUID()}.jpg")
         try {
@@ -167,7 +191,16 @@ class AndroidIntegrationTest {
             assertNull(blocked.uri); assertNull(blocked.report.review); assertTrue(blocked.report.blocked.isNotEmpty())
             val oplus = syntheticRepairCarrier(livephoto.ui.ConversionTarget.Oplus)
             file.writeBytes(oplus)
-            assertEquals("REPAIR_AMBIGUOUS", assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file))).error.code.value)
+            // The recognized no-tail OPPO profile now participates in bounded safe repair.
+            // An intact carrier has nothing to repair, and must not publish a file.
+            val intact = success(controller.repairPhoto(Uri.fromFile(file)))
+            assertNull(intact.uri); assertNull(intact.report.review)
+            assertTrue(intact.report.proposedChanges.isEmpty()); assertTrue(intact.report.blocked.isEmpty())
+            assertContentEquals(oplus, file.readBytes())
+            val unsafeSuffix = corruptRepairField(oplus, ProtocolIds.Oplus) + byteArrayOf(0x12)
+            file.writeBytes(unsafeSuffix)
+            assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file)))
+            assertContentEquals(unsafeSuffix, file.readBytes())
             for (bytes in listOf(conversionImage(), byteArrayOf(0, 1, 2, 3), byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0))) {
                 file.writeBytes(bytes)
                 assertIs<CoreResult.Failure>(controller.repairPhoto(Uri.fromFile(file)))
@@ -211,7 +244,8 @@ class AndroidIntegrationTest {
                         val before = countConvertedPhotos()
                         val converted = controller.convertPhoto(Uri.fromFile(file), target.selector)
                         assertContentEquals(original, file.readBytes())
-                        if (sourceTarget == livephoto.ui.ConversionTarget.Oplus && target != sourceTarget) {
+                        // V1 fits the existing XMP slot without moving EXIF; V2 still cannot.
+                        if (sourceTarget == livephoto.ui.ConversionTarget.Oplus && target == livephoto.ui.ConversionTarget.GoogleV2) {
                             assertEquals("UNSAFE_METADATA_REWRITE", assertIs<CoreResult.Failure>(converted).error.code.value)
                             assertEquals(before, countConvertedPhotos())
                             continue

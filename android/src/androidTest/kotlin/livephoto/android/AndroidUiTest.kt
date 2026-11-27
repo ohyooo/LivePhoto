@@ -49,7 +49,7 @@ class AndroidUiTest {
             override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
         }
         compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
-        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        openPhotoTool(5)
         compose.onNodeWithTag("set-photo-key").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("key-seconds").performScrollTo().performTextReplacement("-1")
@@ -63,7 +63,7 @@ class AndroidUiTest {
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("key-report").assertDoesNotExist()
         compose.onNodeWithTag("key-seconds").assertTextContains("0")
-        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+        returnToEmptyCreate()
     }
 
     @Test fun repairRequiresPreviewAndClearsReviewAfterApplyOrSameUriReselection() {
@@ -92,7 +92,7 @@ class AndroidUiTest {
             override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
         }
         compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
-        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        openPhotoTool(4)
         compose.onNodeWithTag("preview-repair").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("apply-repair").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
@@ -112,7 +112,7 @@ class AndroidUiTest {
         compose.onNodeWithTag("preview-repair").performScrollTo().performClick()
         compose.onNodeWithTag("repair-report").assertTextContains("修复被阻止（未写入）", substring = true)
         compose.onNodeWithTag("apply-repair").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+        returnToEmptyCreate()
     }
 
     @Test fun conversionHasIndependentTargetAndClearsReportOnChanges() {
@@ -133,7 +133,7 @@ class AndroidUiTest {
             override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
         }
         compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
-        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        openPhotoTool(3)
         compose.onNodeWithTag("convert-photo").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("conversion-target-GoogleV2").performScrollTo().performClick()
@@ -145,7 +145,7 @@ class AndroidUiTest {
         compose.onNodeWithTag("convert-photo").performScrollTo().performClick()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("conversion-report").assertDoesNotExist()
-        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+        returnToEmptyCreate()
     }
 
     @Test fun cleanSplitUsesExplicitIndependentSavesAndClearsOnReselection() {
@@ -170,7 +170,7 @@ class AndroidUiTest {
             override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
         }
         compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
-        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        openPhotoTool(2)
         compose.onNodeWithTag("prepare-clean-split").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("prepare-clean-split").performScrollTo().performClick()
@@ -185,7 +185,7 @@ class AndroidUiTest {
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("save-split-image").assertDoesNotExist()
         compose.onNodeWithTag("clean-split-report").assertDoesNotExist()
-        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+        returnToEmptyCreate()
     }
 
     @Test fun sharedExtractionUsesItsOwnInputAndReportsExactExport() {
@@ -208,14 +208,15 @@ class AndroidUiTest {
             override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
         }
         compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
-        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        openPhotoTool(1)
         compose.onNodeWithTag("extract-video").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("extract-video").performScrollTo().performClick()
         compose.onNodeWithTag("extraction-report").assertTextContains("TEST_VIDEO_SAVED", substring = true)
-            .assertTextContains("ExactExtraction：Verified", substring = true)
+        expandReport("提取")
+        compose.onNodeWithTag("extraction-report").assertTextContains("ExactExtraction：Verified", substring = true)
         assertTrue(extracted)
-        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+        returnToEmptyCreate()
     }
 
     @Test fun sharedReadonlyPanelWorksWithoutCreationInputs() {
@@ -233,15 +234,14 @@ class AndroidUiTest {
             override fun formatFailure(error: Exception, imageName: String?, videoName: String?) = error.message.orEmpty()
         }
         compose.runOnUiThread { compose.activity.setContent { MaterialTheme { livephoto.ui.LivePhotoScreen(platform) } } }
-        compose.onNodeWithTag("toggle-analysis").performScrollTo().performClick()
+        openPhotoTool(0)
         compose.onNodeWithTag("analyze").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("select-analysis").performScrollTo().performClick()
         compose.onNodeWithTag("analyze").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("analysis-report").assertTextContains("未修改输入、未生成文件", substring = true)
+        expandReport("检查")
         compose.onNodeWithTag("analysis-report").assertTextContains("识别结果：Unknown", substring = true)
-            .assertTextContains("未修改输入、未生成文件", substring = true)
-        compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("image-selection").assertTextEquals("图片：未选择")
-        compose.onNodeWithTag("video-selection").assertTextEquals("视频：未选择")
+        returnToEmptyCreate()
     }
 
     @Test fun sharedScreenUsesOpaqueReferencesAndScrollsInAShortWindow() {
@@ -273,15 +273,15 @@ class AndroidUiTest {
         assertTrue(image.top >= bar.bottom, "App bar must not cover image selection")
         val video = compose.onNodeWithTag("select-video").performScrollTo().assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(video.top >= bar.bottom, "App bar must not cover video selection")
-        compose.onNodeWithTag("create").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("create").assertIsDisplayed().assertIsNotEnabled()
     }
 
     @Test fun videoOnlyClearlyRequiresImageAndCannotGenerate() {
         withPickerResults(Uri.parse("content://livephoto-ui-test/video")) {
             compose.onNodeWithTag("select-video").performScrollTo().performClick()
-            compose.onNodeWithTag("video-selection").assertTextEquals("视频：已选择")
+            assertInputSelected("video", "视频")
             compose.onNodeWithTag("image-selection").assertTextEquals("图片：未选择")
-            compose.onNodeWithTag("create").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithTag("create").assertIsDisplayed().assertIsNotEnabled()
             compose.onNodeWithTag("input-readiness").assertTextEquals("已选择视频，还需选择图片")
         }
     }
@@ -290,17 +290,17 @@ class AndroidUiTest {
         withPickerResults(Uri.parse("content://livephoto-ui-test/image"), Uri.parse("content://livephoto-ui-test/video"), null) {
             compose.onNodeWithTag("select-image").performScrollTo().performClick()
             compose.onNodeWithTag("select-video").performScrollTo().performClick()
-            compose.onNodeWithTag("select-image").performScrollTo().performClick() // Cancel; do not erase image.
-            compose.onNodeWithTag("image-selection").assertTextEquals("图片：已选择")
-            compose.onNodeWithTag("video-selection").assertTextEquals("视频：已选择")
+            compose.onNodeWithContentDescription("重新选择图片").performScrollTo().performClick() // Cancel; keep both inputs.
+            assertInputSelected("image", "图片")
+            assertInputSelected("video", "视频")
             compose.activityRule.scenario.recreate()
-            compose.onNodeWithTag("image-selection").assertTextEquals("图片：已选择")
-            compose.onNodeWithTag("video-selection").assertTextEquals("视频：已选择")
-            compose.onNodeWithTag("create").performScrollTo().assertIsEnabled()
+            assertInputSelected("image", "图片")
+            assertInputSelected("video", "视频")
+            compose.onNodeWithTag("create").assertIsDisplayed().assertIsEnabled()
         }
     }
 
-    @Test fun selectedFileSizesAndActualParseFailureAreVisibleAtTheTop() {
+    @Test fun selectedFileSizesAndActualParseFailureAreVisibleWithoutManualScroll() {
         compose.runOnUiThread {
             compose.activity.setContent {
                 MaterialTheme {
@@ -323,16 +323,47 @@ class AndroidUiTest {
             compose.onNodeWithTag("select-video").performScrollTo().performClick()
             compose.onNodeWithTag("video-name").assertTextEquals("名称：clip.mp4")
             compose.onNodeWithTag("video-size").assertTextEquals("大小：3.00 MiB（3145728 字节）")
-            compose.onNodeWithTag("create").performScrollTo().performClick()
-            compose.onNodeWithTag("status").assertIsDisplayed()
+            compose.onNodeWithTag("create").assertIsDisplayed().assertIsEnabled().performClick()
+            // The result must be brought into the content viewport without the user scrolling.
+            val error = compose.onNodeWithTag("status").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val header = compose.onNodeWithTag("app-bar").fetchSemanticsNode().boundsInRoot
+            val footer = compose.onNodeWithTag("main-action").fetchSemanticsNode().boundsInRoot
+            assertTrue(error.top >= header.bottom && error.bottom <= footer.top, "Error must be visible between header and fixed action bar")
+            expandReport("生成")
+            compose.onNodeWithTag("status")
                 .assertTextContains("UNSUPPORTED_CONTAINER", substring = true)
                 .assertTextContains("Multiple sample descriptions are not implemented", substring = true)
                 .assertTextContains("视频输入（clip.mp4）", substring = true)
                 .assertTextContains("解析视频容器、轨道与采样表", substring = true)
-            val errorY = compose.onNodeWithTag("status").fetchSemanticsNode().positionInRoot.y
-            val imageY = compose.onNodeWithTag("select-image").fetchSemanticsNode().positionInRoot.y
-            assertTrue(errorY < imageY, "Error details must appear above the input buttons")
         }
+    }
+
+    private fun openPhotoTool(index: Int) {
+        compose.onNodeWithTag("page-1").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("create").assertDoesNotExist()
+        if (index != 0) {
+            compose.onNodeWithTag("tool-selector").performScrollTo().performClick()
+            compose.onNodeWithTag("tool-$index").assertIsEnabled().performClick()
+        }
+    }
+
+    private fun returnToEmptyCreate() {
+        compose.onNodeWithTag("create").assertDoesNotExist()
+        compose.onNodeWithTag("page-0").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("create").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("image-selection").assertTextEquals("图片：未选择")
+        compose.onNodeWithTag("video-selection").assertTextEquals("视频：未选择")
+    }
+
+    private fun expandReport(title: String) {
+        compose.onNodeWithContentDescription("展开${title}详情").performScrollTo().performClick()
+    }
+
+    private fun assertInputSelected(tag: String, label: String) {
+        compose.onNodeWithTag("select-$tag").assertDoesNotExist()
+        compose.onNodeWithTag("$tag-selection").assertDoesNotExist()
+        compose.onNodeWithContentDescription("重新选择$label").assertExists()
+        compose.onNodeWithContentDescription("移除$label").assertExists()
     }
 
     private fun withPickerResults(vararg results: Uri?, block: () -> Unit) {
