@@ -695,6 +695,8 @@ Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https:/
 
 - [x] [真实设备验收清单和证据模板](docs/device-acceptance.md)已就绪；清单不代表已在真机运行。
 - [x] Android 私有缓存随机读取、同签名双向安装及 [Android 目标的 818 项宿主 JVM Core 回归](https://github.com/ohyooo/LivePhoto/actions/runs/45972581300)；iOS 只读 Core 的两个 XCFramework 切片和 Kotlin 模拟器测试已分别验证。
+- [x] Android 系统文件选择：支持在系统恢复同一编辑任务时保留只读授权；移除最后一个引用时释放应用持有的授权。提供者不允许持久授权时仍使用临时授权，文件移动或授权被撤销时提示重选。
+- [x] [iOS 只读文件 URL](docs/ios-roadmap.md)：支持单图或显式配对检查，分块读取、合计 32 MiB；不保存文件路径或书签，不包含 Photos 写入。
 - [x] Web 有限协议接口、公共 JS/Wasm 回归、浏览器媒体后端、后台取消、有界分块 IO；更广格式及搁置项见 [Web 路线与 TODO](docs/web-roadmap.md)。
 - [x] Compose Desktop 接入共享 Compose 工具界面与本地 FFmpeg，三平台便携包、原子新文件保存和 CI 窗口验证。
 - [x] 桌面全屏往返、按需时间轴缩略图、取消保存后的恢复及便携应用启动和视频播放，已完成三平台 CI 验收。
@@ -702,7 +704,7 @@ Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https:/
 尚待验收与实现：
 
 - [ ] [真实设备验收](docs/device-acceptance.md)：手机相册需要未编辑的厂商原片及设备、系统、相册和导入路径证据，分别核对动态识别、播放、声音和 key；桌面和浏览器还需要真实 GPU 和音频设备。没有实际记录不算通过，合成素材或解码检查不能代替。
-- [ ] 移动端更大文件预算、持久 URI 生命周期、通用多资产事务及移动系统媒体后端。不会用桌面 FFmpeg 进程冒充移动支持。
+- [ ] 移动端更大文件预算、跨新建任务的授权策略、通用多资产事务及移动系统媒体后端。不会用桌面 FFmpeg 进程冒充移动支持。
 - [ ] 有规范证据的更多媒体时间线、容器/codec、AAC priming、复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
 - [ ] 更多显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
 
