@@ -12,6 +12,8 @@ import java.awt.Rectangle
 import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
+import java.util.HexFormat
 import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 import kotlin.test.*
@@ -66,6 +68,8 @@ class DesktopMediaTest {
             // OpenJFX's macOS backend seeks in whole seconds. The same fixture on
             // every host must show a green frame around exactly one second.
             generateVideo(playbackVideo, "drawbox=color=lime:t=fill:enable='between(t,0.75,1.25)',")
+            val playbackDigest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(playbackVideo))
+            println("Synthetic H.264 playback SHA-256: ${HexFormat.of().formatHex(playbackDigest)}")
             configureDesktopRendering()
             EventQueue.invokeAndWait {
                 val playback = DesktopVideoEditor(host.register(playbackVideo), playbackVideo, host)

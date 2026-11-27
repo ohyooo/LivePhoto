@@ -72,7 +72,11 @@ jobs:
         run: |
           $arguments = @(':verifyDesktopBuild', ':shared:desktopJvmTest', '--rerun', ':ui:desktopTest', ':desktop:desktopTest', '--rerun', ':desktop:createDistributable', '--continue', '--max-workers=2', '--console=plain', '--stacktrace', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g')
           if ($IsLinux) { & xvfb-run -a ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
-          elseif ($IsWindows) { & ./gradlew.bat @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
+          elseif ($IsWindows) {
+            # JavaFX's native playback diagnostics are for synthetic CI inputs only.
+            $env:JAVA_TOOL_OPTIONS = ("$env:JAVA_TOOL_OPTIONS -Djfxmedia.loglevel=debug").Trim()
+            & ./gradlew.bat @arguments 2>&1 | Tee-Object ci-output/desktop-build.log
+          }
           else { & ./gradlew @arguments 2>&1 | Tee-Object ci-output/desktop-build.log }
           if ($LASTEXITCODE -ne 0) { throw 'Desktop build or tests failed.' }
       - name: Show failed tests and packaging diagnostics
@@ -95,6 +99,14 @@ jobs:
                 Write-Host $message.Substring(0, [Math]::Min($message.Length, 2048))
                 $failure.InnerText -split '\r?\n' | Select-Object -First 40 | ForEach-Object {
                   Write-Host $_.Substring(0, [Math]::Min($_.Length, 2048))
+                }
+              }
+              if ($IsWindows -and $test.GetAttribute('classname') -eq 'livephoto.desktop.DesktopMediaTest') {
+                foreach ($output in $report.SelectNodes('/testsuite/system-out | /testsuite/system-err')) {
+                  $output.InnerText -split '\r?\n' | Where-Object { $_.Trim().Length -gt 0 } |
+                    Select-Object -Last 20 | ForEach-Object {
+                      Write-Host $_.Substring(0, [Math]::Min($_.Length, 1024))
+                    }
                 }
               }
             }
