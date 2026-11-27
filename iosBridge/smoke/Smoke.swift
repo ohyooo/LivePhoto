@@ -24,7 +24,8 @@ func inspectPickedFile(_ selectedURL: URL) throws -> LivePhotoInspection {
     defer { if acquired { selectedURL.stopAccessingSecurityScopedResource() } }
     var failure: NSError?
     var report: LivePhotoInspection?
-    NSFileCoordinator().coordinate(readingItemAt: selectedURL, options: [], error: &failure) { readableURL in
+    let coordinator = NSFileCoordinator(filePresenter: nil)
+    coordinator.coordinate(readingItemAt: selectedURL, options: [], error: &failure) { readableURL in
         report = LivePhotoInspector().inspectFile(file: readableURL)
     }
     if let failure { throw failure }
