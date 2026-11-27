@@ -2,7 +2,7 @@ name: iOS Core
 
 on:
   push:
-    branches: [dot/livephoto-ios-core]
+    branches: [dot/livephoto-ios-core, dot/livephoto-ios-runtime]
   workflow_dispatch:
   pull_request:
     paths:
@@ -43,7 +43,7 @@ jobs:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
           validate-wrappers: true
-      - name: Compile device and simulator slices and run the iOS simulator tests
+      - name: Compile both slices, run Kotlin tests and run the linked Swift simulator smoke
         shell: bash
         run: bash scripts/verify-ios.sh
       - name: Archive the validated XCFramework
@@ -66,6 +66,7 @@ jobs:
           name: ios-core-reports-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-output/ios-verification.log
+            ci-output/ios-swift-smoke.log
             ci-output/ios-evidence.json
             shared/build/test-results/iosSimulatorArm64Test/*.xml
             iosBridge/build/test-results/iosSimulatorArm64Test/*.xml

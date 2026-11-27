@@ -15,7 +15,7 @@ xcodebuild -version
 xcrun --sdk iphoneos --show-sdk-path >/dev/null
 xcrun --sdk iphonesimulator --show-sdk-path >/dev/null
 
-# The Kotlin test runner owns any boot/shutdown it needs. Do not choose other
+# The stand-alone simulator commands own their boots/shutdowns. Do not choose other
 # platforms (watchOS/tvOS), or mutate the user's existing simulator inventory.
 select_simulator() {
   python3 -c '
@@ -43,7 +43,7 @@ print(max(candidates)[2])
 simulator="$(xcrun simctl list devices available --json | select_simulator)"
 mkdir -p ci-output
 # A failed rerun must not leave behind a previous success summary.
-rm -f ci-output/ios-evidence.json
+rm -f ci-output/ios-evidence.json ci-output/ios-swift-smoke.log
 ./gradlew -Plivephoto.ios=true --no-parallel --max-workers=1 --console=plain \
   :verifyIosBuild :iosBridge:assembleLivePhotoCoreDebugXCFramework \
   :shared:iosSimulatorArm64Test --device "$simulator" --rerun \
@@ -51,7 +51,7 @@ rm -f ci-output/ios-evidence.json
   2>&1 | tee ci-output/ios-verification.log
 
 xcf=iosBridge/build/XCFrameworks/debug/LivePhotoCore.xcframework
-python3 - "$xcf" <<'PY'
+python3 - "$xcf" "$simulator" <<'PY'
 import collections
 import hashlib
 import json
@@ -61,9 +61,11 @@ import plistlib
 import re
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
-xcf = Path(sys.argv[1])
+xcf = Path(sys.argv[1]).resolve()
+simulator = sys.argv[2]
 with (xcf / "Info.plist").open("rb") as info:
     libs = plistlib.load(info)["AvailableLibraries"]
 if len(libs) != 2:
@@ -95,7 +97,7 @@ for lib in libs:
         "-F", str(framework.parent), "iosBridge/smoke/Smoke.swift",
     ], check=True)
     records[variant] = {
-        "frameworkPath": str(framework),
+        "frameworkPath": str(framework.relative_to(Path.cwd())),
         "sha256": hashlib.sha256(contents).hexdigest(),
         "size": len(contents),
     }
@@ -126,11 +128,81 @@ log = Path("ci-output/ios-verification.log").read_text()
 for module in counts:
     if not re.search(rf"^> Task :{module}:iosSimulatorArm64Test\s*$", log, re.MULTILINE):
         raise SystemExit(f"{module} simulator test task did not execute")
+
+expected_swift_cases = [
+    "ordinary-jpeg", "apple-still-only", "apple-matched-pair", "apple-mismatched-pair",
+]
+swift_log = Path("ci-output/ios-swift-smoke.log")
+
+
+def run_smoke_command(command, timeout):
+    # Retain compiler and simulator errors even on failures; do not ship media or binaries.
+    with swift_log.open("a") as log:
+        try:
+            run = subprocess.run(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                check=False, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            output = (error.stdout or b"").decode(errors="replace")
+            log.write(output + "\nCommand timed out.\n")
+            print(output, end="", flush=True)
+            raise
+        log.write(run.stdout)
+    print(run.stdout, end="", flush=True)
+    run.check_returncode()
+    return run.stdout
+
+
+def simulator_state():
+    devices = json.loads(subprocess.check_output(
+        ["xcrun", "simctl", "list", "devices", "available", "--json"],
+        text=True, timeout=30,
+    ))["devices"]
+    return next(device["state"] for group in devices.values() for device in group
+                if device["udid"] == simulator)
+
+
+simulator_framework = Path(records["simulator"]["frameworkPath"])
+with tempfile.TemporaryDirectory(prefix="livephoto-swift-smoke-") as temp:
+    executable = Path(temp, "LivePhotoSwiftSmoke")
+    sdk = subprocess.check_output(
+        ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"], text=True,
+    ).strip()
+    run_smoke_command([
+        "xcrun", "--sdk", "iphonesimulator", "swiftc",
+        "-sdk", sdk, "-target", "arm64-apple-ios15.0-simulator",
+        "-F", str(simulator_framework.parent), "-framework", "LivePhotoCore",
+        "-Xlinker", "-ObjC", "-lc++", "iosBridge/smoke/main.swift",
+        "iosBridge/smoke/SimulatorFixtures.swift", "-o", str(executable),
+    ], 120)
+    linked = run_smoke_command(["xcrun", "vtool", "-show-build", str(executable)], 30)
+    if not re.search(r"^\s*platform\s+IOSSIMULATOR\s*$", linked, re.MULTILINE):
+        raise SystemExit("Swift smoke did not link as an iOS Simulator executable")
+    state_before = simulator_state()
+    try:
+        swift_output = run_smoke_command([
+            "xcrun", "simctl", "spawn", "--standalone", simulator, str(executable), "--",
+        ], 180)
+    finally:
+        # On timeout/interruption, only stop a simulator this smoke started.
+        if state_before == "Shutdown" and simulator_state() != "Shutdown":
+            subprocess.run(["xcrun", "simctl", "shutdown", simulator], check=True, timeout=60)
+    swift_executable_hash = hashlib.sha256(executable.read_bytes()).hexdigest()
+
+swift_cases = re.findall(r"^SWIFT_IOS_CASE=([a-z-]+):PASS$", swift_output, re.MULTILINE)
+if swift_cases != expected_swift_cases or swift_output.splitlines().count("SWIFT_IOS_SMOKE=SUCCESS") != 1:
+    raise SystemExit(f"Incomplete Swift simulator smoke evidence: {swift_cases}")
 summary = {
     "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
     "run": os.environ.get("GITHUB_RUN_ID"),
-    "scope": "read-only-core-and-swift-api; no app, device runtime, Photos or AVFoundation claim",
+    "scope": "read-only-core-and-swift-simulator; no app, device runtime, Photos or AVFoundation claim",
     "swiftTypecheck": sorted(records),
+    "swiftSimulatorSmoke": {
+        "target": "arm64-apple-ios15.0-simulator",
+        "cases": swift_cases,
+        "executableSha256": swift_executable_hash,
+    },
     "simulatorTests": dict(counts),
     "slices": records,
 }

@@ -8,7 +8,7 @@ Install Xcode, its command-line tools and an iPhone simulator runtime, and set `
 
 ```sh
 # Builds both XCFramework slices, runs Core/bridge simulator tests, and
-# checks that a Swift caller compiles against both slices.
+# type-checks Swift against both slices, then links and runs a Swift simulator smoke.
 bash scripts/verify-ios.sh
 
 # Choose a particular already-created iPhone simulator (see xcrun simctl list).
@@ -18,7 +18,7 @@ IOS_SIMULATOR_UDID=<uuid> bash scripts/verify-ios.sh
 ./gradlew -Plivephoto.ios=true :iosBridge:assembleLivePhotoCoreDebugXCFramework
 ```
 
-The static framework is written to `iosBridge/build/XCFrameworks/debug/LivePhotoCore.xcframework`. The verifier additionally writes `ci-output/ios-evidence.json`, the Gradle log, and test XML under each module's `build/test-results/iosSimulatorArm64Test/`. Device-slice linking and Swift type checking do not require signing or a physical device; this does not execute on a device. Linux can configure the opt-in Gradle graph, but cannot verify the iOS build or run the simulator.
+The static framework is written to `iosBridge/build/XCFrameworks/debug/LivePhotoCore.xcframework`. The verifier also writes `ci-output/ios-evidence.json`, the Gradle log, the linked Swift simulator smoke log, and test XML under each module's `build/test-results/iosSimulatorArm64Test/`. It type-checks the Swift sample for both frameworks and links the simulator framework into a standalone Swift command-line smoke executable. The iPhone device slice is built but does not run on physical hardware. Linux can configure the opt-in Gradle graph, but cannot verify the iOS build or run the simulator.
 
 ## Swift entry points
 
@@ -35,4 +35,4 @@ let pairReport = inspector.inspectPair(image: originalImageData, video: original
 
 The combined input limit is 32 MiB. A result can be successful but not `Live`; for example a single Apple carrier is only a candidate. The result includes the Core disposition, protocol/profile when known, pairing status, and issue codes, or a structured failure. Input bytes are read-only and copied into bounded in-memory storage. Do not mutate the input while calling the bridge.
 
-The simulator regression fixtures test ordinary JPEG, a synthetic Apple JPEG/MOV pair, mismatched pairing, empty input, and the input limit. These tests are not evidence for importing into Photos or handling every capture from Apple hardware. This milestone contains no SwiftUI app, Photos import/export, security-scoped file picker, AVFoundation media backend, file writes, or App Store packaging. Those require their own implementation and runtime checks.
+The Kotlin simulator regression fixtures test ordinary JPEG, a synthetic Apple JPEG/MOV pair, mismatched pairing, empty input, and the input limit. The linked Swift smoke independently exercises ordinary JPEG, a single Apple still, a matched pair, and a mismatched pair through the public bridge. These tests are not evidence for importing into Photos or handling every capture from Apple hardware. This milestone contains no SwiftUI app, Photos import/export, security-scoped file picker, AVFoundation media backend, file writes, or App Store packaging. Those require their own implementation and runtime checks.
