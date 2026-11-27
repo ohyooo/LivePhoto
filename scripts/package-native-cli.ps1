@@ -97,6 +97,11 @@ if ((Invoke-Native @('--version') 0 $false $false) -ne 'LivePhoto 0.1.0') { thro
 if ((Invoke-Native @('--help') 0 $false $false) -notmatch 'LivePhoto Core CLI') { throw 'Native help failed.' }
 $missing = Invoke-Native @('detect', '--input', $image) 3 $false
 if ($missing.error.code.value -ne 'INVALID_ARGUMENT') { throw 'Missing private workspace was not rejected.' }
+$invalidOutput = Join-Path $verify 'invalid-trim-output'
+$invalidTrim = Invoke-Native @('trim', '--input', (Join-Path $verify 'unavailable.mp4'), '--output-dir', $invalidOutput,
+    '--start-us', '100', '--end-us', '50') 2 $false
+if ($invalidTrim.error.code -ne 'INVALID_ARGUMENT' -or $invalidTrim.error.message -ne 'Time range is reversed' -or
+    (Test-Path -LiteralPath $invalidOutput)) { throw 'Native CLI did IO before rejecting invalid trim arguments.' }
 $budget = Invoke-Native @('create', '--image', $image, '--video', $video, '--target', 'oplus.olive', '--output-dir', (Join-Path $verify 'over-budget'), '--max-bytes', '100') 3
 if ($budget.error.code.value -ne 'RESOURCE_LIMIT_EXCEEDED') { throw 'Input budget was not enforced.' }
 $created = Invoke-Native @('create', '--image', $image, '--video', $video, '--target', 'oplus.olive', '--profile', 'jpeg-no-tail', '--output-dir', (Join-Path $verify 'created live'))

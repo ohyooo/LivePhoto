@@ -16,7 +16,8 @@ Write: --output-dir NEW_DIRECTORY (assets published together under assets/)
 Convert: --target PROTOCOL [--profile PROFILE]
 Create/convert edits: [--start-us N --end-us N --mode LosslessPreferred] [--frame-index N | --time-us N]
 Derived image: [--replacement-frame-index N | --replacement-time-us N] [--replacement-track-id ID]; independent of key
-Convert: [--same-target PreserveAsIs|Normalize]; trim [--key-outside Reject|ClampExplicitly|ClearIfSupported]
+Convert: [--same-target PreserveAsIs|Normalize]
+Composite create/convert trim: [--key-outside Reject|ClampExplicitly|ClearIfSupported]
 Extract: [--resources ID,ID] [--raw-carrier]
 Repair: preview by default; --apply --output-dir NEW_DIRECTORY to write
 Repair modes: [--mode SafeMetadataOnly|ExplicitRePair|ExplicitRemux]; re-pair needs --pair-video and --authority EVIDENCE_ID from inspect of a selected single asset
@@ -128,13 +129,7 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
             val imageQuality = options["quality"]?.toUInt()?.also { require(it <= 100u) { "Image quality must be in 0..100" } }
             options["log-level"]?.let(log::configure)
             log.debug("operation=$command event=start")
-            val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
-                command in setOf("create", "convert") && (options.keys.any { it in trimKeys + replacementKeys } || "ffmpeg" in options) ||
-                command == "repair" && (options["mode"] == RepairMode.ExplicitRemux.name || "ffmpeg" in options)
-            val discovery = if (providedCore == null && needsBackend) platform.discover(options["ffmpeg"]) else null
-            log.trace("event=backend-discovery requested=$needsBackend ffmpeg-found=${discovery?.ffmpegPath != null}")
-            val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
-            fun required(name: String): String = options[name] ?: errorArgument("Missing --$name")
+            fun required(name: String): String = options[name]?.takeIf { it.isNotEmpty() } ?: errorArgument("Missing --$name")
             val maxBytes = options["max-bytes"]?.toULong() ?: 1_073_741_824uL
             require(maxBytes in 1uL..Long.MAX_VALUE.toULong()) { "Invalid byte budget" }
             val context = Context(Limits(maxBytes, maxBytes), progress = ProgressReceiver { log.progress(it.stage.name, it.completed, it.total) })
@@ -148,10 +143,13 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
                 return options["${prefix}frame-index"]?.let { CoverPosition.FrameIndex(it.toULong(), options["${prefix}track-id"]?.let(::TrackId)) }
                     ?: CoverPosition.Timestamp(Time(required("${prefix}time-us").toLong(), 1_000_000u))
             }
+            fun trimSpec() = TrimSpec(
+                TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)),
+                mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred,
+                keyOutside = options["key-outside"]?.let(KeyOutsidePolicy::valueOf) ?: KeyOutsidePolicy.Reject,
+            )
             fun edits(): EditSpec? {
-                val trim = if (options.keys.any { it in trimKeys }) TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)),
-                    mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred,
-                    keyOutside = options["key-outside"]?.let(KeyOutsidePolicy::valueOf) ?: KeyOutsidePolicy.Reject) else null
+                val trim = if (options.keys.any { it in trimKeys }) trimSpec() else null
                 val key = if (options.keys.any { it in positionKeys }) position() else null
                 val replacement = if (options.keys.any { it in replacementKeys }) position("replacement-") else null
                 return if (trim == null && key == null && replacement == null) null else EditSpec(trim = trim, keyPosition = key, replacementFrame = replacement)
@@ -162,33 +160,110 @@ public class CliEngine(private val platform: CliPlatform, private val providedCo
                 transcode = if (options.containsKey("allow-transcode")) TranscodePolicy.Explicit else TranscodePolicy.Forbid,
                 conflicts = if (command == "repair" && "authority" in options) ConflictPolicy.ExplicitAuthority else ConflictPolicy.Reject,
                 authority = if (command == "repair") options["authority"]?.let(::EvidenceId) else null)
-            val result: CoreResult<*> = when (command) {
-                "capabilities" -> CoreResult.Success(core.getProtocolCapabilities(target()))
-                "media-capabilities" -> CoreResult.Success(mapOf("capabilities" to core.getMediaCapabilities(),
-                    "ffmpegPath" to discovery?.ffmpegPath?.toString(), "discoveryIssues" to (discovery?.issues ?: emptyList<Issue>())))
-                "detect" -> core.detect(ReadRequest(source(), context))
-                "inspect" -> core.inspect(ReadRequest(source(), context))
-                "analyze" -> core.analyze(AnalyzeRequest(source(), context = context))
-                "validate" -> core.validate(ValidationRequest(source(), layers = options["layers"]?.split(',')?.map { Layer.valueOf(it) } ?: listOf(Layer.Structure, Layer.Protocol, Layer.Media), context = context))
-                "get-key" -> core.getKeyPhotoPosition(ReadRequest(source(), context))
-                "probe" -> core.probe(ProbeRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), decodeCheck = "decode-check" in options, context = context))
-                "create" -> core.create(CreateRequest(file("image"), file("video"), target(), edits = edits(), policy = policy, output = destination(), context = context))
-                "convert" -> core.convert(ConvertRequest(source(), target(), edits = edits(), sameTarget = options["same-target"]?.let(SameTargetPolicy::valueOf) ?: SameTargetPolicy.PreserveAsIs, policy = policy, output = destination(), context = context))
-                "extract" -> core.extract(ExtractRequest(source(), options["resources"]?.split(',')?.map(::ResourceId) ?: emptyList(), includeRawCarrier = options.containsKey("raw-carrier"), output = destination(), context = context))
-                "split" -> core.split(SplitRequest(source(), policy = policy, output = destination(), context = context))
-                "repair" -> {
-                    require(options.containsKey("apply") || !options.containsKey("output-dir")) { "Repair preview does not accept --output-dir; use --apply" }
-                    core.repair(RepairRequest(source(), mode = options["mode"]?.let(RepairMode::valueOf) ?: RepairMode.SafeMetadataOnly,
-                        allowedIssueCodes = options["issues"]?.split(',')?.map(::IssueCode) ?: emptyList(), authority = options["authority"]?.let(::EvidenceId),
-                        dryRun = !options.containsKey("apply"), policy = policy, output = if (options.containsKey("apply")) destination() else null, context = context))
-                }
-                "set-key" -> core.setKeyPhotoPosition(SetKeyRequest(source(), position(), policy, destination(), context))
-                "extract-frame" -> core.extractFrame(ExtractFrameRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), position(), ImageEncoding(ImageFormat.valueOf(required("format")), quality = imageQuality), destination(), context))
-                "replace-cover" -> core.replacePrimaryImageFromFrame(ReplaceRequest(source(), position(), ImageEncoding(ImageFormat.valueOf(required("format")), quality = imageQuality), updateKeyPosition = "update-key" in options, policy = policy, output = destination(), context = context))
-                "trim" -> core.trim(TrimRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), TrimSpec(TimeRange(Time(required("start-us").toLong(), 1_000_000u), Time(required("end-us").toLong(), 1_000_000u)), mode = options["mode"]?.let(TrimMode::valueOf) ?: TrimMode.LosslessPreferred), policy, destination(), context))
-                "remux" -> core.remux(RemuxRequest(ResourceRef(source(), options["resource"]?.let(::ResourceId)), VideoContainer.valueOf(required("container")), policy, destination(), context))
-                else -> core.transcode(TranscodeRequest(ResourceRef(source()), VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container"))), policy, destination(), context))
+            // The action captures only validated arguments. Keep expensive source spooling,
+            // output allocation and FFmpeg discovery out of CLI syntax validation.
+            fun plan(vararg paths: String, action: suspend LivePhotoCore.() -> CoreResult<*>): suspend LivePhotoCore.() -> CoreResult<*> {
+                paths.forEach { required(it) }
+                if ("input" in paths && "pair-video" in options) required("pair-video")
+                return action
             }
+            fun encoding() = ImageEncoding(ImageFormat.valueOf(required("format")), quality = imageQuality)
+            fun resourceId() = options["resource"]?.let(::ResourceId)
+            val action = when (command) {
+                "capabilities" -> {
+                    val selector = target()
+                    plan { CoreResult.Success(getProtocolCapabilities(selector)) }
+                }
+                "media-capabilities" -> null
+                "detect" -> plan("input") { detect(ReadRequest(source(), context)) }
+                "inspect" -> plan("input") { inspect(ReadRequest(source(), context)) }
+                "analyze" -> plan("input") { analyze(AnalyzeRequest(source(), context = context)) }
+                "validate" -> {
+                    val layers = options["layers"]?.split(',')?.map { Layer.valueOf(it) }
+                        ?: listOf(Layer.Structure, Layer.Protocol, Layer.Media)
+                    plan("input") { validate(ValidationRequest(source(), layers = layers, context = context)) }
+                }
+                "get-key" -> plan("input") { getKeyPhotoPosition(ReadRequest(source(), context)) }
+                "probe" -> {
+                    val resource = resourceId()
+                    plan("input") { probe(ProbeRequest(ResourceRef(source(), resource), decodeCheck = "decode-check" in options, context = context)) }
+                }
+                "create" -> {
+                    val selector = target()
+                    val requestedEdits = edits()
+                    plan("image", "video", "output-dir") {
+                        create(CreateRequest(file("image"), file("video"), selector, edits = requestedEdits, policy = policy, output = destination(), context = context))
+                    }
+                }
+                "convert" -> {
+                    val selector = target()
+                    val requestedEdits = edits()
+                    val sameTarget = options["same-target"]?.let(SameTargetPolicy::valueOf) ?: SameTargetPolicy.PreserveAsIs
+                    plan("input", "output-dir") {
+                        convert(ConvertRequest(source(), selector, edits = requestedEdits, sameTarget = sameTarget, policy = policy, output = destination(), context = context))
+                    }
+                }
+                "extract" -> {
+                    val resources = options["resources"]?.split(',')?.map(::ResourceId) ?: emptyList()
+                    plan("input", "output-dir") {
+                        extract(ExtractRequest(source(), resources, includeRawCarrier = options.containsKey("raw-carrier"), output = destination(), context = context))
+                    }
+                }
+                "split" -> plan("input", "output-dir") { split(SplitRequest(source(), policy = policy, output = destination(), context = context)) }
+                "repair" -> {
+                    val apply = "apply" in options
+                    require(apply || "output-dir" !in options) { "Repair preview does not accept --output-dir; use --apply" }
+                    val mode = options["mode"]?.let(RepairMode::valueOf) ?: RepairMode.SafeMetadataOnly
+                    val allowedIssueCodes = options["issues"]?.split(',')?.map(::IssueCode) ?: emptyList()
+                    if (apply) required("output-dir")
+                    plan("input") {
+                        repair(RepairRequest(source(), mode = mode, allowedIssueCodes = allowedIssueCodes, authority = policy.authority,
+                            dryRun = !apply, policy = policy, output = if (apply) destination() else null, context = context))
+                    }
+                }
+                "set-key" -> {
+                    val key = position()
+                    plan("input", "output-dir") { setKeyPhotoPosition(SetKeyRequest(source(), key, policy, destination(), context)) }
+                }
+                "extract-frame" -> {
+                    val key = position()
+                    val encoding = encoding()
+                    val resource = resourceId()
+                    plan("input", "output-dir") { extractFrame(ExtractFrameRequest(ResourceRef(source(), resource), key, encoding, destination(), context)) }
+                }
+                "replace-cover" -> {
+                    val key = position()
+                    val encoding = encoding()
+                    plan("input", "output-dir") {
+                        replacePrimaryImageFromFrame(ReplaceRequest(source(), key, encoding, updateKeyPosition = "update-key" in options,
+                            policy = policy, output = destination(), context = context))
+                    }
+                }
+                "trim" -> {
+                    val spec = trimSpec()
+                    val resource = resourceId()
+                    plan("input", "output-dir") { trim(TrimRequest(ResourceRef(source(), resource), spec, policy, destination(), context)) }
+                }
+                "remux" -> {
+                    val container = VideoContainer.valueOf(required("container"))
+                    val resource = resourceId()
+                    plan("input", "output-dir") { remux(RemuxRequest(ResourceRef(source(), resource), container, policy, destination(), context)) }
+                }
+                "transcode" -> {
+                    val encoding = VideoEncoding(VideoCodec.valueOf(required("codec")), VideoContainer.valueOf(required("container")))
+                    plan("input", "output-dir") { transcode(TranscodeRequest(ResourceRef(source()), encoding, policy, destination(), context)) }
+                }
+                else -> error("Unexpected CLI command after validation")
+            }
+            val needsBackend = command in mediaCommands && (command != "probe" || "decode-check" in options || "ffmpeg" in options) ||
+                command in setOf("create", "convert") && (options.keys.any { it in trimKeys + replacementKeys } || "ffmpeg" in options) ||
+                command == "repair" && (options["mode"] == RepairMode.ExplicitRemux.name || "ffmpeg" in options)
+            val discovery = if (providedCore == null && needsBackend) platform.discover(options["ffmpeg"]) else null
+            log.trace("event=backend-discovery requested=$needsBackend ffmpeg-found=${discovery?.ffmpegPath != null}")
+            val core = providedCore ?: DefaultLivePhotoCore(discovery?.backend)
+            val result = if (action == null) CoreResult.Success(mapOf("capabilities" to core.getMediaCapabilities(),
+                "ffmpegPath" to discovery?.ffmpegPath?.toString(), "discoveryIssues" to (discovery?.issues ?: emptyList<Issue>())))
+                else action(core)
             emit(CliJson.encode(result, output?.assetPath))
             if (result is CoreResult.Failure) log.failure(result.error.code.value, result.error.stage.name)
             log.debug("operation=$command event=result status=${if (result is CoreResult.Failure) "failure" else "success"}")

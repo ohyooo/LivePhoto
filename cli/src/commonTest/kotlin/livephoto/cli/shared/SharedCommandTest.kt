@@ -87,6 +87,44 @@ class SharedCommandTest {
             assertTrue(lines.single().contains("INVALID_ARGUMENT"))
         }
     }
+    @Test fun malformedRequestsNeverDiscoverToolsOpenInputsOrAllocateOutputs() = synchronous {
+        var discoveries = 0
+        val platform = object : TestPlatform() {
+            override suspend fun discover(ffmpegPath: String?): CliDiscovery {
+                discoveries++
+                return super.discover(ffmpegPath)
+            }
+        }
+        val cli = CliEngine(platform)
+        val input = listOf("--input", "not-opened")
+        val output = listOf("--output-dir", "not-created")
+        val create = listOf("create", "--image", "not-opened", "--video", "not-opened", "--target", "oplus.olive")
+        val cases = listOf(
+            create + output + listOf("--start-us", "0"),
+            create + listOf("--end-us", "1000", "--start-us", "0"),
+            listOf("trim") + input + output + listOf("--start-us", "900", "--end-us", "100"),
+            listOf("remux") + input + output + listOf("--container", "unsupported"),
+            listOf("transcode") + input + output + listOf("--container", "Mp4", "--codec", "unsupported"),
+            listOf("extract-frame") + input + output + listOf("--frame-index", "1", "--time-us", "30", "--format", "Jpeg"),
+            listOf("replace-cover") + input + output + listOf("--time-us", "30", "--format", "unsupported"),
+            listOf("repair", "--apply", "--mode", "ExplicitRemux") + input,
+            listOf("repair", "--mode", "unsupported") + input,
+            listOf("convert", "--target", "oplus.olive", "--same-target", "unsupported") + input + output,
+            listOf("validate", "--layers", "Structure,unsupported") + input,
+            listOf("extract", "--resources", "one,") + input + output,
+            listOf("inspect", "--pair-video", "") + input,
+            listOf("probe", "--decode-check"),
+            listOf("probe", "--decode-check", "--max-bytes", "0") + input,
+        )
+        for (args in cases) {
+            val lines = mutableListOf<String>()
+            assertEquals(2, cli.run(args, lines::add), args.toString())
+            assertTrue(lines.single().contains("INVALID_ARGUMENT"), args.toString())
+            assertEquals(0, discoveries, args.toString())
+            assertTrue(platform.opened.isEmpty(), args.toString())
+            assertTrue(platform.transactions.isEmpty(), args.toString())
+        }
+    }
     @Test fun repairIsReadOnlyByDefaultAndEmptyAllowlistReachesCore() = synchronous {
         var received: RepairRequest? = null
         val core = object : LivePhotoCore by DefaultLivePhotoCore() {

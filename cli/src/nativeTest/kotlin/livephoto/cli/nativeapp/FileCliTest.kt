@@ -57,6 +57,15 @@ class FileCliTest {
         assertFalse(json.contains("private-path"))
     }
 
+    @Test fun invalidMediaArgumentsWinBeforeWorkspaceOrFilesAreRequired(): Unit = immediate {
+        var json = ""
+        assertEquals(2, CliEngine(Platform("")).run(listOf("trim", "--input", "missing-video",
+            "--output-dir", "must-not-exist", "--start-us", "100", "--end-us", "50")) { json = it })
+        assertContains(json, "INVALID_ARGUMENT")
+        assertContains(json, "Time range is reversed")
+        assertFalse(json.contains("LIVEPHOTO_WORKSPACE"))
+    }
+
     @Test fun realInputsShareBudgetAndCleanupLeavesOriginalUntouched(): Unit = immediate {
         val fs = localFileSystem
         val root = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "livephoto-cli-test-${Random.nextLong().toULong()}"
