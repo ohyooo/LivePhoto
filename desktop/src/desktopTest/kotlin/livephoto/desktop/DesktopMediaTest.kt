@@ -9,6 +9,7 @@ import livephoto.ui.CoreMediaAction
 import java.awt.EventQueue
 import java.awt.Robot
 import java.awt.Rectangle
+import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -31,6 +32,7 @@ class DesktopMediaTest {
         var platform: DesktopPlatform? = null
         var editor: DesktopVideoEditor? = null
         var window: JFrame? = null
+        var testFailure: Throwable? = null
         try {
             execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
             execute("-i", video.toString(), "-frames:v", "1", image.toString())
@@ -94,10 +96,35 @@ class DesktopMediaTest {
             assertTrue(redPixels > 5000, "Native video is blank/occluded in the real Compose window: $redPixels red pixels; ${playback.playback.value}")
             playback.seek(.8)
             assertTrue(playback.playback.value.duration in 1.9..2.1)
+        } catch (failure: Throwable) {
+            testFailure = failure
+            throw failure
         } finally {
-            EventQueue.invokeAndWait { editor?.close(); window?.dispose() }
-            platform?.close()
-            Files.walk(directory).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) }
+            try {
+                EventQueue.invokeAndWait { editor?.close(); window?.dispose() }
+                platform?.close()
+                deleteMediaTestDirectory(directory)
+            } catch (cleanupFailure: Exception) {
+                val original = testFailure ?: throw cleanupFailure
+                original.addSuppressed(cleanupFailure)
+            }
+        }
+    }
+}
+
+private fun deleteMediaTestDirectory(directory: Path) {
+    val paths = Files.walk(directory).use { it.sorted(Comparator.reverseOrder()).toList() }
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    for (path in paths) {
+        while (true) {
+            try {
+                Files.deleteIfExists(path)
+                break
+            } catch (failure: FileSystemException) {
+                // The FX queue can drain before its native decoder releases a Windows file handle.
+                if (System.nanoTime() - deadline >= 0) throw failure
+                Thread.sleep(50)
+            }
         }
     }
 }

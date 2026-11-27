@@ -9,19 +9,35 @@ export async function launchBrowser(){
   if(name==='chromium'||name==='firefox')return ({chromium,firefox})[name].launch({headless:process.env.LIVEPHOTO_HEADLESS!=='false',
     ...(name==='firefox'?{firefoxUserPrefs:{'webgl.force-enabled':true}}:{})});
   if(name!=='safari'||process.platform!=='darwin')throw Error('Unsupported browser runner');
+  for(let attempt=1;;attempt++){
+    try{return await launchSafari(attempt);}
+    catch(error){
+      if(attempt===2||!error.safariStartupTimeout)throw error;
+      console.warn('Safari did not become ready for WebDriver; retrying startup once on a fresh driver.');
+      await new Promise(resolve=>setTimeout(resolve,1500));
+    }
+  }
+}
+
+async function launchSafari(attempt){
   const reserve=createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));
   const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
   const driver=spawn('/usr/bin/safaridriver',['--port',String(port)],{stdio:['ignore','pipe','pipe']});
-  let log='',session,version;
+  let log='',session,version,creatingSession=false;
   for(const stream of [driver.stdout,driver.stderr])stream.on('data',data=>{log=(log+data).slice(-65536);});
   const request=async(method,path,body)=>{
     const response=await fetch(`http://127.0.0.1:${port}${path}`,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(180000)});
     const value=(await response.json()).value;
-    if(!response.ok)throw Error('Safari WebDriver: '+JSON.stringify(value));
+    if(!response.ok){
+      const error=Error('Safari WebDriver: '+JSON.stringify(value));
+      error.safariStartupTimeout=creatingSession&&value?.error==='session not created'&&
+        /timed out while connecting to a Safari instance/i.test(value.message||'');
+      throw error;
+    }
     return value;
   };
   const close=async()=>{
-    try{if(session)await request('DELETE','/session/'+session);}finally{driver.kill();await writeFile('ci-output/web-safaridriver.log',log);}
+    try{if(session)await request('DELETE','/session/'+session);}finally{driver.kill();await writeFile('ci-output/web-safaridriver.log',log,{flag:attempt===1?'w':'a'});}
   };
   try{
     let ready=false;
@@ -31,7 +47,9 @@ export async function launchBrowser(){
       await new Promise(resolve=>setTimeout(resolve,100));
     }
     if(!ready)throw Error('Safari driver did not start');
+    creatingSession=true;
     const value=await request('POST','/session',{capabilities:{alwaysMatch:{browserName:'safari'}}});
+    creatingSession=false;
     session=value.sessionId;version=value.capabilities.browserVersion;
     await request('POST',`/session/${session}/timeouts`,{script:180000,pageLoad:180000});
     const evaluate=(fn,arg)=>request('POST',`/session/${session}/execute/async`,{
@@ -54,5 +72,9 @@ export async function launchBrowser(){
       if(options.viewport)await request('POST',`/session/${session}/window/rect`,options.viewport);
       return {newPage:async()=>page,close:async()=>{}};
     }};
-  }catch(error){await close();throw error;}
+  }catch(error){
+    log+=`\nSafari driver attempt ${attempt}: ${error.message}\n`;
+    try{await close();}catch(cleanup){console.warn('Safari driver cleanup failed:',cleanup.message);}
+    throw error;
+  }
 }
