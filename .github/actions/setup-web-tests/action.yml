@@ -17,9 +17,28 @@ runs:
     - name: Install pinned browser tooling
       shell: bash
       working-directory: scripts/web
+      env:
+        LIVEPHOTO_TEST_BROWSER: ${{ inputs.browser }}
       run: |
+        case "$LIVEPHOTO_TEST_BROWSER" in
+          chromium|firefox|safari) ;;
+          *) echo "Unsupported test browser" >&2; exit 1 ;;
+        esac
         npm install --ignore-scripts --no-audit --no-fund
-        if [[ '${{ inputs.browser }}' != safari ]]; then npx playwright install --with-deps '${{ inputs.browser }}'; fi
+        if [[ "$LIVEPHOTO_TEST_BROWSER" == safari ]]; then exit 0; fi
+        if [[ "$RUNNER_OS" == Linux ]]; then
+          # Scope only Playwright's apt calls to the signed runner Ubuntu sources.
+          # In particular, an unrelated vendor mirror returning 403 must not block browser tests.
+          ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+          test -s "$ubuntu_sources"
+          apt_config=$(mktemp)
+          trap 'rm -f "$apt_config"' EXIT
+          printf 'Dir::Etc::sourcelist "%s";\nDir::Etc::sourceparts "-";\n' "$ubuntu_sources" > "$apt_config"
+          sudo env "APT_CONFIG=$apt_config" "$(command -v node)" ./node_modules/playwright/cli.js install-deps "$LIVEPHOTO_TEST_BROWSER"
+          npx playwright install "$LIVEPHOTO_TEST_BROWSER"
+        else
+          npx playwright install --with-deps "$LIVEPHOTO_TEST_BROWSER"
+        fi
 
     - name: Cache stable FFmpeg fixture generator
       uses: actions/cache@v6
