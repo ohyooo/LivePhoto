@@ -29,12 +29,13 @@ class DesktopMediaTest {
             try { assertTrue(process.waitFor(30, TimeUnit.SECONDS)); assertEquals(0, process.exitValue()) }
             finally { if (process.isAlive) process.destroyForcibly() }
         }
+        fun generateVideo(prefixFilter: String = "") = execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "${prefixFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
         var platform: DesktopPlatform? = null
         var editor: DesktopVideoEditor? = null
         var window: JFrame? = null
         var testFailure: Throwable? = null
         try {
-            execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
+            generateVideo()
             execute("-i", video.toString(), "-frames:v", "1", image.toString())
             val host = DesktopPlatform { _, name -> if (name == null) null else output }
             platform = host
@@ -61,7 +62,8 @@ class DesktopMediaTest {
             val changed = assertIs<CoreResult.Failure>(host.analyze(videoRef))
             assertEquals("SOURCE_CHANGED", changed.error.code.value)
             Files.delete(video)
-            execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", video.toString())
+            // The desktop UI must actually display a distinguishable frame after seeking.
+            generateVideo("drawbox=color=lime:t=fill:enable='gte(t,1)',")
             configureDesktopRendering()
             EventQueue.invokeAndWait {
                 val playback = DesktopVideoEditor(host.register(video), video, host)
@@ -78,24 +80,42 @@ class DesktopMediaTest {
             assertTrue(playback.playback.value.ready, "JavaFX did not load the synthetic H.264 video")
             playback.setMuted(true); playback.togglePlayback()
             val robot = Robot()
-            var redPixels = 0
-            var screenshot: java.awt.image.BufferedImage? = null
-            while (redPixels < 5000 && System.nanoTime() < deadline) {
-                Thread.sleep(100)
-                val bounds = Rectangle(60, 60, 640, 420)
-                screenshot = robot.createScreenCapture(bounds)
-                redPixels = 0
-                for (y in 80 until 340 step 2) for (x in 40 until 600 step 2) {
-                    val rgb = screenshot.getRGB(x, y)
-                    if ((rgb shr 16 and 255) > 160 && (rgb shr 8 and 255) < 80 && (rgb and 255) < 80) redPixels++
-                }
-            }
+            val bounds = Rectangle(60, 60, 640, 420)
             val report = Path.of("build/reports/desktop-smoke")
             Files.createDirectories(report)
-            screenshot?.let { ImageIO.write(it, "png", report.resolve("video-window.png").toFile()) }
+            fun awaitPicture(name: String, deadline: Long, matches: (Int) -> Boolean, settled: () -> Boolean = { true }) {
+                var matching = 0
+                do {
+                    Thread.sleep(50)
+                    val picture = robot.createScreenCapture(bounds)
+                    matching = 0
+                    for (y in 80 until 340 step 2) for (x in 40 until 600 step 2) {
+                        if (matches(picture.getRGB(x, y))) matching++
+                    }
+                    if (matching > 5000 && settled()) {
+                        ImageIO.write(picture, "png", report.resolve(name).toFile())
+                        return
+                    }
+                    if (System.nanoTime() >= deadline || playback.playback.value.error != null) {
+                        ImageIO.write(picture, "png", report.resolve(name).toFile())
+                        break
+                    }
+                } while (true)
+                fail("Did not render $name with a settled playback clock: $matching matching pixels; ${playback.playback.value}")
+            }
+            awaitPicture("video-window.png", deadline, { rgb ->
+                (rgb shr 16 and 255) > 160 && (rgb shr 8 and 255) < 80 && (rgb and 255) < 80
+            })
             assertNull(playback.playback.value.error)
-            assertTrue(redPixels > 5000, "Native video is blank/occluded in the real Compose window: $redPixels red pixels; ${playback.playback.value}")
-            playback.seek(.8)
+            // Queue two positions. The latest seek should win and pause at the green frame.
+            playback.seek(.4)
+            playback.seek(1.5)
+            awaitPicture("video-seek-window.png", System.nanoTime() + TimeUnit.SECONDS.toNanos(10), { rgb ->
+                (rgb shr 16 and 255) < 80 && (rgb shr 8 and 255) > 160 && (rgb and 255) < 80
+            }) {
+                val state = playback.playback.value
+                state.ready && state.paused && !state.seeking && kotlin.math.abs(state.current - 1.5) <= 0.1
+            }
             assertTrue(playback.playback.value.duration in 1.9..2.1)
             // Close the app host while the real player is still mounted. The editor's
             // Compose disposal must not be required to release native playback.

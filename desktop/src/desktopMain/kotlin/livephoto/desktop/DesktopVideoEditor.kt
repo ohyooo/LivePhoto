@@ -4,6 +4,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.graphics.Color
+import javafx.animation.PauseTransition
 import javafx.application.Platform
 import javafx.embed.swing.JFXPanel
 import javafx.scene.layout.StackPane
@@ -43,6 +44,8 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
     private val panel = JFXPanel()
     private val resultPreview = poster != null
     private var player: MediaPlayer? = null
+    private val seekState = DesktopSeekState()
+    private var seekTimeout: PauseTransition? = null
     @Volatile private var closed = false
     private val operationLock = Any()
     private val operationJobs = mutableSetOf<Job>()
@@ -91,6 +94,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                     }
                     panel.scene = scene
                     fun failed() {
+                        cancelSeek()
                         val failure = active.error ?: media.error
                         changePlayback { it.copy(ready = false, seeking = false, paused = true,
                             error = "视频预览失败（${playbackFailureDetails(failure)}）") }
@@ -105,13 +109,19 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
                             seeking = false, width = media.width.toDouble(), height = media.height.toDouble()) }
                     }
                     active.setOnReady { ready() }
-                    active.currentTimeProperty().addListener { _, _, value -> changePlayback { it.copy(current = value.toSeconds(), seeking = false) } }
+                    active.currentTimeProperty().addListener { _, _, value ->
+                        seekState.observe(value.toSeconds())?.let(::publishTime)
+                    }
                     active.statusProperty().addListener { _, _, status -> changePlayback { it.copy(paused = it.error != null || status != MediaPlayer.Status.PLAYING) } }
-                    active.setOnEndOfMedia { changePlayback { it.copy(paused = true, current = it.duration) } }
+                    active.setOnEndOfMedia {
+                        // An old end callback must not move the clock past a newer seek.
+                        if (seekState.pending == null) changePlayback { it.copy(paused = true, current = it.duration) }
+                    }
                     // Errors may precede installation of the asynchronous callbacks.
                     if (active.error != null || media.error != null) failed()
                     else if (active.status == MediaPlayer.Status.READY) ready()
                 } catch (failure: Exception) {
+                    cancelSeek()
                     player?.dispose(); player = null; panel.scene = null
                     changePlayback { it.copy(ready = false, seeking = false,
                         error = "无法启动本机媒体预览（${playbackFailureDetails(failure)}）") }
@@ -124,10 +134,39 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
         synchronized(state) { if (!closed) state.value = change(state.value) }
     }
     private fun update(action: (MediaPlayer) -> Unit) { Platform.runLater { if (!closed) player?.let(action) } }
+    private fun cancelSeek() {
+        seekState.cancel()
+        seekTimeout?.stop()
+        seekTimeout = null
+    }
+    private fun publishTime(seconds: Double) {
+        seekTimeout?.stop()
+        seekTimeout = null
+        changePlayback { value ->
+            if (value.ready) value.copy(current = seconds.coerceAtMost(value.duration), seeking = false) else value
+        }
+    }
     override fun seek(seconds: Double) {
         if (!seconds.isFinite() || !state.value.ready) return
-        val position = seconds.coerceIn(0.0, state.value.duration)
-        update { it.pause(); changePlayback { value -> value.copy(seeking = position != value.current, paused = true, current = position) }; it.seek(Duration.seconds(position)) }
+        update { active ->
+            val playback = state.value
+            if (!playback.ready) return@update
+            val position = seconds.coerceIn(0.0, playback.duration)
+            val alreadyThere = seekState.pending == null && active.currentTime.toSeconds() == position
+            active.pause()
+            if (alreadyThere) {
+                changePlayback { it.copy(paused = true, current = position, seeking = false) }
+                return@update
+            }
+            seekTimeout?.stop()
+            val request = seekState.request(position)
+            changePlayback { it.copy(paused = true, current = position, seeking = true) }
+            seekTimeout = PauseTransition(Duration.seconds(1.5)).apply {
+                setOnFinished { seekState.expire(request, active.currentTime.toSeconds())?.let(::publishTime) }
+                play()
+            }
+            active.seek(Duration.seconds(position))
+        }
     }
     override fun togglePlayback() { update { if (state.value.paused) { if (state.value.current >= state.value.duration) it.seek(Duration.ZERO); it.play() } else it.pause() } }
     override fun setVolume(volume: Double) { if (volume.isFinite()) update { player -> player.volume = volume.coerceIn(0.0, 1.0); changePlayback { it.copy(volume = player.volume) } } }
@@ -206,6 +245,7 @@ internal class DesktopVideoEditor(private val reference: String, path: Path, pri
             // Keep these enqueues under the close lock: a concurrent shutdown must not
             // observe closed=true and queue its own FX barrier before this disposal.
             Platform.runLater {
+                cancelSeek()
                 try { player?.dispose() }
                 finally {
                     player = null
