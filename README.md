@@ -189,7 +189,7 @@ CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性�
 
 ## Android 测试应用
 
-在 [GitHub Releases](https://github.com/ohyooo/LivePhoto/releases) 的 Android 构建中，直接下载并安装 **`LivePhoto-release.apk`**；排错时可下载同版本的 **`LivePhoto-debug.apk`**。附件就是 APK，不需要解压，不附带测试报告。需要 **Android 10 / API 29 或更高**；这是实验性应用，不是正式商店发行版。主分支 CI 全部通过后才发布，不覆盖历史构建。
+在 [GitHub Releases](https://github.com/ohyooo/LivePhoto/releases) 找到 Android 预发行构建，按设备 CPU 架构下载对应 APK：多数手机用 `LivePhoto-arm64-v8a.apk`，较旧的 32 位 ARM 设备用 `LivePhoto-armeabi-v7a.apk`，x86 模拟器按镜像架构选 `LivePhoto-x86.apk` 或 `LivePhoto-x86_64.apk`。附件本身是 APK，不需要解压。需要 **Android 10 / API 29 或更高**。只有主分支 CI 全部通过才发布，不覆盖历史构建；这不是正式商店发行版。
 
 打开 LivePhoto，依次选择图片、视频及目标协议，再点击“生成并保存”。当前界面只开放已实现的 **JPEG＋MP4**：OPPO/OnePlus `jpeg-no-tail`、Google Motion Photo V2 `jpeg`、Google MicroVideo V1 `jpeg`。输入由内容识别，不靠文件名；同名仅便于自己选择。未知/不安全的格式、metadata 或媒体 profile 会由 Core 拒绝，不自动转换。
 
@@ -215,7 +215,7 @@ Android 的 OPPO/OnePlus 生成支持两种精确相机注释替换：UNDEFINED 
 
 Windows 使用 `.\gradlew.bat` 替换 `./gradlew`。Android 模式与桌面 `livephoto.nativeTarget` 分开，不能同时指定。APK 分别位于 `android/build/outputs/apk/debug/android-debug.apk` 和 `android/build/outputs/apk/release/android-release.apk`。用 Android Studio 导入时，在该 IDE 的 Gradle VM options 设置 `-Dorg.gradle.project.livephoto.android=true`，不要把模式写成所有平台共用的全局属性。
 
-CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 产物中的 **`LivePhoto-debug.apk`、`LivePhoto-release.apk` 分别直接上传单文件**，使用 `upload-artifact@v7` 的 `archive: false`，没有外层 ZIP；`compression-level: 0` 只控制压缩等级，单独设置不能移除 ZIP。发布任务用 `download-artifact@v8` 的 `skip-decompress: true` 保留 APK 自身结构。`android-reports-...` 是单独的报告 ZIP，保留 XML、日志、启动截图及混淆映射，不附带含素材的测试 APK。Native 报告只保留测试结果及素材哈希清单，不附带导出的图片、视频或媒体 fixture。手机原片与其生成结果不提交到仓库或上传 artifacts；应用 APK 不包含测试素材。
+CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 用同一个 Release AAB 生成四个独立、已签名的 ABI APK，按单文件上传，不加外层 ZIP。发布任务校验下载摘要，并保留 APK 本身供直接安装。Debug APK 参加 CI 安装与启动验证，不是 Releases 的下载附件。`android-reports-...` 是单独的报告 ZIP，保留 XML、日志、启动截图及混淆映射，不附带含素材的测试 APK。Native 报告只保留测试结果及素材哈希清单，不附带导出的图片、视频或媒体 fixture。手机原片与其生成结果不提交到仓库或上传 artifacts；应用 APK 不包含测试素材。
 
 主分支 debug/release 共用固定签名，通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复，缺少签名时拒绝发布。PR 使用默认 debug 签名且不发布 Releases；本地未传入签名时也使用本地 debug key，不能据此覆盖 CI 安装版。CI 的 `versionCode` 随构建递增，签名保持一致。**以前使用随机 CI debug key 的版本可能需卸载一次**；之后本仓库固定签名的 debug/release 可互相更新。产物证据记录实际证书指纹。
 
