@@ -82,7 +82,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
     val blocker = when {
         image == null && video == null -> "还需选择图片和视频"
         video == null -> "已选择图片，还需选择视频"
-        image == null -> "已选择视频，还需选择图片或确认封面"
+        image == null -> if (editor == null) "已选择视频，还需选择图片" else "已选择视频，还需选择图片或确认封面"
         coverWarning != null -> coverWarning
         editing.pendingTrim -> "请先应用裁剪或重置选段"
         totalSize != null && totalSize!! >= 32L * 1024 * 1024 -> "图片与当前视频合计达到或超过 32 MiB，请先裁剪视频或缩短选段"
