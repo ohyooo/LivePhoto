@@ -1,4 +1,5 @@
 """Publish only a successful main-branch Web artifact; never build or run its contents."""
+import base64
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 SOURCE = 'ohyooo/LivePhoto'
 SITE = 'ohyooo/livephoto-web'
+SITE_URL = f'https://github.com/{SITE}.git'
 
 
 def api(path):
@@ -26,7 +28,26 @@ def api(path):
 
 
 def git(directory, *arguments):
-    return subprocess.check_output(['git', '-C', str(directory), *arguments], text=True).strip()
+    env = os.environ.copy()
+    env.pop('PAGES_HTTPS_TOKEN', None)
+    return subprocess.check_output(['git', '-C', str(directory), *arguments], env=env, text=True).strip()
+
+
+def push_site(directory):
+    token = os.environ.get('PAGES_HTTPS_TOKEN')
+    if not token:
+        raise RuntimeError('Set the site-only PAGES_HTTPS_TOKEN before publishing a new website version')
+    authorization = base64.b64encode(f'x-access-token:{token}'.encode()).decode('ascii')
+    env = os.environ.copy()
+    env.pop('PAGES_HTTPS_TOKEN', None)
+    env.pop('GH_TOKEN', None)
+    # Authorization is scoped to the fixed HTTPS repository, never stored in
+    # the origin or command line, and is not supplied to clone or verification.
+    env.update(GIT_TERMINAL_PROMPT='0', GIT_CONFIG_COUNT='2',
+        GIT_CONFIG_KEY_0=f'http.{SITE_URL}.extraHeader',
+        GIT_CONFIG_VALUE_0=f'Authorization: Basic {authorization}',
+        GIT_CONFIG_KEY_1='http.followRedirects', GIT_CONFIG_VALUE_1='false')
+    subprocess.run(['git', '-C', str(directory), 'push', SITE_URL, 'HEAD:main'], env=env, check=True)
 
 
 def download(artifact, destination):
@@ -119,10 +140,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix='livephoto-pages-') as temporary:
         root = Path(temporary)
         site = root / 'repository'
-        subprocess.run(['git', 'clone', '--depth=1', '--branch=main', f'git@github.com:{SITE}.git', str(site)], check=True)
+        public_env = os.environ.copy()
+        public_env.pop('PAGES_HTTPS_TOKEN', None)
+        public_env.pop('GH_TOKEN', None)
+        subprocess.run(['git', 'clone', '--depth=1', '--branch=main', SITE_URL, str(site)], env=public_env, check=True)
         current = json.loads((site / 'web-ui-package-evidence.json').read_text(encoding='utf-8-sig'))
         # Reuse the site's validator before either replacing or trusting its generated files.
-        subprocess.run(['python3', 'scripts/verify-package.py'], cwd=site, check=True)
+        subprocess.run(['python3', 'scripts/verify-package.py'], cwd=site, env=public_env, check=True)
         if int(current['run']) >= int(run):
             if str(current['run']) == run and current['commit'] != source['head_sha']:
                 raise RuntimeError('Published source identity disagrees with this run')
@@ -145,13 +169,13 @@ def main():
         shutil.rmtree(site / 'site')
         shutil.copytree(staged / 'site', site / 'site')
         shutil.copy2(staged / 'web-ui-package-evidence.json', site / 'web-ui-package-evidence.json')
-        subprocess.run(['python3', 'scripts/verify-package.py'], cwd=site, check=True)
+        subprocess.run(['python3', 'scripts/verify-package.py'], cwd=site, env=public_env, check=True)
         git(site, 'config', 'user.name', 'github-actions[bot]')
         git(site, 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
         git(site, 'add', '--', 'site', 'web-ui-package-evidence.json')
         git(site, 'commit', '-m', f'Publish tested Web run {run} ({source["head_sha"][:7]})')
         commit = git(site, 'rev-parse', 'HEAD')
-        git(site, 'push', 'origin', 'HEAD:main')
+        push_site(site)
         await_pages(commit)
 
 

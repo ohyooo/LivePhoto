@@ -139,7 +139,7 @@ Repair 不保证支持所有可创建的布局。已知 OPPO 无尾标布局的�
 
 ## 浏览器共享界面
 
-在线使用：[GitHub Pages](https://ohyooo.github.io/livephoto-web/)。网站发布仓库为 [livephoto-web](https://github.com/ohyooo/livephoto-web)，保存已通过 Web CI 的静态产物。主分支 Web CI 成功后，[自动同步流程](https://github.com/ohyooo/LivePhoto/actions/workflows/pages-sync.yml) 核对产物及清单、更新站点仓库，并等待 Pages 发布和真实 Chromium 的公开地址、资源哈希及生成下载检查。失败构建不发布，较旧运行不覆盖新版本；重复运行会核对实际发布版本。
+在线使用：[GitHub Pages](https://ohyooo.github.io/livephoto-web/)。网站发布仓库为 [livephoto-web](https://github.com/ohyooo/livephoto-web)，保存已通过 Web CI 的静态产物。只有需要更新站点时，才在 main 手动运行 [Pages 同步](https://github.com/ohyooo/LivePhoto/actions/workflows/pages-sync.yml)，传入成功的主分支 Web CI 运行 ID。流程核对来源、产物及清单，更新站点仓库，并等待公开地址的真实 Chromium 浏览器验收；失败或较旧运行不会覆盖较新的站点。发布新版本需设置 `PAGES_HTTPS_TOKEN`，凭据只授权目标站点仓库的内容写入。普通 push 和 PR 只运行同步脚本的检查，不触发部署。
 
 界面分为“新建 / 照片工具”两页，按窗口宽度使用一、二、三列。右上角太阳／月亮菜单可选择跟随系统、浅色、深色；刷新后重新跟随。普通播放器整体不超过浏览器高度的一半，保持视频比例；全屏不受限制。控制条包含播放、时间、静音与音量、倍速和全屏，音量填满剩余空间；极窄时可通过图标展开调节。新布局验收状态见 [Web 路线](docs/web-roadmap.md)。
 

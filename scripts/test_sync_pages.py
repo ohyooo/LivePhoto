@@ -1,4 +1,6 @@
+import base64
 import json
+import os
 import runpy
 import stat
 import tempfile
@@ -66,6 +68,27 @@ class PagesArchiveTest(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, 'public browser checks failed'):
                         wait('a' * 40)
+
+    def test_push_uses_only_the_fixed_https_url_and_scopes_auth(self):
+        with patch.dict(os.environ, {'PAGES_HTTPS_TOKEN': 'test-token', 'GH_TOKEN': 'source-token'}), \
+                patch('subprocess.run') as run:
+            module['push_site'](Path('site-checkout'))
+        args, kwargs = run.call_args
+        url = 'https://github.com/ohyooo/livephoto-web.git'
+        self.assertEqual(args[0], ['git', '-C', 'site-checkout', 'push', url, 'HEAD:main'])
+        env = kwargs['env']
+        self.assertEqual(env['GIT_CONFIG_KEY_0'], f'http.{url}.extraHeader')
+        self.assertEqual(base64.b64decode(env['GIT_CONFIG_VALUE_0'].removeprefix('Authorization: Basic ')),
+            b'x-access-token:test-token')
+        self.assertEqual(env['GIT_CONFIG_VALUE_1'], 'false')
+        self.assertNotIn('PAGES_HTTPS_TOKEN', env)
+        self.assertNotIn('GH_TOKEN', env)
+
+    def test_missing_site_credential_can_never_push(self):
+        with patch.dict(os.environ, {'PAGES_HTTPS_TOKEN': ''}), patch('subprocess.run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'PAGES_HTTPS_TOKEN'):
+                module['push_site'](Path('site-checkout'))
+            run.assert_not_called()
 
 
 if __name__ == '__main__':

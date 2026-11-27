@@ -9,7 +9,6 @@
 - Windows 播放器测试关闭后短时文件占用已增加有界重试；Safari 仅对已识别的 WebDriver 启动超时重试一次，不跳过测试或放宽断言。
 - 此轮范围不含 Apple、Android/iOS 扩展、真机相册兼容或搁置的播放器遮挡。发布记录与编译验收单独核对。
 - [x] 本轮 GitHub Pages 发布：主分支 `421199b` 的 [Web 复验](https://github.com/ohyooo/LivePhoto/actions/runs/45958435318)、[站点同步](https://github.com/ohyooo/LivePhoto/actions/runs/45959494506)和[公开站点 Chromium 验证](https://github.com/ohyooo/livephoto-web/actions/runs/45959545233)均通过。[公开地址](https://ohyooo.github.io/livephoto-web/)的 23 个 HTTPS 静态文件与主分支产物逐一匹配 SHA-256，合成素材真实生成与下载通过。
-- [ ] 本轮独立内网站点更新及 HTTPS 验证单列；GitHub Pages 通过不代表内网站点已更新。
 
 
 ## 已完成的基础
@@ -19,7 +18,7 @@
 
 - [x] 浏览器私有磁盘暂存：FFmpeg 中间文件直接写入 OPFS，按最多 64 KiB 分块交给 Kotlin Core；Wasm UI 的最终产物也通过磁盘事务回读验证后返回 File，页面持有下载/预览租约，失败与取消清理未提交文件，过期暂存后续回收。FFmpeg 回读与独立 JS 协议库仍有有界内存占用，不宣称全流程恒定内存。四个独立真实 Chromium 测试验证完成/失败清理、取消/Worker 强制中断恢复、跨标签页活动任务隔离、存储不足及 48 MiB 写入上限；保留音视频包与 UI 生成回归。JS/Wasm 不再使用 FFmpeg MEMFS 输出和整文件传输数组；删除不用的 npm Worker 包装，原媒体命令与协议逻辑仍在 Kotlin。媒体编辑要求 OPFS/Web Locks；不可用时失败，不暗中回退整文件内存。输入只读，最终生成合计仍严格小于 32 MiB。
 
-- [x] GitHub Pages：独立 [livephoto-web](https://github.com/ohyooo/livephoto-web) 仓库托管已核验的静态产物，访问 [在线站点](https://ohyooo.github.io/livephoto-web/)。[首次发布与公开地址浏览器验收](https://github.com/ohyooo/livephoto-web/actions/runs/40091610599) 成功，28 个文件哈希、Wasm UI、后台 Worker 和合成素材真实生成下载通过。主分支 Web CI 成功后自动同步正式产物，核对来源与哈希后推送站点仓库，并等待公开地址的真实浏览器验收；失败或较旧构建不覆盖当前站点。不依赖内网站点，也不改变用户原有 GitHub Pages 首页。
+- [x] GitHub Pages：独立 [livephoto-web](https://github.com/ohyooo/livephoto-web) 仓库托管已核验的静态产物，访问 [在线站点](https://ohyooo.github.io/livephoto-web/)。[首次发布与公开地址浏览器验收](https://github.com/ohyooo/livephoto-web/actions/runs/40091610599) 成功，28 个文件哈希、Wasm UI、后台 Worker 和合成素材真实生成下载通过。今后仅在显式请求更新时手动同步已通过主分支 Web CI 的产物，核对来源与哈希，并等待公开地址的真实浏览器验收；较旧或失败构建不覆盖当前站点，也不改变 GitHub Pages 首页。
 
 ### 共享界面重设计（验收通过，源站已部署）
 
@@ -74,7 +73,7 @@ UI 后台实现已在 `aae8e62` 完成上述整轮验收、产物审计与部署
 本轮新增规则已在上述 CI 验收并部署：允许选择超过 32 MiB 的原视频，在后台预处理的 512 MiB / 60 秒预算内裁剪；生成时只检查图片与当前实际视频合计，必须小于 32 MiB。媒体中间输出仍限 48 MiB。两尺寸真实 UI 合成回归使用附有合法零填充 free box 的大于 257 MiB MP4，验证直接生成被阻止、实际裁剪后可以生成，另独立核验音视频 packet 和封面时间；功能库还验证合计恰好 32 MiB 时读取前拒绝。未据此宣称所有大文件或浏览器都能处理。
 
 - [x] 固定长度 XMP 槽位及保留边界：仅在新包放得下、原包可写且无 MPF 时使用根外空白保持段长。默认 OPPO→Google V1 的转换、EXIF 原位置/原字节和视频原字节已验证；Google V2 放不下仍拒绝。未知 EXIF 关联仍为 `Unknown`，Strict/必需 MetadataPreserving 仍拒绝，MPF/Extended XMP 原门禁保留。不是任意 metadata 保真的声明。
-- [x] OPPO 显式次级 `Padding="0"` 的有限长度修复：标准厂商标记/版本、无尾标、两个目录项、单一完整物理视频及独立保真验证；预览无输出、显式应用、原视频字节和幂等已在公共测试、真实浏览器及两尺寸 UI 验证。`1`、`-1`、`00`、未知字段/尾部和歧义继续拒绝；普通 Google 规则不放宽。验收版本 `34253a7` 的 [Web CI 40148248112](https://github.com/ohyooo/LivePhoto/actions/runs/40148248112) 全部 32 个 job 成功，公共 JS/Wasm 各 811 项，正式产物已审计并更新 LAN 和 GitHub Pages。
+- [x] OPPO 显式次级 `Padding="0"` 的有限长度修复：标准厂商标记/版本、无尾标、两个目录项、单一完整物理视频及独立保真验证；预览无输出、显式应用、原视频字节和幂等已在公共测试、真实浏览器及两尺寸 UI 验证。`1`、`-1`、`00`、未知字段/尾部和歧义继续拒绝；普通 Google 规则不放宽。验收版本 `34253a7` 的 [Web CI 40148248112](https://github.com/ohyooo/LivePhoto/actions/runs/40148248112) 全部 32 个 job 成功，公共 JS/Wasm 各 811 项，正式产物已审计并更新 GitHub Pages。
 - [x] 独立 JS 功能库十个协议 API 的分块 IO：Kotlin BinarySource 接按需 Blob.slice，公开 File/Blob API 不变。主线程与 Worker 验证零整读、每次最多 64 KiB、预算零读取、IO_READ_FAILED 无输出及所有既有字节/保真检查，结果已包含在上述整轮 CI。媒体输入的只读挂载另见下项。
 - [x] FFmpeg 媒体输入只读挂载：JS 功能库与 Kotlin/Wasm UI 共用 WORKERFS 适配，原始 Blob 不整读为 Kotlin 字节数组、不写入 MEMFS；Core-owned 借用区间经原输入引用及边界核验后映射对应切片，保留原文件所有权隔离。真实主线程/Worker 五操作、取消、预算、输入不变、独立音视频包及两尺寸 UI 已在上述 CI 验证。
 - [x] Core 输出分页、冻结与复用：64 KiB 页避免整文件扩容复制，跨页覆盖、seek、truncate 缩减后补零、切片与摘要保持正确。prepare 冻结全部写端，独立验证读柄与提交共享不可变页；公开数组仍为防御复制，原子集合、预算、取消和读柄生命周期不变。
