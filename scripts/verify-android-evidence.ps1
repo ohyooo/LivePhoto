@@ -29,9 +29,9 @@ function Test-Reports([string]$Directory, [int]$Expected) {
     if ($count -ne $Expected) { throw "Incomplete Android test execution: $count / $Expected" }
     return $count
 }
-$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 45
-$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 45
-$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 39
+$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 49
+$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 49
+$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 40
 $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
 if ($compile -notmatch 'BUILD SUCCESSFUL' -or $device -notmatch 'BUILD SUCCESSFUL' -or
@@ -124,7 +124,7 @@ $summary = [ordered]@{
         renamedCoreClasses = $renamedCore
     }
     signing = $(if ($env:LIVEPHOTO_SIGNING_KEYSTORE) { 'user-supplied-actions-secret' } else { 'generated-debug-key' })
-    scope = 'android-app-direct-shared-core-saf-memory-media-store-single-jpeg-no-mobile-decoder-no-gallery-certification'
+    scope = 'android-app-direct-shared-core-saf-cache-random-access-media-store-single-jpeg-no-mobile-decoder-no-gallery-certification'
 }
 $summary | ConvertTo-Json -Depth 5 | Set-Content 'ci-output/android-evidence.json' -Encoding utf8
 Write-Host "ANDROID_EVIDENCE=SUCCESS debugHost=$hostTests releaseHost=$releaseHostTests device=$deviceTests same-signature"

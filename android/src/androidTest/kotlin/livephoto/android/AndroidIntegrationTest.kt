@@ -21,6 +21,30 @@ class AndroidIntegrationTest {
     private val context = Context(Limits(32_000_000u, 48_000_000u))
     private fun fixture(name: String): ByteArray = InstrumentationRegistry.getInstrumentation().context.assets.open("reference/$name").use { it.readBytes() }
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+    @Test fun controllerDiscardsSnapshotsAfterReadOnlyAnalysisAndBudgetRefusal() = runBlocking {
+        fun snapshots() = app.cacheDir.listFiles()!!.filter {
+            it.name.startsWith("livephoto-input-") && it.name.endsWith(".snapshot")
+        }.map { it.name }.toSet()
+        val before = snapshots()
+        val input = app.getFileStreamPath("analysis-snapshot-${UUID.randomUUID()}.jpg")
+        try {
+            val original = syntheticRepairCarrier(livephoto.ui.ConversionTarget.GoogleV1)
+            input.writeBytes(original)
+            val controller = AndroidCreateController(app, app.core)
+            assertIs<CoreResult.Success<AnalysisResult>>(controller.analyze(Uri.fromFile(input)))
+            assertContentEquals(original, input.readBytes())
+            assertEquals(before, snapshots())
+            java.io.RandomAccessFile(input, "rw").use {
+                it.setLength(AndroidCreateController.MAX_INPUT_BYTES.toLong() + 1)
+            }
+            val refused = assertIs<CoreResult.Failure>(controller.analyze(Uri.fromFile(input)))
+            assertEquals("RESOURCE_LIMIT_EXCEEDED", refused.error.code.value)
+            assertEquals(Stage.Read, refused.error.stage)
+            assertEquals(AndroidCreateController.MAX_INPUT_BYTES.toLong() + 1, input.length())
+            assertEquals(before, snapshots())
+        } finally { input.delete() }
+    }
+
     @Test fun controllerSetsOnlyKeyMetadataAndPublishesVerifiedJpegForGoogleProfiles() = runBlocking {
         val file = app.getFileStreamPath("key-${UUID.randomUUID()}.jpg")
         try {

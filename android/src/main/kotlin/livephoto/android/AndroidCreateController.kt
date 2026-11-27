@@ -8,7 +8,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import livephoto.core.*
-import livephoto.core.memory.MemoryBinarySource
 import livephoto.core.memory.MemoryOutputTransaction
 import java.util.UUID
 
@@ -20,13 +19,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     data class Repaired(val uri: Uri?, val report: livephoto.ui.PhotoRepairReport)
     data class Keyed(val uri: Uri, val report: livephoto.ui.PhotoKeyReport)
 
-    suspend fun setPhotoKey(input: Uri, requested: Time): CoreResult<Keyed> = withContext(Dispatchers.IO) {
-        val job = currentCoroutineContext()[Job]
-        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
-        catch (limit: InputBudgetExceededException) {
-            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read, limit.message ?: "Key input exceeds 32 MiB"))
-        }
-        when (val result = livephoto.ui.preparePhotoKey(core, bytes, requested, Cancellation { job?.isActive == false })) {
+    suspend fun setPhotoKey(input: Uri, requested: Time): CoreResult<Keyed> = withPhotoInput(input) { source, cancellation ->
+        when (val result = livephoto.ui.preparePhotoKey(core, source, requested, cancellation)) {
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 currentCoroutineContext().ensureActive()
@@ -37,14 +31,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     }
 
     /** Preview/no-op/blocked results never call the exporter. */
-    suspend fun repairPhoto(input: Uri, review: livephoto.ui.RepairReview? = null): CoreResult<Repaired> = withContext(Dispatchers.IO) {
-        val job = currentCoroutineContext()[Job]
-        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
-        catch (limit: InputBudgetExceededException) {
-            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
-                limit.message ?: "Repair input exceeds 32 MiB"))
-        }
-        when (val result = livephoto.ui.preparePhotoRepair(core, bytes, review, Cancellation { job?.isActive == false })) {
+    suspend fun repairPhoto(input: Uri, review: livephoto.ui.RepairReview? = null): CoreResult<Repaired> = withPhotoInput(input) { source, cancellation ->
+        when (val result = livephoto.ui.preparePhotoRepair(core, source, review, cancellation)) {
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 val uri = result.value.bytes?.let { repaired ->
@@ -56,14 +44,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         }
     }
 
-    suspend fun convertPhoto(input: Uri, target: ProtocolSelector): CoreResult<Converted> = withContext(Dispatchers.IO) {
-        val job = currentCoroutineContext()[Job]
-        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
-        catch (limit: InputBudgetExceededException) {
-            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
-                limit.message ?: "Conversion input exceeds 32 MiB"))
-        }
-        when (val result = livephoto.ui.prepareConvertedPhoto(core, bytes, target, Cancellation { job?.isActive == false })) {
+    suspend fun convertPhoto(input: Uri, target: ProtocolSelector): CoreResult<Converted> = withPhotoInput(input) { source, cancellation ->
+        when (val result = livephoto.ui.prepareConvertedPhoto(core, source, target, cancellation)) {
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 currentCoroutineContext().ensureActive()
@@ -74,15 +56,9 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         }
     }
 
-    /** Preparation is memory-only. Each later export is an explicit single-file action. */
-    suspend fun cleanSplit(input: Uri): CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>> = withContext(Dispatchers.IO) {
-        val job = currentCoroutineContext()[Job]
-        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
-        catch (limit: InputBudgetExceededException) {
-            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
-                limit.message ?: "Clean split input exceeds 32 MiB"))
-        }
-        livephoto.ui.prepareCleanSplit(core, bytes, Cancellation { job?.isActive == false })
+    /** Preparation keeps output in memory. Each later export is an explicit single-file action. */
+    suspend fun cleanSplit(input: Uri): CoreResult<livephoto.ui.PreparedCleanSplit<livephoto.core.Bytes>> = withPhotoInput(input) { source, cancellation ->
+        livephoto.ui.prepareCleanSplit(core, source, cancellation)
     }
 
     suspend fun saveSplitFile(file: livephoto.ui.SplitFile<livephoto.core.Bytes>): Uri = withContext(Dispatchers.IO) {
@@ -96,14 +72,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         }
     }
 
-    suspend fun extractVideo(input: Uri): CoreResult<Extracted> = withContext(Dispatchers.IO) {
-        val job = currentCoroutineContext()[Job]
-        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
-        catch (limit: InputBudgetExceededException) {
-            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
-                limit.message ?: "Video extraction input exceeds 32 MiB"))
-        }
-        when (val result = livephoto.ui.prepareExtractedVideo(core, bytes, Cancellation { job?.isActive == false })) {
+    suspend fun extractVideo(input: Uri): CoreResult<Extracted> = withPhotoInput(input) { source, cancellation ->
+        when (val result = livephoto.ui.prepareExtractedVideo(core, source, cancellation)) {
             is CoreResult.Failure -> result
             is CoreResult.Success -> {
                 currentCoroutineContext().ensureActive()
@@ -116,14 +86,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     }
 
     /** Read-only input adapter. No exporter, transaction, decoder or gallery write. */
-    suspend fun analyze(input: Uri): CoreResult<AnalysisResult> = withContext(Dispatchers.IO) {
-        val job = currentCoroutineContext()[Job]
-        val bytes = try { readSelected(input, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
-        catch (limit: InputBudgetExceededException) {
-            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
-                limit.message ?: "Photo analysis input exceeds 32 MiB"))
-        }
-        livephoto.ui.analyzeSelectedPhoto(core, bytes, Cancellation { job?.isActive == false })
+    suspend fun analyze(input: Uri): CoreResult<AnalysisResult> = withPhotoInput(input) { source, cancellation ->
+        livephoto.ui.analyzeSelectedPhoto(core, source, cancellation)
     }
 
     suspend fun create(image: Uri, video: Uri, target: ProtocolSelector): CoreResult<Created> = withContext(Dispatchers.IO) {
@@ -135,15 +99,24 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         val job = currentCoroutineContext()[Job]
         val context = Context(Limits(MAX_INPUT_BYTES.toULong(), MAX_OUTPUT_BYTES.toULong()),
             cancellation = Cancellation { job?.isActive == false })
-        val imageBytes = androidOperation("read-image", "image") { readSelected(image, MAX_INPUT_BYTES) }
-        val videoBytes = androidOperation("read-video", "video") { readSelected(video, MAX_INPUT_BYTES - imageBytes.size) }
         val token = UUID.randomUUID().toString()
-        val imageSource = MemoryBinarySource(Bytes(imageBytes), SourceId("android-image:$token"))
-        val videoSource = MemoryBinarySource(Bytes(videoBytes), SourceId("android-video:$token"))
+        val imageSource = androidOperation("read-image", "image") { snapshot(image, MAX_INPUT_BYTES) }
+        try {
+            val videoSource = androidOperation("read-video", "video") {
+                snapshot(video, MAX_INPUT_BYTES - imageSource.byteLength)
+            }
+            try { createFromSnapshots(imageSource, videoSource, target, context, token) }
+            finally { videoSource.close() }
+        } finally { imageSource.close() }
+    }
+
+    private suspend fun createFromSnapshots(
+        imageSource: BinarySource, videoSource: BinarySource, target: ProtocolSelector, context: Context, token: String,
+    ): CoreResult<Created> {
         val output = MemoryOutputTransaction(context, token)
         var created: OperationResult? = null
         try {
-            when (val result = androidOperation("invoke-core", "request") {
+            return when (val result = androidOperation("invoke-core", "request") {
                 val policy = livephoto.ui.uiCreationPolicy(target)
                 core.create(CreateRequest(imageSource, videoSource, target, policy = policy, output = output, context = context))
             }) {
@@ -171,15 +144,25 @@ class AndroidCreateController(private val android: AndroidContext, private val c
             }
         } finally {
             created?.output?.assets?.forEach { it.readableSource?.close() }
-            imageSource.close()
-            videoSource.close()
         }
     }
 
-    private suspend fun readSelected(uri: Uri, remaining: Int): ByteArray {
-        require(remaining > 0) { "Input byte budget exceeded" }
-        val stream = checkNotNull(android.contentResolver.openInputStream(uri)) { "Cannot open selected input" }
-        return stream.use { readBounded(it, remaining) { currentCoroutineContext().ensureActive() } }
+    private suspend fun snapshot(uri: Uri, remaining: Int): AndroidInputSnapshot =
+        AndroidInputSnapshot.copyFrom(android.cacheDir, remaining, SourceId("android-input:${UUID.randomUUID()}")) {
+            checkNotNull(android.contentResolver.openInputStream(uri)) { "Cannot open selected input" }
+        }
+
+    private suspend fun <T> withPhotoInput(
+        uri: Uri, action: suspend (BinarySource, Cancellation) -> CoreResult<T>,
+    ): CoreResult<T> = withContext(Dispatchers.IO) {
+        val job = currentCoroutineContext()[Job]
+        val source = try { snapshot(uri, livephoto.ui.ANALYSIS_INPUT_LIMIT) }
+        catch (_: InputBudgetExceededException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("RESOURCE_LIMIT_EXCEEDED"), Stage.Read,
+                "Photo input exceeds 32 MiB"))
+        }
+        try { action(source, Cancellation { job?.isActive == false }) }
+        finally { source.close() }
     }
 
     companion object {

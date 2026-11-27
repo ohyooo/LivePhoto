@@ -201,7 +201,7 @@ Compose 界面使用无原生 ActionBar 的窗口和 Material 3 `Scaffold` 安�
 
 Android 的 OPPO/OnePlus 生成支持两种精确相机注释替换：UNDEFINED 类型、带 ASCII 前缀的 `oplus_1048576`，以及 TIFF ASCII 类型的 `oplus_1056768`，目标均为标准 `oplus_10485792`。前者使用原字段空间；后者在 EXIF 末尾追加新值，只更新该字段的类型、长度和指针。保留 EXIF 起点、其它目录与值的位置、MakerNote、图片尾部及输入原片；字段重叠、空间超限等不安全结构继续拒绝。结果显示替换记录，`MetadataPreserving=Changed`；其它普通注释仍按冲突拒绝，非标准 ASCII 文本不会被检测为 Live 标记。Core 默认不授权替换；两种写法分别使用 `loss=AllowListed` 和 `MetadataLoss.OplusCameraUserComment` / `MetadataLoss.OplusAsciiCameraUserComment` 加入 `allowedLosses`。CLI 的 Oplus `create` 使用 `--replace-oplus-user-comment` 显式启用，不能同时要求严格 metadata 保留。
 
-输入合计上限 **32 MiB**，输出上限 **48 MiB**；此首版使用冻结的内存输入和内存事务，不是大视频工具。Core 完成验证后，把单张 JPEG 原字节写入 MediaStore 的 pending 项，回读确认一致再发布到 `Pictures/LivePhoto`，不会覆盖原片。不申请全盘读写、联网或相册遍历权限；输入由系统文件选择器授权。未完成的 pending 项只按本次创建的 URI 清理；已发布或状态不确定的项不盲删。
+输入合计上限 **32 MiB**，输出上限 **48 MiB**；生成和照片工具从系统选择器读取内容，以最多 64 KiB 的块写入应用私有缓存，并由 Core 分块随机读取该快照，不把整份输入载入内存。每次操作结束、拒绝或取消会清理当次暂存；输出事务仍有界地保存在内存，不是大视频工具。Core 完成验证后，把单张 JPEG 原字节写入 MediaStore 的 pending 项，回读确认一致再发布到 `Pictures/LivePhoto`，不会覆盖原片。不申请全盘读写、联网或相册遍历权限；输入由系统文件选择器授权。未完成的 pending 项只按本次创建的 URI 清理；已发布或状态不确定的项不盲删。
 
 请在系统相册检查动态识别、播放、声音与 key；**保存成功、模拟器通过都不等于你的手机相册兼容**。Android 当前没有 FFmpeg、抽帧、裁剪、remux 或 transcode 后端。保存只支持本节的单 JPEG，不宣称实现通用配对/多资产相册事务。
 
