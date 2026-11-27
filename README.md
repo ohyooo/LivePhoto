@@ -223,7 +223,7 @@ Android 的 OPPO/OnePlus 生成支持两种精确相机注释替换：UNDEFINED 
 
 Windows 使用 `.\gradlew.bat` 替换 `./gradlew`。Android 模式与桌面 `livephoto.nativeTarget` 分开，不能同时指定。APK 分别位于 `android/build/outputs/apk/debug/android-debug.apk` 和 `android/build/outputs/apk/release/android-release.apk`。用 Android Studio 导入时，在该 IDE 的 Gradle VM options 设置 `-Dorg.gradle.project.livephoto.android=true`，不要把模式写成所有平台共用的全局属性。
 
-CI 使用 SDK 37.2 编译 debug/release，分别重新执行宿主单元测试、lint，并执行 **API 36 模拟器**协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 用同一个 Release AAB 生成四个独立、已签名的 ABI APK，按单文件上传，不加外层 ZIP。发布任务校验下载摘要，并保留 APK 本身供直接安装。Debug APK 参加 CI 安装与启动验证，不是 Releases 的下载附件。单独的 `android-evidence-...` 仅包含测试与覆盖安装的 JSON 摘要，不附带截图、媒体或测试 APK。Native 报告只保留测试结果及素材哈希清单，不附带导出的图片、视频或媒体 fixture。手机原片与其生成结果不提交到仓库或上传 artifacts；应用 APK 不包含测试素材。
+CI 使用 SDK 37.2 编译 debug/release，分别重新执行 App 宿主单元测试、lint，并在 Android 目标的宿主 JVM 上重新执行 818 项共享 Core 测试；另在 **API 36 模拟器**执行协议/存储/Compose 界面回归，以及 debug → release → debug 不卸载覆盖安装和启动检查；核对签名、可调试标志、DEX、测试数及 SHA-256。编译 SDK 不等于运行验收系统版本。Actions 用同一个 Release AAB 生成四个独立、已签名的 ABI APK，按单文件上传，不加外层 ZIP。发布任务校验下载摘要，并保留 APK 本身供直接安装。Debug APK 参加 CI 安装与启动验证，不是 Releases 的下载附件。单独的 `android-evidence-...` 仅包含测试与覆盖安装的 JSON 摘要，不附带截图、媒体或测试 APK。Native 报告只保留测试结果及素材哈希清单，不附带导出的图片、视频或媒体 fixture。手机原片与其生成结果不提交到仓库或上传 artifacts；应用 APK 不包含测试素材。
 
 主分支 debug/release 共用固定签名，通过 Actions secrets 注入：`LIVEPHOTO_SIGNING_KEYSTORE_BASE64`、`LIVEPHOTO_SIGNING_STORE_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_PASSWORD`、`LIVEPHOTO_SIGNING_KEY_ALIAS`。不把 keystore/密码提交到仓库；只在可信 main 构建恢复，缺少签名时拒绝发布。分支和 PR 通过单次 CI 共用的临时签名检查双向覆盖安装，不发布 Releases，也不能覆盖正式签名的安装。本地未传入签名时仍使用本地 debug key。CI 的 `versionCode` 随构建递增，签名保持一致。**以前使用随机 CI debug key 的版本可能需卸载一次**；之后本仓库固定签名的 debug/release 可互相更新。产物证据记录实际证书指纹。
 
@@ -699,7 +699,7 @@ Native CLI 历史完整验收基线：[提交 `ac4ebe3` 的三平台 CI](https:/
 - [ ] 更多有规范证据的媒体时间线、容器/codec、AAC priming/复杂原始 edits 和保留 profile；由 FFmpeg 处理，逐项补独立证明。不增加音频编码。
 - [ ] 其它显式 Repair、复杂 HEIF/AVIF、HDR/GainMap、辅助资源及未知 metadata 引用关系；无法证明安全时保持 Unsupported/Partial。
 - [ ] **暂停 Apple 新功能**：复杂 Generic Create、HEIC 写入/转换、MakerNote 合并/兼容读取、更多普通或混合 timed metadata、CID 与普通文本的跨工具兼容；已有能力和测试保留。
-- [x] Android 私有缓存随机读取、分支 CI 同签名双向安装；iOS 只读 Core 的两个 XCFramework 切片和 Kotlin 模拟器测试已分别验证。
+- [x] Android 私有缓存随机读取、同签名双向安装及 [Android 目标的 818 项宿主 JVM Core 回归](https://github.com/ohyooo/LivePhoto/actions/runs/45972581300)；iOS 只读 Core 的两个 XCFramework 切片和 Kotlin 模拟器测试已分别验证。
 - [ ] 后续移动工作：更大文件预算、持久 URI 生命周期、通用多资产事务、移动系统媒体后端与真机验收。不会用桌面 FFmpeg 进程冒充移动支持。
 - [x] Web 有限协议接口、公共 JS/Wasm 回归、浏览器媒体后端、后台取消、有界分块 IO；更广格式及搁置项见 [Web 路线与 TODO](docs/web-roadmap.md)。
 - [x] Compose Desktop 接入共享 Compose 工具界面与本地 FFmpeg，三平台便携包、原子新文件保存和 CI 窗口验证。
