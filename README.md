@@ -192,7 +192,7 @@ CI 在窄屏与宽屏验证共享界面、文件选择/取消、按钮可达性�
 
 使用 `-Plivephoto.ios=true` 选择独立 iOS 构建。它复用共享 Core，提供 iPhone arm64 和 Apple Silicon 模拟器 arm64 两个目标，以及面向 Swift 的只读 `LivePhotoInspector` 接口。可传入单份图片数据或显式传入图片与视频配对，检查识别结果和诊断；不写入文件或相册。
 
-在 Apple Silicon Mac 上安装 Xcode、iPhone 模拟器和 JDK 25 后，运行 `bash scripts/verify-ios.sh`。Apple Silicon [iOS CI](https://github.com/ohyooo/LivePhoto/actions/runs/45965431398) 已构建两个框架切片，通过 Kotlin 模拟器测试，并对 Swift 示例做了类型检查；该轮没有运行 Swift 宿主或使用真机。详见 [iOS 构建与接口说明](docs/ios-roadmap.md)。
+在 Apple Silicon Mac 上安装 Xcode、iPhone 模拟器和 JDK 25 后，运行 `bash scripts/verify-ios.sh`。Apple Silicon [iOS CI](https://github.com/ohyooo/LivePhoto/actions/runs/45981713807) 已构建两个框架切片，执行 824 项 Kotlin 模拟器测试，并链接、运行 Swift 示例的四个模拟器用例。未使用真机，也未验证照片库写入。详见 [iOS 构建与接口说明](docs/ios-roadmap.md)。
 
 
 ## Android 测试应用
