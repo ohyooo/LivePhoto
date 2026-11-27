@@ -2,7 +2,7 @@ name: iOS Core
 
 on:
   push:
-    branches: [dot/livephoto-ios-core]
+    branches: [main, dot/livephoto-ios-core, dot/livephoto-integration]
   workflow_dispatch:
   pull_request:
     paths:

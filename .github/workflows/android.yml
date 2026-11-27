@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_apks:
+        description: Publish the verified main-branch APKs as a GitHub prerelease
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -151,6 +156,16 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-android-evidence.ps1
 
+      - name: Upload Android verification summaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-output/android-evidence.json
+            ci-output/android-install-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload arm64-v8a APK without ZIP wrapping
         uses: actions/upload-artifact@v7
         with:
@@ -195,7 +210,7 @@ jobs:
   publish:
     name: Publish direct APK downloads
     needs: android
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.publish_apks == true
     runs-on: ubuntu-24.04
     permissions:
       actions: read
