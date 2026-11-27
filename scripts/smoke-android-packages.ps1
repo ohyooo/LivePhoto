@@ -5,18 +5,26 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 $adb = Join-Path $env:ANDROID_HOME 'platform-tools/adb'
 $package = 'com.ohyooo.livephoto'
 $evidence = [ordered]@{ commit = $env:GITHUB_SHA; run = $env:GITHUB_RUN_ID; installs = @() }
-foreach ($variant in @('release', 'debug')) {
-    & $adb shell am force-stop $package
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot stop the test application.' }
-    $apk = "android/build/outputs/apk/$variant/android-$variant.apk"
+function Install-TestApk([string]$Variant, [string]$Operation) {
+    $apk = "android/build/outputs/apk/$Variant/android-$Variant.apk"
     $installed = (& $adb install -r $apk 2>&1) -join "`n"
     $installExit = $LASTEXITCODE
     if ($installExit -ne 0 -or $installed -notmatch '(?m)^Success\s*$') {
         $detail = ($installed -split '\r?\n' | Select-Object -Last 8 | ForEach-Object {
             $_.Substring(0, [Math]::Min(400, $_.Length))
         }) -join "`n"
-        throw "Cannot upgrade to $variant APK (adb exit $installExit).`n$detail"
+        throw "Cannot $Operation $Variant APK (adb exit $installExit).`n$detail"
     }
+}
+
+# AGP may uninstall the tested app when instrumentation finishes. Explicitly
+# seed the debug install, so release really replaces debug rather than a blank slot.
+Install-TestApk 'debug' 'install baseline'
+$evidence.baselineDebugInstalled = $true
+foreach ($variant in @('release', 'debug')) {
+    & $adb shell am force-stop $package
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot stop the test application.' }
+    Install-TestApk $variant 'upgrade to'
     $launch = (& $adb shell am start -W -n "$package/livephoto.android.MainActivity" 2>&1) -join "`n"
     $launchExit = $LASTEXITCODE
     $launch | Set-Content "ci-output/android-$variant-launch.log" -Encoding utf8
