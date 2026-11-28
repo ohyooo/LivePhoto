@@ -79,14 +79,27 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
     val confirmedTime = platform.coverPosition(image, video)
     val totalSize = if ((image == null || imageInfo?.sizeBytes != null) && (video == null || videoInfo?.sizeBytes != null))
         (imageInfo?.sizeBytes ?: 0) + (videoInfo?.sizeBytes ?: 0) else null
-    val blocker = when {
-        image == null && video == null -> "还需选择图片和视频"
-        video == null -> "已选择图片，还需选择视频"
-        image == null -> if (editor == null) "已选择视频，还需选择图片" else "已选择视频，还需选择图片或确认封面"
-        coverWarning != null -> coverWarning
-        editing.pendingTrim -> "请先应用裁剪或重置选段"
-        totalSize != null && totalSize!! >= 32L * 1024 * 1024 -> "图片与当前视频合计达到或超过 32 MiB，请先裁剪视频或缩短选段"
-        else -> null
+    val canEditVideo = editor?.canProcess == true && playback?.ready == true && playback.error == null &&
+        playback.duration > 0 && playback.duration <= 60
+    val blocker = creationBlocker(image != null, video != null, coverWarning, editing.pendingTrim, totalSize, canEditVideo)
+    fun openCover() {
+        val active = editor ?: return
+        editing.coverOpen = true
+        editing.coverPosition = active.playback.value.current
+        editing.coverFocusRequest++
+    }
+    fun doNextStep(step: CreationNextStep) {
+        if (locked) return
+        when (step) {
+            CreationNextStep.PickImage -> imagePicker()
+            CreationNextStep.PickVideo, CreationNextStep.ReplaceVideo -> videoPicker()
+            CreationNextStep.ConfirmCover -> openCover()
+            CreationNextStep.ReviewTrim, CreationNextStep.TrimVideo -> {
+                editing.trimOpen = true
+                editing.coverOpen = false
+                editing.trimFocusRequest++
+            }
+        }
     }
     fun reset() {
         image?.let(platform::release); video?.let(platform::release)
@@ -135,16 +148,27 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 }
             }
         }
+        val readiness: @Composable (Modifier) -> Unit = { modifier ->
+            Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(blocker?.message ?: if (busy) "正在生成与验证…" else "素材已准备好",
+                    Modifier.weight(1f).testTag("input-readiness"), style = MaterialTheme.typography.bodySmall)
+                blocker?.next?.let { next ->
+                    TextButton(onClick = { doNextStep(next) }, enabled = !locked, modifier = Modifier.testTag("creation-next-step")) {
+                        Text(next.label)
+                    }
+                }
+            }
+        }
         val action: @Composable () -> Unit = {
             Surface(Modifier.fillMaxWidth().testTag("main-action"), shadowElevation = 2.dp) {
                 Column(Modifier.padding(horizontal = if (wide) 24.dp else 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (wide) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(blocker ?: if (busy) "正在生成与验证…" else "素材已准备好", Modifier.weight(1f).testTag("input-readiness"))
+                        readiness(Modifier.weight(1f))
                         TextButton(onClick = { if (image != null || video != null) resetDialog = true }, enabled = !locked) { Text("重置输入") }
                         Button(onClick = ::generate, enabled = !locked && blocker == null, shape = ControlShape,
                             modifier = Modifier.height(48.dp).testTag("create")) { Text(if (busy) "正在生成…" else "生成动态照片") }
                     } else {
-                        Text(blocker ?: if (busy) "正在生成与验证…" else "素材已准备好", Modifier.testTag("input-readiness"), style = MaterialTheme.typography.bodySmall)
+                        readiness(Modifier.fillMaxWidth())
                         Button(onClick = ::generate, enabled = !locked && blocker == null, shape = ControlShape,
                             modifier = Modifier.fillMaxWidth().height(48.dp).testTag("create")) { Text(if (busy) "正在生成…" else "生成动态照片") }
                         TextButton(onClick = { if (image != null || video != null) resetDialog = true }, enabled = !locked) { Text("重置输入") }
@@ -210,9 +234,7 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                             modifier = Modifier.testTag(if (isVideo) "video-selection" else "image-selection"))
                         if (isVideo && playback?.ready == true) Text("${mediaClock(playback.duration)} · ${playback.width.toInt()} × ${playback.height.toInt()}", style = MaterialTheme.typography.bodySmall)
                     }
-                    if (editor != null) TextButton(onClick = {
-                        editing.coverOpen = true; editing.coverPosition = editor.playback.value.current; editing.coverFocusRequest++
-                    }, enabled = !locked) { Text("从视频选封面") }
+                    if (editor != null) TextButton(onClick = ::openCover, enabled = !locked) { Text("从视频选封面") }
                     Text("参与生成：${formatMediaSize(totalSize)} / 32 MiB", Modifier.testTag("input-total"), style = MaterialTheme.typography.bodySmall)
                     Text("不修改原片。JPEG＋已支持配置的 MP4；可播放不等于可生成。", style = MaterialTheme.typography.bodySmall)
                 }
@@ -287,6 +309,8 @@ private fun OutputSettings(profile: Int, onSelect: (Int) -> Unit, enabled: Boole
     var planned by remember { mutableStateOf(false) }
     SectionCard("输出设置", Modifier.testTag("output-card")) {
         Text("目标协议")
+        Text("按接收相册选格式。能生成，不代表每台手机的相册都能播放。",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             if (maxWidth >= 500.dp) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ProfileNames.forEachIndexed { index, label -> OutlinedButton(onClick = { onSelect(index) }, enabled = enabled,
@@ -302,7 +326,7 @@ private fun OutputSettings(profile: Int, onSelect: (Int) -> Unit, enabled: Boole
             }
         }
         Disclosure("格式说明", "JPEG 输出 · 不自动转码", formats, { formats = !formats }) {
-            Text("OPPO / OnePlus、Google V2、Google V1。不是所有容器或 metadata 组合都支持；不会忽略安全错误。")
+            Text("OPPO / OnePlus 选对应格式；Google 相册先试 Motion Photo V2。MicroVideo V1 用于明确要求旧格式的场景。请在实际接收设备上试播。")
             Text("媒体编辑：原视频可超过 32 MiB，预处理上限 512 MiB / 60 秒，输出 48 MiB；生成前图片与处理后视频合计须小于 32 MiB。符合条件的 AAC 音频始终 copy，保留声道数；目标动态照片协议仍有独立的音频限制。HDR、ICC 和 metadata 的保留以报告为准。")
         }
         Disclosure("更多能力", "规划占位，不会启动任务", planned, { planned = !planned }) {

@@ -134,12 +134,14 @@ try {
     const bar=await text('LivePhoto').boundingBox(), input=await button('选择图片').boundingBox();
     check(label+':appbar-does-not-cover-picker',bar && input && input.y>=bar.y+bar.height);
     await page.screenshot({path:`ci-output/web-ui-${label}-before.png`});
-    await choose('选择图片',imagePath);
-    await text('名称：cover.jpg').waitFor({state:'attached'});
-    await choose('选择视频',videoPath);
+    // The footer must open the actual same picker for the next missing input.
+    await choose('选视频',videoPath);
+    await text('名称：clip.mp4').waitFor({state:'attached'});
+    await choose('选图片',imagePath);
     await text('名称：cover.jpg').waitFor({state:'attached'});
     await text('名称：clip.mp4').waitFor({state:'attached'});
-    check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).or(page.getByLabel(/大小：/)).count()>=2);
+    check(label+':shared-file-names-and-sizes',await page.getByText(/大小：/).or(page.getByLabel(/大小：/)).count()>=2&&
+      await page.locator('#creation-next-step').count()===0);
     await page.locator('#livephoto-image-input').setInputFiles([]);
     check(label+':cancel-keeps-selection',await text('名称：cover.jpg').count()===1);
     await page.waitForFunction(()=>document.querySelector('video[aria-label="视频预览"]')?.readyState>=2);
@@ -158,7 +160,8 @@ try {
     await click('裁剪范围');await driver.typeField('#trim-end','1.5');
     await click('裁剪范围');const beforeDraft=downloads;await click('生成动态照片');await page.waitForTimeout(200);
     const pendingBlocked=downloads===beforeDraft&&(await page.locator('#input-readiness').textContent()).includes('先应用裁剪');
-    await click('裁剪范围');const keptDraft=(await page.locator('#trim-end').textContent()).includes('1.5');
+    await click('查看选段');
+    const keptDraft=(await page.locator('#trim-end').textContent()).includes('1.5');
     await click('重置选段');await click('裁剪范围');
     check(label+':pending-trim-and-reset-draft',pendingBlocked&&keptDraft&&downloads===beforeDraft&&
       (await page.locator('#input-readiness').textContent()).includes('素材已准备好'));
@@ -278,11 +281,15 @@ try {
       downloads===beforeFormats&&errors.length===0);
 
     await choose('重新选择图片',imagePath);
+    await text('名称：cover.jpg').waitFor({state:'attached'});
     const beforeReset=downloads;await click('移除视频');
+    await text('视频：未选择').waitFor({state:'attached'});
     const removed=await text('视频：未选择').count()===1&&await text('名称：cover.jpg').count()===1;
     await click('重置输入');await click('取消');
     const cancelledReset=await text('名称：cover.jpg').count()===1;
     await click('重置输入');await click('确认重置');
+    await text('图片：未选择').waitFor({state:'attached'});
+    await text('上次结果 · 输入已变化').waitFor({state:'attached'});
     check(label+':input-removal-and-reset-confirmation',removed&&cancelledReset&&downloads===beforeReset&&
       await text('图片：未选择').count()===1&&await text('视频：未选择').count()===1&&await text('上次结果 · 输入已变化').count()===1);
 

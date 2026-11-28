@@ -74,6 +74,7 @@ public class VideoEditingState {
     public var toolsOpen by mutableStateOf(false)
     public var coverOpen by mutableStateOf(false)
     internal var coverFocusRequest by mutableIntStateOf(0)
+    internal var trimFocusRequest by mutableIntStateOf(0)
     public var coverPosition by mutableDoubleStateOf(0.0)
     public var coverPreview by mutableStateOf<String?>(null)
     public var status by mutableStateOf("")
@@ -108,9 +109,13 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val coverFocus = remember { BringIntoViewRequester() }
+    val trimFocus = remember { BringIntoViewRequester() }
     LaunchedEffect(editor) { state.coverPreview = null }
     LaunchedEffect(state.coverFocusRequest) {
         if (state.coverFocusRequest > 0) { withFrameNanos { }; coverFocus.bringIntoView() }
+    }
+    LaunchedEffect(state.trimFocusRequest) {
+        if (state.trimFocusRequest > 0) { withFrameNanos { }; trimFocus.bringIntoView() }
     }
     var thumbnails by remember(editor) { mutableStateOf<List<String>>(emptyList()) }
     var thumbnailError by remember(editor) { mutableStateOf<String?>(null) }
@@ -202,7 +207,7 @@ public fun VideoEditingPanel(editor: VideoEditor, parentBusy: Boolean, onBusy: (
                 state.pendingTrim -> "待应用 · ${mediaSeconds((state.end - state.start).coerceAtLeast(0.0))}"
                 state.lastAction == CoreMediaAction.Trim -> "已裁剪 · ${mediaSeconds(playback.duration)}"
                 else -> "保留完整视频"
-            }, state.trimOpen, { state.trimOpen = !state.trimOpen }) {
+            }, state.trimOpen, { state.trimOpen = !state.trimOpen }, headerModifier = Modifier.bringIntoViewRequester(trimFocus)) {
                 if (thumbnails.isNotEmpty()) Row(Modifier.fillMaxWidth().height(48.dp)) {
                     thumbnails.forEachIndexed { index, reference ->
                         Box(Modifier.weight(1f).fillMaxHeight()) {

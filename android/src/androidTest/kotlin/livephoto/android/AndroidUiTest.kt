@@ -278,11 +278,12 @@ class AndroidUiTest {
 
     @Test fun videoOnlyClearlyRequiresImageAndCannotGenerate() {
         withPickerResults(Uri.parse("content://livephoto-ui-test/video")) {
-            compose.onNodeWithTag("select-video").performScrollTo().performClick()
+            compose.onNodeWithTag("creation-next-step").assertIsDisplayed().assertTextEquals("选视频").performClick()
             assertInputSelected("video", "视频")
             compose.onNodeWithTag("image-selection").assertTextEquals("图片：未选择")
             compose.onNodeWithTag("create").assertIsDisplayed().assertIsNotEnabled()
             compose.onNodeWithTag("input-readiness").assertTextEquals("已选择视频，还需选择图片")
+            compose.onNodeWithTag("creation-next-step").assertIsDisplayed().assertTextEquals("选图片")
         }
     }
 

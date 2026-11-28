@@ -49,9 +49,9 @@ internal fun SectionCard(title: String, modifier: Modifier = Modifier, content: 
 
 @Composable
 internal fun Disclosure(title: String, summary: String, expanded: Boolean, onToggle: () -> Unit,
-    content: @Composable ColumnScope.() -> Unit) {
+    headerModifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextButton(onClick = onToggle, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).semantics { contentDescription = title }, shape = ControlShape,
+        TextButton(onClick = onToggle, modifier = headerModifier.fillMaxWidth().heightIn(min = 44.dp).semantics { contentDescription = title }, shape = ControlShape,
             contentPadding = PaddingValues(horizontal = 4.dp),
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {

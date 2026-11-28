@@ -100,7 +100,7 @@ export async function verifyCoreUi({browser,origin,coreSource,largeSource,incons
           await driver.click('生成动态照片');await page.waitForTimeout(200);
           if(downloads!==beforeDownloads||engines!==beforeEngines)throw Error('Oversized original was processed as a final photo');
           await seek(1.2);await driver.click('使用当前画面作为封面');await status(/Core ExtractFrame：ffmpeg-wasm.*实际/s);
-          await driver.click('裁剪范围');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
+          await driver.click('去裁剪');await driver.dragRange('start',.60);await driver.dragRange('end',.90);
         }
         await driver.click(button);
         await text(new RegExp('Core '+action[0].toUpperCase()+action.slice(1)+'：ffmpeg-wasm')).waitFor({state:'attached'});
