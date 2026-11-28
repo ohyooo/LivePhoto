@@ -32,7 +32,7 @@ function Test-Reports([string]$Directory, [int]$Expected) {
 $coreHostTests = Test-Reports 'shared/build/test-results/testAndroidHostTest' 818
 $hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 60
 $releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 60
-$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 43
+$deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 44
 $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
 if ($compile -notmatch 'BUILD SUCCESSFUL' -or $device -notmatch 'BUILD SUCCESSFUL' -or

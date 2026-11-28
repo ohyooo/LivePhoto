@@ -1,6 +1,7 @@
 package livephoto.android
 
 import java.io.File
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 
@@ -31,15 +32,28 @@ internal fun writeLargeGoogleV1Fixture(file: File, jpeg: ByteArray, movie: ByteA
     return videoLength
 }
 
-internal fun fixtureFileDigest(file: File): String {
+/** Write a structurally bounded MP4 free box instead of allocating a giant fixture byte array. */
+internal fun writeLargeMovieFixture(file: File, movie: ByteArray, size: Int) {
+    val freeSize = size - movie.size
+    require(freeSize >= 8)
+    RandomAccessFile(file, "rw").use { stream ->
+        stream.setLength(0)
+        stream.write(movie)
+        stream.writeInt(freeSize)
+        stream.writeBytes("free")
+        stream.setLength(size.toLong())
+    }
+}
+
+internal fun fixtureFileDigest(file: File): String = file.inputStream().use(::fixtureStreamDigest)
+
+internal fun fixtureStreamDigest(input: InputStream): String {
     val sha = MessageDigest.getInstance("SHA-256")
-    file.inputStream().use { input ->
-        val block = ByteArray(64 * 1024)
-        while (true) {
-            val count = input.read(block)
-            if (count < 0) break
-            sha.update(block, 0, count)
-        }
+    val block = ByteArray(64 * 1024)
+    while (true) {
+        val count = input.read(block)
+        if (count < 0) break
+        sha.update(block, 0, count)
     }
     return sha.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

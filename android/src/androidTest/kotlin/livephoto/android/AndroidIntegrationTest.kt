@@ -704,6 +704,56 @@ class AndroidIntegrationTest {
         } finally { if (imageFile.exists()) assertTrue(imageFile.delete()) }
     }
 
+    @Test fun createEnforcesCombinedInputBoundaryWithVerifiedDiskPublication() = runBlocking<Unit> {
+        val token = UUID.randomUUID().toString()
+        val image = app.getFileStreamPath("create-budget-$token.jpg")
+        val movie = app.getFileStreamPath("create-budget-$token.mp4")
+        val imageBytes = conversionImage()
+        val videoBytes = fractionalAudioVideo()
+        val limit = AndroidCreateController.MAX_INPUT_BYTES
+        val controller = AndroidCreateController(app, app.core)
+        val target = ProtocolSelector(ProtocolIds.GoogleV1, ProfileId("jpeg"))
+        fun inputs() = app.cacheDir.listFiles()!!.filter {
+            it.name.startsWith("livephoto-input-") && it.name.endsWith(".snapshot")
+        }.map { it.name }.toSet()
+        val beforeInputs = inputs()
+        val beforeStages = privateOutputStages()
+        try {
+            image.writeBytes(imageBytes)
+            for (delta in listOf(-1, 0, 1)) {
+                writeLargeMovieFixture(movie, videoBytes, limit - imageBytes.size + delta)
+                val originalMovie = fixtureFileDigest(movie)
+                if (delta > 0) {
+                    // A direct stream is authoritative, independent of provider-reported size.
+                    val rejected = assertFailsWith<AndroidOperationFailure> {
+                        controller.create(Uri.fromFile(image), Uri.fromFile(movie), target)
+                    }
+                    assertEquals("read-video", rejected.step)
+                    assertIs<InputBudgetExceededException>(rejected.cause)
+                } else {
+                    val created = success(controller.create(Uri.fromFile(image), Uri.fromFile(movie), target))
+                    try {
+                        val asset = created.operation.output.assets.single()
+                        assertTrue(asset.byteLength > limit.toULong(), "New protocol metadata adds bytes")
+                        assertTrue(asset.byteLength <= AndroidCreateController.MAX_OUTPUT_BYTES.toULong())
+                        assertEquals(asset.digest.value, app.contentResolver.openInputStream(created.uri)!!.use(::fixtureStreamDigest))
+                        assertTrue(created.operation.preservation.records.any {
+                            it.guarantee == Guarantee.BitstreamPreserving && it.outcome == GuaranteeOutcome.Verified &&
+                                it.sourceDigest?.value == originalMovie && it.outputDigest == it.sourceDigest
+                        })
+                    } finally { assertEquals(1, app.contentResolver.delete(created.uri, null, null)) }
+                }
+                assertContentEquals(imageBytes, image.readBytes())
+                assertEquals(originalMovie, fixtureFileDigest(movie))
+                assertEquals(beforeInputs, inputs())
+                assertEquals(beforeStages, privateOutputStages())
+            }
+        } finally {
+            image.delete()
+            movie.delete()
+        }
+    }
+
     @Test fun controllerFreezesSelectedInputsAndPublishesExactGalleryCopy() = runBlocking {
         val token = UUID.randomUUID().toString()
         val imageName = "android-test-$token.jpg"
