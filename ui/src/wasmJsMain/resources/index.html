@@ -7,11 +7,53 @@
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="在浏览器本地将图片与视频封装为动态照片，不上传媒体。">
   <title>LivePhoto</title>
-  <style>:root{color-scheme:light dark;background:Canvas;color:CanvasText}html,body,#app{width:100%;height:100%;margin:0;overflow:clip}body{position:fixed;inset:0}</style>
+  <style>:root{color-scheme:light dark;background:Canvas;color:CanvasText}html,body,#app{width:100%;height:100%;margin:0;overflow:clip}body{position:fixed;inset:0}
+    #startup:not([hidden]){position:absolute;inset:0;overflow:auto;padding:clamp(20px,6vw,64px);font:1rem/1.55 system-ui,sans-serif}
+    #startup h1,#startup p{max-width:42rem}
+    #startup h1{font-size:clamp(1.4rem,4vw,2rem);line-height:1.3}
+    #startup button{font:inherit;color:CanvasText;background:Canvas;border:1px solid currentColor;border-radius:.45rem;padding:.45rem .85rem;cursor:pointer}
+  </style>
 </head>
 <body>
   <div id="app"></div>
-  <script>window.livePhotoMediaReady = import('./media/player.mjs');</script>
-  <script src="livephoto-ui.js"></script>
+  <main id="startup" role="alert" hidden>
+    <h1 id="startup-title"></h1>
+    <p id="startup-details"></p>
+    <p>LivePhoto 在本机处理素材，这个页面未读入你的图片或视频。</p>
+    <button id="startup-retry" type="button">刷新重试</button>
+  </main>
+  <noscript>请启用 JavaScript 后重新打开 LivePhoto。</noscript>
+  <script>
+    (() => {
+      const show = (title, details) => {
+        document.getElementById('startup-title').textContent = title;
+        document.getElementById('startup-details').textContent = details;
+        document.getElementById('startup').hidden = false;
+      };
+      document.getElementById('startup-retry').addEventListener('click', () => location.reload());
+
+      let graphics;
+      try {
+        graphics = document.createElement('canvas').getContext('webgl2');
+      } catch {
+        // A blocked graphics context is treated the same as an unavailable one.
+      }
+      if (!graphics) {
+        show('当前浏览器无法启用 WebGL 2',
+             '请在普通浏览器窗口打开。如果仍无法启动，可检查浏览器的图形加速设置，重启浏览器后再试。');
+        return;
+      }
+      try { graphics.getExtension('WEBGL_lose_context')?.loseContext(); } catch {}
+
+      const couldNotLoad = () => show('LivePhoto 未能加载', '请检查网络连接后刷新页面。');
+      window.livePhotoMediaReady = import('./media/player.mjs');
+      // Playback setup may fail without stopping the editor; the app handles that condition.
+      window.livePhotoMediaReady.catch(() => {});
+      const application = document.createElement('script');
+      application.addEventListener('error', couldNotLoad, {once: true});
+      application.src = './livephoto-ui.js';
+      document.body.append(application);
+    })();
+  </script>
 </body>
 </html>

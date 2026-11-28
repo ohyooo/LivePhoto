@@ -69,10 +69,50 @@ try {
     await page.reload();await page.locator('canvas').first().waitFor({state:'visible'});await page.keyboard.press('Tab');
     check(size+':reload-follows-browser-again',await theme('light')&&errors.length===0);
     await context.close();
+
+    const blocked=await browser.newContext({viewport,serviceWorkers:'block'});
+    await blocked.route('**/*',r=>r.request().url().startsWith(origin+'/')?r.continue():r.abort());
+    await blocked.addInitScript(throwOnRequest => {
+      const original=HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext=function(kind,...options){
+        if(kind!=='webgl2')return Reflect.apply(original,this,[kind,...options]);
+        if(throwOnRequest)throw new DOMException('Graphics request blocked','NotSupportedError');
+        return null;
+      };
+    },size==='wide');
+    const fallback=await blocked.newPage();lastPage=fallback;
+    const resources=[],fallbackErrors=[];
+    fallback.on('request',r=>resources.push(new URL(r.url()).pathname));
+    fallback.on('pageerror',e=>fallbackErrors.push(e.message));
+    await fallback.goto(origin+'/livephoto/');
+    await fallback.getByRole('heading',{name:'当前浏览器无法启用 WebGL 2'}).waitFor({state:'visible'});
+    const reloaded=fallback.waitForEvent('load');
+    await fallback.getByRole('button',{name:'刷新重试'}).click();
+    await reloaded;
+    check(size+':blocked-graphics-shows-html-without-loading-media',
+      await fallback.getByRole('alert').getByText(/未读入你的图片或视频/).isVisible()&&
+      resources.filter(path=>path==='/livephoto/').length===2&&
+      resources.every(path=>!(/\.(wasm|m?js)$/.test(path)))&&
+      await fallback.locator('canvas').count()===0&&fallbackErrors.length===0);
+    await fallback.screenshot({path:`ci-output/web-ui-startup-${size}.png`});
+    await blocked.close();
+
+    const missing=await browser.newContext({viewport,serviceWorkers:'block'});
+    await missing.route('**/*',r=>{
+      const url=r.request().url();
+      if(!url.startsWith(origin+'/')||url.endsWith('/livephoto-ui.js'))return r.abort();
+      return r.continue();
+    });
+    const retry=await missing.newPage();lastPage=retry;
+    await retry.goto(origin+'/livephoto/');
+    await retry.getByRole('heading',{name:'LivePhoto 未能加载'}).waitFor({state:'visible'});
+    check(size+':bundle-load-failure-is-not-reported-as-graphics',
+      await retry.getByRole('alert').getByText(/检查网络连接/).isVisible()&&await retry.getByRole('button',{name:'刷新重试'}).isVisible());
+    await missing.close();
   }
-  if(checks.length!==6||new Set(checks).size!==6)throw Error('Incomplete theme evidence');
+  if(checks.length!==8||new Set(checks).size!==8)throw Error('Incomplete theme and startup evidence');
   await writeFile(`ci-output/web-theme-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,scope:'browser-preference-shared-compose-real-pixels-and-pointer-session-override'},null,2)+'\n');
-  console.log(`WEB_THEME_EVIDENCE=SUCCESS 6 checks; ${part}`);
+  console.log(`WEB_THEME_EVIDENCE=SUCCESS 8 checks; ${part}`);
 }catch(error){
   if(lastPage&&!lastPage.isClosed()){
     await lastPage.screenshot({path:`ci-output/web-ui-theme-${part}-failure.png`}).catch(()=>{});
