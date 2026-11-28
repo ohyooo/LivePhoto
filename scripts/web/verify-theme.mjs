@@ -10,8 +10,9 @@ const part=process.env.LIVEPHOTO_TEST_PART;
 if(!['mobile','wide'].includes(part))throw Error('Select theme viewport');
 const root=resolve('ci-output/web-ui'),fixtures=await mkdtemp(join(tmpdir(),'livephoto-theme-'));
 if(!process.env.LIVEPHOTO_FFMPEG)throw Error('Synthetic fixture generator required');
-const movie=join(fixtures,'theme.mp4');
-execFileSync(process.env.LIVEPHOTO_FFMPEG,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=25','-t','1','-c:v','libx264','-threads','1','-pix_fmt','yuv420p',movie],{timeout:60000});
+const movie=join(fixtures,'theme.mp4'),cover=join(fixtures,'theme.jpg');
+execFileSync(process.env.LIVEPHOTO_FFMPEG,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=25','-t','1','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-use_editlist','0','-video_track_timescale','90000','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',movie],{timeout:60000});
+execFileSync(process.env.LIVEPHOTO_FFMPEG,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=blue:s=64x64','-frames:v','1','-threads','1','-update','1',cover],{timeout:60000});
 const server=createServer(async(req,res)=>{try{
   const url=new URL(req.url,'http://localhost');if(!url.pathname.startsWith('/livephoto/'))throw Error('subpath');
   const path=resolve(root,'.'+(url.pathname==='/livephoto/'?'/index.html':url.pathname.slice('/livephoto'.length)));
@@ -109,10 +110,43 @@ try {
     check(size+':bundle-load-failure-is-not-reported-as-graphics',
       await retry.getByRole('alert').getByText(/检查网络连接/).isVisible()&&await retry.getByRole('button',{name:'刷新重试'}).isVisible());
     await missing.close();
+
+    const withoutPreview=await browser.newContext({viewport,serviceWorkers:'block'});
+    let playerBlocked=false;
+    await withoutPreview.route('**/*',r=>{
+      const url=r.request().url();
+      if(!url.startsWith(origin+'/'))return r.abort();
+      if(new URL(url).pathname==='/livephoto/media/player.mjs'){playerBlocked=true;return r.abort();}
+      return r.continue();
+    });
+    const basic=await withoutPreview.newPage();lastPage=basic;basic.setDefaultTimeout(25000);
+    const basicErrors=[];basic.on('pageerror',e=>basicErrors.push(e.message));
+    await basic.goto(origin+'/livephoto/');
+    await basic.locator('canvas').first().waitFor({state:'visible'});await basic.keyboard.press('Tab');
+    const basicDriver=composeDriver(basic,viewport);
+    await basic.getByText(/预览和视频编辑暂不可用/).waitFor({state:'attached',timeout:12000});
+    await basicDriver.choose('选择视频',movie);
+    await basicDriver.choose('选择图片',cover);
+    await basic.getByText('名称：theme.mp4',{exact:true}).waitFor({state:'attached'});
+    await basic.getByText('名称：theme.jpg',{exact:true}).waitFor({state:'attached'});
+    check(size+':missing-player-shows-limited-mode-with-file-pickers',playerBlocked&&
+      await basic.getByText(/Unable to load bundled font/).count()===0&&
+      await basicDriver.find('从视频选封面').count()===0&&await basic.locator('video').count()===0);
+    const pending=basic.waitForEvent('download');pending.catch(()=>{});
+    await basicDriver.click('生成动态照片');
+    const download=await pending;
+    const output=await readFile(await download.path()),original=await readFile(movie);
+    await basicDriver.click('照片工具');
+    await basicDriver.choose('选择待检查照片',{name:download.suggestedFilename(),mimeType:'image/jpeg',buffer:output});
+    await basicDriver.click('开始检查（只读）');
+    await basic.getByText(/识别为动态照片/).waitFor({state:'attached'});
+    check(size+':missing-player-keeps-generation-and-read-only-inspection',
+      output.length>original.length&&output.subarray(-original.length).equals(original)&&basicErrors.length===0);
+    await withoutPreview.close();
   }
-  if(checks.length!==8||new Set(checks).size!==8)throw Error('Incomplete theme and startup evidence');
+  if(checks.length!==10||new Set(checks).size!==10)throw Error('Incomplete theme and startup evidence');
   await writeFile(`ci-output/web-theme-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,scope:'browser-preference-shared-compose-real-pixels-and-pointer-session-override'},null,2)+'\n');
-  console.log(`WEB_THEME_EVIDENCE=SUCCESS 8 checks; ${part}`);
+  console.log(`WEB_THEME_EVIDENCE=SUCCESS 10 checks; ${part}`);
 }catch(error){
   if(lastPage&&!lastPage.isClosed()){
     await lastPage.screenshot({path:`ci-output/web-ui-theme-${part}-failure.png`}).catch(()=>{});

@@ -7,7 +7,11 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
 import androidx.compose.ui.window.ComposeViewport
 import androidx.compose.ui.Modifier
@@ -60,19 +64,33 @@ public fun main() {
         val resolver = LocalFontFamilyResolver.current
         var fontsReady by remember { mutableStateOf(false) }
         var fontError by remember { mutableStateOf(false) }
+        var previewUnavailable by remember { mutableStateOf(false) }
+        LaunchedEffect(platform) {
+            try { platform.media = browserMediaReady().await() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { previewUnavailable = true }
+        }
         LaunchedEffect(resolver) {
             try {
                 val values = Int8Array(browserFont().await())
                 val bytes = ByteArray(values.length) { browserByte(values, it) }
                 resolver.preload(FontFamily(Font("NotoSansSC", bytes)))
-                platform.media = browserMediaReady().await()
                 fontsReady = true
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { fontError = true }
         }
         MaterialTheme(colorScheme = livePhotoColors(dark), typography = LivePhotoTypography) {
             Surface(Modifier.fillMaxSize()) {
-                if (fontsReady) LivePhotoScreen(platform, dark, themeMode = themeMode, onThemeSelected = { themeMode = it })
+                if (fontsReady) Column {
+                    if (previewUnavailable) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
+                        Text("预览和视频编辑暂不可用。仍可选取 JPEG 和 MP4 生成动态照片，或使用照片工具。",
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        LivePhotoScreen(platform, dark, themeMode = themeMode, onThemeSelected = { themeMode = it })
+                    }
+                }
                 else Text(if (fontError) "Unable to load bundled font. Reload the page or check the static server." else "Loading fonts...")
             }
         }
@@ -81,7 +99,7 @@ public fun main() {
 
 private class BrowserPlatform : LivePhotoUiPlatform {
     private val files = mutableMapOf<String, File>()
-    lateinit var media: BrowserMedia
+    var media by mutableStateOf<BrowserMedia?>(null)
     private data class Timeline(val root: String, val origin: Double)
     private data class Frame(val image: String, val root: String, val sourceTime: Double)
     private val timelines = mutableMapOf<String, Timeline>()
@@ -89,7 +107,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     private var lastResult by mutableStateOf<Pair<Blob, Blob>?>(null)
     private var next = 0
     override val outputDescription = "浏览器下载"
-    override val supportsVideoEditing = true
+    override val supportsVideoEditing: Boolean get() = media != null
     override val supportsAnalysis = true
     override val supportsVideoExtraction = true
     override val supportsCleanSplit = true
@@ -100,7 +118,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val repairSuccessMessage = "已应用修复并发起下载，请检查下载记录。"
     override val conversionSuccessMessage = "已转换并发起下载，请检查下载记录。"
     override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
-    override val hasResultPreview: Boolean get() = lastResult != null
+    override val hasResultPreview: Boolean get() = media != null && lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
     override val creationResultStatus = "下载已发起"
     override val creationResultFileSource = "下载记录中的原文件"
@@ -232,9 +250,10 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     @Composable
     override fun ImagePreview(reference: String, modifier: Modifier, onScroll: (Float) -> Unit) {
         val file = files[reference] ?: return
+        val player = media?.player ?: return
         key(reference) {
             HtmlElementView(factory = {
-                browserPreviewElement(media.player.imagePreview(file, onScroll)).also {
+                browserPreviewElement(player.imagePreview(file, onScroll)).also {
                     if (reference.startsWith("thumbnail:")) it.setAttribute("alt", "时间轴缩略图")
                 }
             }, modifier = modifier.height(160.dp), onRelease = { browserReleasePreview(it) })
@@ -244,9 +263,10 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     @Composable
     override fun ResultPreview(modifier: Modifier, onScroll: (Float) -> Unit) {
         val result = lastResult ?: return
+        val player = media?.player ?: return
         key(result) {
             HtmlElementView(factory = {
-                browserPreviewElement(media.player.resultPreview(result.first, result.second, onScroll))
+                browserPreviewElement(player.resultPreview(result.first, result.second, onScroll))
             }, modifier = modifier, onRelease = { browserReleasePreview(it) })
         }
     }
@@ -256,12 +276,14 @@ private class BrowserPlatform : LivePhotoUiPlatform {
         if (reference == null) return null
         val file = files[reference] ?: return null
         val timeline = timelines[reference] ?: return null
-        val controller = remember(reference) { BrowserEditor(file, timeline) }
+        val player = media?.player ?: return null
+        val controller = remember(reference, player) { BrowserEditor(file, timeline, player) }
         DisposableEffect(controller) { onDispose { controller.dispose() } }
         return controller
     }
 
-    private inner class BrowserEditor(private val file: File, private val timeline: Timeline) : VideoEditor {
+    private inner class BrowserEditor(private val file: File, private val timeline: Timeline,
+        private val player: BrowserPlayerModule) : VideoEditor {
         private val state = mutableStateOf(VideoPlayback())
         override val playback: State<VideoPlayback> = state
         private var surface: BrowserPlayer? = null
@@ -281,7 +303,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
                         value.seeking, value.ready, value.error, value.width, value.height,
                         value.paused, value.volume, value.muted, value.rate, value.fullscreen)
                 }
-                if (surface == null) surface = media.player.createPlayer(file, callback, onScroll)
+                if (surface == null) surface = player.createPlayer(file, callback, onScroll)
                 surface!!.element
             }, modifier = modifier)
             }
@@ -309,7 +331,7 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             if (thumbnailReferences.isNotEmpty()) return thumbnailReferences.toList()
             // A separate read-only decoder must not seek or reload the active player.
             var ready: BrowserPlayback? = null
-            val decoder = media.player.createPlayer(file, { ready = it }, {})
+            val decoder = player.createPlayer(file, { ready = it }, {})
             decoder.element.setAttribute("preload", "auto")
             suspend fun awaitPosition() {
                 while (ready?.ready != true || ready?.seeking != false) {

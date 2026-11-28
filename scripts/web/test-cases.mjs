@@ -21,7 +21,8 @@ const playerCases=['tools-collapsed-by-default','aspect-and-viewport','controls-
   'pointer-seek-paused','keyboard-seek','play-and-pause','picture-click-toggle','mute-and-restore','rate-menu-outside-picture','fullscreen-ratio-controls',
   'ended-progress-complete','current-picture-capture','range-handles-select-inner-segment'];
 const themeCases=['default-follows-dark-browser','browser-preference-updates-rendering','toggle-in-top-right','manual-toggle-keeps-selected-media',
-  'manual-override-is-respected','reload-follows-browser-again','blocked-graphics-shows-html-without-loading-media','bundle-load-failure-is-not-reported-as-graphics'];
+  'manual-override-is-respected','reload-follows-browser-again','blocked-graphics-shows-html-without-loading-media','bundle-load-failure-is-not-reported-as-graphics',
+  'missing-player-shows-limited-mode-with-file-pickers','missing-player-keeps-generation-and-read-only-inspection'];
 const browserCases=protocols.flatMap(p=>['create','detect','validate','extract','inputs-immutable','embedded-video','inspect-layout','analyze-no-media-backend',
   'key-position','clean-split-assets','same-target-exact'].map(n=>p+':'+n).concat(protocols.filter(q=>q!==p).map(q=>p+':'+(p==='oplus.olive'&&q==='google.motionphoto.v2'?'convert-blocked-exif-':'convert-to-')+q)))
   .concat(['ordinary-jpeg-is-not-live','unknown-target-rejected','swapped-content-rejected','truncated-video-no-output','budget-rejected-before-reading',
