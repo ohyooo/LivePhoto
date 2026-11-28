@@ -69,6 +69,34 @@ class PagesArchiveTest(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, 'public browser checks failed'):
                         wait('a' * 40)
 
+    def test_site_validator_gets_only_source_read_token_and_its_own_output_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            site = root / 'repository'
+            (site / 'scripts').mkdir(parents=True)
+            script = site / 'scripts/verify-package.py'
+            script.write_text(
+                "import os\nfrom pathlib import Path\n"
+                "assert os.environ['GH_TOKEN'] == 'source-token'\n"
+                "assert 'PAGES_HTTPS_TOKEN' not in os.environ\n"
+                "assert 'GITHUB_ENV' not in os.environ\n"
+                "Path(os.environ['GITHUB_OUTPUT']).write_text('commit=validated\\n')\n",
+                encoding='utf-8')
+            real_output = root / 'runner-output'
+            real_output.write_text('unchanged', encoding='utf-8')
+            with patch.dict(os.environ, {'PAGES_HTTPS_TOKEN': 'site-token', 'GH_TOKEN': 'source-token',
+                    'GITHUB_ENV': str(root / 'runner-env'), 'GITHUB_OUTPUT': str(real_output)}):
+                module['verify_site'](site, root)
+            self.assertEqual('unchanged', real_output.read_text(encoding='utf-8'))
+            self.assertEqual('commit=validated\n', (root / 'verify-package-output.txt').read_text(encoding='utf-8'))
+
+    def test_local_git_has_no_source_or_site_token(self):
+        with patch.dict(os.environ, {'PAGES_HTTPS_TOKEN': 'site-token', 'GH_TOKEN': 'source-token'}), \
+                patch('subprocess.check_output', return_value='clean') as run:
+            self.assertEqual('clean', module['git'](Path('site-checkout'), 'status'))
+        self.assertNotIn('PAGES_HTTPS_TOKEN', run.call_args.kwargs['env'])
+        self.assertNotIn('GH_TOKEN', run.call_args.kwargs['env'])
+
     def test_push_uses_only_the_fixed_https_url_and_scopes_auth(self):
         with patch.dict(os.environ, {'PAGES_HTTPS_TOKEN': 'test-token', 'GH_TOKEN': 'source-token'}), \
                 patch('subprocess.run') as run:
