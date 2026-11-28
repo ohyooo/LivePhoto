@@ -74,7 +74,10 @@ class AndroidIntegrationTest {
             val original = fixtureFileDigest(input)
             val uri = Uri.fromFile(input)
             val controller = AndroidCreateController(app, app.core)
-            val analysis = success(controller.analyze(uri)).inspection
+            val inspected = success(controller.analyze(uri))
+            val analysis = inspected.inspection
+            assertFalse(livephoto.ui.summarizePhotoInspection(inspected).openExtraction,
+                "A photo above the export limit must not suggest extraction")
             assertEquals(Disposition.Live, analysis.detection.disposition)
             assertEquals(ProtocolIds.GoogleV1, analysis.detection.primaryProtocol?.protocol)
             assertEquals(videoLength.toULong(), analysis.layout.regions.single { it.kind == ResourceKind.Video }.range.length)

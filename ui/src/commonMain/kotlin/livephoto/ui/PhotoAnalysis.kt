@@ -98,3 +98,33 @@ public fun formatPhotoAnalysisFailure(error: CoreError): String = buildString {
     }
     append("\n未修改输入、未生成文件；检查失败不等于普通照片。")
 }
+
+/** A small view of structured Core results; no file details are passed through this summary. */
+public enum class PhotoInspectionStatus { Motion, InvalidMotion, NonLive, Candidate, Ambiguous, Unknown }
+
+public data class PhotoInspectionSummary(val status: PhotoInspectionStatus, val openExtraction: Boolean)
+
+public fun summarizePhotoInspection(result: AnalysisResult): PhotoInspectionSummary {
+    val status = when (result.inspection.detection.disposition) {
+        Disposition.Live -> if (result.validation.verdict == Verdict.Invalid) PhotoInspectionStatus.InvalidMotion else PhotoInspectionStatus.Motion
+        Disposition.NonLive -> PhotoInspectionStatus.NonLive
+        Disposition.Candidate -> PhotoInspectionStatus.Candidate
+        Disposition.Ambiguous -> PhotoInspectionStatus.Ambiguous
+        Disposition.Unknown -> PhotoInspectionStatus.Unknown
+    }
+    val layout = result.inspection.layout
+    val videos = layout.resources.filter { it.kind == ResourceKind.Video }
+    // A vendor entry and a generic compatibility entry can describe the same bytes.
+    val oneVideo = videos.all { it.standalone && it.extents.isNotEmpty() } &&
+        videos.distinctBy { resource -> resource.extents.map { it.source to it.range } }.size == 1
+    // Android permits a bigger read-only photo, but export still has the common input budget.
+    val canExtract = status == PhotoInspectionStatus.Motion &&
+        layout.sources.singleOrNull()?.size?.let { it <= ANALYSIS_INPUT_LIMIT.toULong() } == true &&
+        oneVideo &&
+        result.capabilities.availability != Availability.Unsupported &&
+        result.capabilities.operations.any { entry ->
+            entry.operation == Operation.ExtractRaw && entry.exposure == Exposure.Public &&
+                entry.implementation in setOf(Implementation.Supported, Implementation.Experimental)
+        }
+    return PhotoInspectionSummary(status, canExtract)
+}

@@ -22,6 +22,8 @@ internal external interface TaskReply : JsAny {
     val start: String?
     val end: String?
     val windowScale: String?
+    val inspectionStatus: String?
+    val openExtraction: Boolean?
 }
 internal external interface TaskRunner : JsAny {
     fun run(options: JsAny, files: JsAny): Promise<TaskReply>

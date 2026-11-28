@@ -317,9 +317,21 @@ try {
     await writeFile(oversized,Buffer.alloc(32*1024*1024+1));
     if (scenario === 'analysis') {
     const downloadsBeforeAnalysis=downloads;
+    const guidance=page.locator('#analysis-guidance');
+    const next=page.locator('#analysis-next-step');
     for(const {target,output} of analysisInputs) {
       const report=await analyze({name:target+'.jpg',mimeType:'image/jpeg',buffer:output},/只读检查完成/);
-      check(label+':analysis-live-'+target,report.includes('识别结果：Live')&&report.includes('首选协议：'+target)&&
+      await next.waitFor({state:'attached'});
+      let guided=(await guidance.textContent()).includes('识别为动态照片');
+      if(target==='oplus.olive') {
+        await click('去提取视频');
+        await page.locator('#extract-video').waitFor({state:'attached'});
+        guided&&=downloads===downloadsBeforeAnalysis&&
+          (await page.locator('#analysis-name').textContent()).includes(target+'.jpg');
+        await driver.selectTool('检查照片');
+        await next.waitFor({state:'attached'});
+      }
+      check(label+':analysis-live-'+target,guided&&report.includes('识别结果：Live')&&report.includes('首选协议：'+target)&&
         report.includes('Structure /')&&report.includes('Protocol /')&&report.includes('Media /')&&
         report.includes('关键照片来源：')&&report.includes('不是完整播放或设备相册兼容证明'));
       if(target==='oplus.olive') {
@@ -329,13 +341,16 @@ try {
       }
     }
     const ordinary=await analyze(imagePath,/只读检查完成/);
-    check(label+':analysis-ordinary-not-live',ordinary.includes('识别结果：NonLive')&&ordinary.includes('首选协议：无'));
+    check(label+':analysis-ordinary-not-live',ordinary.includes('识别结果：NonLive')&&ordinary.includes('首选协议：无')&&
+      (await guidance.textContent()).includes('未识别为动态照片')&&await next.count()===0);
     const unknown=await analyze({name:'unknown.jpg',mimeType:'image/jpeg',buffer:Buffer.from([0,1,2,3])},/只读检查完成/);
-    check(label+':analysis-unknown-not-nonlive',unknown.includes('识别结果：Unknown')&&!unknown.includes('识别结果：NonLive'));
+    check(label+':analysis-unknown-not-nonlive',unknown.includes('识别结果：Unknown')&&!unknown.includes('识别结果：NonLive')&&
+      (await guidance.textContent()).includes('无法判断')&&await next.count()===0);
     const broken=await analyze({name:'malformed.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,225,0,16,0,0])},/检查失败/);
     const unreadable=await analyze({name:'unreadable.jpg',mimeType:'image/jpeg',buffer:Buffer.from([255,216,255,217])},/检查失败/);
     check(label+':analysis-malformed-error-not-nonlive',broken.includes('错误码：')&&broken.includes('阶段：')&&broken.includes('检查失败不等于普通照片')&&
-      unreadable.includes('IO_READ_FAILED')&&unreadable.includes('阶段：Read')&&!unreadable.includes('识别结果：NonLive'));
+      unreadable.includes('IO_READ_FAILED')&&unreadable.includes('阶段：Read')&&!unreadable.includes('识别结果：NonLive')&&
+      await guidance.count()===0&&await next.count()===0);
     const slicesBeforeBudget=await page.evaluate(()=>globalThis.analysisIo.slices);
     const budget=await analyze(oversized,/检查失败/);
     const io=await page.evaluate(()=>globalThis.analysisIo);
@@ -348,7 +363,7 @@ try {
     await click('开始检查（只读）');
     await page.waitForFunction(()=>globalThis.releaseTaskReads.length>0);
     await click('取消处理');await text(/已取消处理/).waitFor({state:'attached'});
-    const cancelledAnalysis=(await driver.report(page.locator('#analysis-report'))).includes('CANCELLED');
+    const cancelledAnalysis=(await driver.report(page.locator('#analysis-report'))).includes('CANCELLED')&&await next.count()===0;
     await page.evaluate(()=>{globalThis.holdTaskReads=false;globalThis.releaseTaskReads.splice(0).forEach(release=>release());});
     const recovered=await analyze(imagePath,/只读检查完成/);
     const workers=await page.evaluate(()=>globalThis.taskWorkers);

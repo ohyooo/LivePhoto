@@ -47,6 +47,11 @@ export function createTaskRunner() {
           (result.bytes?.size??0)+(result.second?.size??0)>48*1024*1024||
           (result.failed&&(result.bytes!=null||result.second!=null))){stop('WORKER_FAILED');return;}
         const hasOutput=result.bytes!=null||result.second!=null;
+        if((task.options.kind==='Analyze'&&hasOutput)||
+          ((result.inspectionStatus!=null&&result.inspectionStatus!=='')&&
+          (task.options.kind!=='Analyze'||result.failed||typeof result.inspectionStatus!=='string'||typeof result.openExtraction!=='boolean'))){
+          stop('WORKER_FAILED');return;
+        }
         if(hasOutput){
           if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(result.storageLease??'')){stop('WORKER_FAILED');return;}
           try{await adopt(result.storageLease);}catch{if(worker===active)stop('WORKER_FAILED');return;}

@@ -34,8 +34,9 @@ private external interface Options : JsAny {
 private external interface Reply : JsAny
 private fun reply(report: String, failed: Boolean = false, bytes: Blob? = null, mime: String = "", name: String = "",
     second: Blob? = null, secondMime: String = "", secondName: String = "", review: String = "",
-    time: String = "", scale: String = "", start: String = "", end: String = "", windowScale: String = ""): Reply =
-    js("({report,failed,bytes,mime,name,second,secondMime,secondName,review,time,scale,start,end,windowScale})")
+    time: String = "", scale: String = "", start: String = "", end: String = "", windowScale: String = "",
+    inspectionStatus: String = "", openExtraction: Boolean = false): Reply =
+    js("({report,failed,bytes,mime,name,second,secondMime,secondName,review,time,scale,start,end,windowScale,inspectionStatus,openExtraction})")
 
 private fun install(run: (Request) -> Unit): Unit = js("""{
     const reads=new Map(); let next=0;
@@ -123,7 +124,11 @@ private suspend fun execute(request: Request, disk: DiskSession): Reply {
         return when (kind) {
             "Analyze" -> when (val result = analyzeSelectedPhoto(core, input)) {
                 is CoreResult.Failure -> failed(result.error)
-                is CoreResult.Success -> reply(formatPhotoAnalysis(result.value))
+                is CoreResult.Success -> {
+                    val summary = summarizePhotoInspection(result.value)
+                    reply(formatPhotoAnalysis(result.value), inspectionStatus = summary.status.name,
+                        openExtraction = summary.openExtraction)
+                }
             }
             "Extract" -> when (val result = prepareExtractedVideo(core, input, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)

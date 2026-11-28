@@ -15,6 +15,7 @@ public data class UiTaskResult(
     val applyRepair: (suspend () -> UiTaskResult)? = null,
     val saves: List<UiSaveAction> = emptyList(),
     val cancelled: Boolean = false,
+    val inspection: PhotoInspectionSummary? = null,
 )
 
 internal suspend fun LivePhotoUiPlatform.runHostTask(task: UiTask): UiTaskResult = when (task.kind) {
@@ -24,7 +25,7 @@ internal suspend fun LivePhotoUiPlatform.runHostTask(task: UiTask): UiTaskResult
     }
     UiTaskKind.Analyze -> when (val result = analyze(task.input)) {
         is CoreResult.Failure -> hostTaskFailure(result.error, formatPhotoAnalysisFailure(result.error))
-        is CoreResult.Success -> UiTaskResult(formatPhotoAnalysis(result.value))
+        is CoreResult.Success -> UiTaskResult(formatPhotoAnalysis(result.value), inspection = summarizePhotoInspection(result.value))
     }
     UiTaskKind.Extract -> when (val result = extractVideo(task.input)) {
         is CoreResult.Failure -> hostTaskFailure(result.error, formatVideoExtractionFailure(result.error))

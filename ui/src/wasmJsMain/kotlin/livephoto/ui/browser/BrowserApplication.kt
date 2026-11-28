@@ -218,7 +218,12 @@ private class BrowserPlatform : LivePhotoUiPlatform {
             if (task.kind == UiTaskKind.Create) lastResult = blob to checkNotNull(movie)
             downloadBlob(blob, checkNotNull(response.name))
         }
-        return UiTaskResult(response.report, name = response.name,
+        val inspection = if (task.kind == UiTaskKind.Analyze)
+            PhotoInspectionStatus.entries.firstOrNull { it.name == response.inspectionStatus }?.let { status ->
+                PhotoInspectionSummary(status, status == PhotoInspectionStatus.Motion && response.openExtraction == true)
+            }
+        else null
+        return UiTaskResult(response.report, name = response.name, inspection = inspection,
             applyRepair = response.review?.takeIf { it.isNotEmpty() }?.let { token -> { runBrowserTask(task, token) } })
     }
 

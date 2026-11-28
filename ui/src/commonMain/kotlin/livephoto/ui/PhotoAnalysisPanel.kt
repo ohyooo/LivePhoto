@@ -28,6 +28,7 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
     var selectionRevision by rememberSaveable { mutableStateOf(0) }
     var report by rememberSaveable { mutableStateOf<String?>(null) }
     var failed by rememberSaveable { mutableStateOf(false) }
+    var summary by remember(reference, selectionRevision) { mutableStateOf<PhotoInspectionSummary?>(null) }
     var working by remember { mutableStateOf(false) }
     var extracting by remember { mutableStateOf(false) }
     var splitting by remember { mutableStateOf(false) }
@@ -85,15 +86,23 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                 Button(onClick = {
                     if (!active || working) return@Button
                     val selected = reference ?: return@Button
+                    val revision = selectionRevision
                     scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        working = true; onBusy(true); report = null; failed = false
+                        working = true; onBusy(true); report = null; failed = false; summary = null
                         try {
                             val result = platform.runTask(UiTask(UiTaskKind.Analyze, selected))
-                            report = result.report; failed = result.failed
-                        } catch (cancelled: CancellationException) { report = "检查已取消。"; throw cancelled }
-                        catch (error: Exception) {
-                            failed = true
-                            report = "检查未完成：${error.message?.take(2000) ?: "未知异常"}\n未修改输入、未生成文件。请重新选择文件。"
+                            if (reference == selected && selectionRevision == revision) {
+                                report = result.report; failed = result.failed
+                                if (!result.failed && !result.cancelled) summary = result.inspection
+                            }
+                        } catch (cancelled: CancellationException) {
+                            if (reference == selected && selectionRevision == revision) report = "检查已取消。"
+                            throw cancelled
+                        } catch (_: Exception) {
+                            if (reference == selected && selectionRevision == revision) {
+                                failed = true
+                                report = "检查未完成。未修改输入、未生成文件。请重新选择文件。"
+                            }
                         } finally { working = false; onBusy(false) }
                     }
                 }, enabled = active && !working && reference != null, shape = ControlShape,
@@ -156,6 +165,16 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
                         }
                     }
                 }
+                if (tool == 0) summary?.let { inspection ->
+                    Column(Modifier.testTag("analysis-guidance"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(inspection.status.headline(), style = MaterialTheme.typography.titleMedium)
+                        Text(inspection.status.description(), style = MaterialTheme.typography.bodySmall)
+                        if (inspection.openExtraction && platform.supportsVideoExtraction) {
+                            OutlinedButton(onClick = { if (active && !working) tool = 1 }, enabled = active && !working,
+                                modifier = Modifier.testTag("analysis-next-step"), shape = ControlShape) { Text("去提取视频") }
+                        }
+                    }
+                }
                 report?.let { text ->
                     ReportPanel(text, failed, "analysis-report", "检查", platform)
                 }
@@ -174,4 +193,20 @@ internal fun PhotoAnalysisPanel(platform: LivePhotoUiPlatform, enabled: Boolean,
             }
         }
     }
+}
+
+
+private fun PhotoInspectionStatus.headline(): String = when (this) {
+    PhotoInspectionStatus.Motion -> "识别为动态照片"
+    PhotoInspectionStatus.InvalidMotion -> "发现动态照片标记，但检查未通过"
+    PhotoInspectionStatus.NonLive -> "未识别为动态照片"
+    PhotoInspectionStatus.Candidate -> "发现动态照片线索，尚不能确认"
+    PhotoInspectionStatus.Ambiguous -> "发现冲突的格式线索，尚不能确认"
+    PhotoInspectionStatus.Unknown -> "无法判断这是不是动态照片"
+}
+
+private fun PhotoInspectionStatus.description(): String = when (this) {
+    PhotoInspectionStatus.Motion -> "这里是文件检查结果，不保证接收相册能播放。"
+    PhotoInspectionStatus.NonLive -> "如果原片能动，请从相册按原始格式导出，再检查一次。"
+    else -> "请先查看检查详情，或重新选择未经编辑的原文件。"
 }
