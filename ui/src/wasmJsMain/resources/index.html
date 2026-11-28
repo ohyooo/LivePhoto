@@ -51,6 +51,13 @@
       window.livePhotoMediaReady.catch(() => {});
       const application = document.createElement('script');
       application.addEventListener('error', couldNotLoad, {once: true});
+      application.addEventListener('load', () => {
+        // The Kotlin/Webpack UMD entry exports its startup promise as window.ui.
+        // Loading the script does not mean the separate application Wasm started.
+        Promise.resolve(window.ui).catch(() => {
+          show('LivePhoto 未能启动', '应用组件未能启动。请刷新页面；如果问题持续，请更新浏览器后重试。');
+        });
+      }, {once: true});
       application.src = './livephoto-ui.js';
       document.body.append(application);
     })();

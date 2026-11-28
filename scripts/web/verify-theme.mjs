@@ -9,6 +9,9 @@ import {composeDriver} from './ui-interaction.mjs';
 const part=process.env.LIVEPHOTO_TEST_PART;
 if(!['mobile','wide'].includes(part))throw Error('Select theme viewport');
 const root=resolve('ci-output/web-ui'),fixtures=await mkdtemp(join(tmpdir(),'livephoto-theme-'));
+const manifest=JSON.parse((await readFile('ci-output/web-ui-package-evidence.json','utf8')).replace(/^\uFEFF/,''));
+const appWasm=new Set(manifest.applicationWasm.map(name=>'/livephoto/'+name));
+if(appWasm.size!==1)throw Error('Expected one packaged application Wasm entry');
 if(!process.env.LIVEPHOTO_FFMPEG)throw Error('Synthetic fixture generator required');
 const movie=join(fixtures,'theme.mp4'),cover=join(fixtures,'theme.jpg');
 execFileSync(process.env.LIVEPHOTO_FFMPEG,['-nostdin','-n','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=25','-t','1','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-bf','0','-use_editlist','0','-video_track_timescale','90000','-movflags','+faststart','-map_metadata','-1','-metadata:s:v','encoder=','-fflags','+bitexact','-flags:v','+bitexact','-write_btrt','0',movie],{timeout:60000});
@@ -111,6 +114,35 @@ try {
       await retry.getByRole('alert').getByText(/检查网络连接/).isVisible()&&await retry.getByRole('button',{name:'刷新重试'}).isVisible());
     await missing.close();
 
+    const missingWasm=await browser.newContext({viewport,serviceWorkers:'block'});
+    let failWasm=true,wasmFailures=0;
+    await missingWasm.route('**/*',r=>{
+      const url=r.request().url();
+      if(!url.startsWith(origin+'/'))return r.abort();
+      if(!failWasm||!appWasm.has(new URL(url).pathname))return r.continue();
+      wasmFailures++;
+      if(size==='mobile')return r.abort();
+      return r.fulfill({contentType:'application/wasm',body:Buffer.from('not a wasm module')});
+    });
+    const wasmPage=await missingWasm.newPage();lastPage=wasmPage;
+    const wasmErrors=[];wasmPage.on('pageerror',e=>wasmErrors.push(e.message));
+    const scriptResponse=wasmPage.waitForResponse(r=>r.url()===origin+'/livephoto/livephoto-ui.js');scriptResponse.catch(()=>{});
+    await wasmPage.goto(origin+'/livephoto/');
+    await wasmPage.getByRole('heading',{name:'LivePhoto 未能启动',exact:true}).waitFor({state:'visible'});
+    const restart=wasmPage.getByRole('button',{name:'刷新重试'});
+    check(size+':application-wasm-failure-shows-retry-after-script-success',
+      (await scriptResponse).ok()&&wasmFailures===1&&await restart.isVisible()&&
+      await wasmPage.getByRole('alert').getByText(/未读入你的图片或视频/).isVisible()&&
+      await wasmPage.locator('canvas,input[type=file],html[data-livephoto-runtime]').count()===0&&wasmErrors.length===0);
+    failWasm=false;
+    await restart.click();
+    await wasmPage.locator('canvas').first().waitFor({state:'visible'});await wasmPage.keyboard.press('Tab');
+    await composeDriver(wasmPage,viewport).find('选择视频').waitFor({state:'attached'});
+    check(size+':retry-after-wasm-failure-restores-workspace',
+      await wasmPage.locator('html[data-livephoto-runtime="kotlin-wasm-compose"]').count()===1&&
+      !await wasmPage.locator('#startup').isVisible()&&wasmErrors.length===0);
+    await missingWasm.close();
+
     const withoutPreview=await browser.newContext({viewport,serviceWorkers:'block'});
     let playerBlocked=false;
     await withoutPreview.route('**/*',r=>{
@@ -144,9 +176,9 @@ try {
       output.length>original.length&&output.subarray(-original.length).equals(original)&&basicErrors.length===0);
     await withoutPreview.close();
   }
-  if(checks.length!==10||new Set(checks).size!==10)throw Error('Incomplete theme and startup evidence');
+  if(checks.length!==12||new Set(checks).size!==12)throw Error('Incomplete theme and startup evidence');
   await writeFile(`ci-output/web-theme-evidence-${part}.json`,JSON.stringify({commit:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,browserVersion:browser.version(),part,tests:checks.length,failures:0,checks,scope:'browser-preference-shared-compose-real-pixels-and-pointer-session-override'},null,2)+'\n');
-  console.log(`WEB_THEME_EVIDENCE=SUCCESS 10 checks; ${part}`);
+  console.log(`WEB_THEME_EVIDENCE=SUCCESS 12 checks; ${part}`);
 }catch(error){
   if(lastPage&&!lastPage.isClosed()){
     await lastPage.screenshot({path:`ci-output/web-ui-theme-${part}-failure.png`}).catch(()=>{});
