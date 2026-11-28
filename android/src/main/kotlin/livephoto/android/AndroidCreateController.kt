@@ -8,7 +8,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import livephoto.core.*
-import livephoto.core.memory.MemoryOutputTransaction
 import livephoto.ui.motionPhotoJpegFileName
 import java.io.IOException
 import java.util.UUID
@@ -117,7 +116,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     private suspend fun createFromSnapshots(
         imageSource: BinarySource, videoSource: BinarySource, target: ProtocolSelector, context: Context, token: String,
     ): CoreResult<Created> {
-        val output = MemoryOutputTransaction(context, token)
+        val staging = AndroidOutputStaging(android.cacheDir, token)
+        val output = StagedOutputTransaction(context, token, staging)
         var created: OperationResult? = null
         try {
             return when (val result = androidOperation("invoke-core", "request") {
@@ -135,10 +135,10 @@ class AndroidCreateController(private val android: AndroidContext, private val c
                     val name = motionPhotoJpegFileName("LivePhoto-$token", target.protocol)
                     val uri = androidOperation("save-output", "output") {
                         currentCoroutineContext().ensureActive()
-                        val bytes = output.committedAssets().getValue(asset.id)
-                        AndroidPhotoExporter(android.contentResolver).publish(bytes, name)
+                        check(output.isCommitted(asset.id)) { "Private output was not committed" }
+                        AndroidPhotoExporter(android.contentResolver).publish(checkNotNull(asset.readableSource), asset.byteLength, name)
                     }
-                    // Return the published URI, not a memory handle closed by this session.
+                    // Return the published URI, not a private file handle closed by this session.
                     // Preserve the original conservative/volatile durability report.
                     val published = result.value.copy(output = MediaOutput(
                         listOf(asset.copy(recommendedName = name, readableSource = null, accessReference = uri.toString())),
@@ -148,7 +148,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
                 }
             }
         } finally {
-            created?.output?.assets?.forEach { it.readableSource?.close() }
+            try { created?.output?.assets?.forEach { it.readableSource?.close() } }
+            finally { staging.close() }
         }
     }
 

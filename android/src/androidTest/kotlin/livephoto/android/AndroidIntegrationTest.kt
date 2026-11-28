@@ -704,6 +704,10 @@ class AndroidIntegrationTest {
         val videoBytes = fixture("video.mp4")
         val imageFile = app.getFileStreamPath(imageName)
         val videoFile = app.getFileStreamPath(videoName)
+        fun stages() = app.cacheDir.listFiles()!!.filter {
+            it.name.startsWith("livephoto-output-") && it.name.endsWith(".stage")
+        }.map { it.name }.toSet()
+        val priorStages = stages()
         var output: Uri? = null
         try {
             app.openFileOutput(imageName, 0).use { it.write(imageBytes) }
@@ -738,6 +742,19 @@ class AndroidIntegrationTest {
                 val carrier = app.contentResolver.openInputStream(v2.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
                 assertEquals(v2.operation.output.assets.single().digest.value, sha(carrier))
             } finally { app.contentResolver.delete(v2.uri, null, null) }
+            val v1 = success(AndroidCreateController(app, app.core).create(Uri.fromFile(imageFile), Uri.fromFile(videoFile),
+                ProtocolSelector(ProtocolIds.GoogleV1, ProfileId("jpeg"))))
+            try {
+                val name = assertNotNull(readSelectedMediaInfo(app.contentResolver, v1.uri).displayName)
+                assertTrue(Regex("LivePhoto-[0-9a-f-]+[.]jpg").matches(name))
+                val carrier = app.contentResolver.openInputStream(v1.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
+                assertEquals(v1.operation.output.assets.single().digest.value, sha(carrier))
+                val carrierSource = MemoryBinarySource(Bytes(carrier), SourceId("android-gallery-readback-v1"))
+                try {
+                    assertEquals(ProtocolIds.GoogleV1, success(app.core.detect(ReadRequest(SourceSet.Single(carrierSource), context))).primaryProtocol?.protocol)
+                } finally { carrierSource.close() }
+            } finally { app.contentResolver.delete(v1.uri, null, null) }
+            assertEquals(priorStages, stages())
             assertContentEquals(imageBytes, imageFile.readBytes())
             assertContentEquals(videoBytes, videoFile.readBytes())
         } finally {
