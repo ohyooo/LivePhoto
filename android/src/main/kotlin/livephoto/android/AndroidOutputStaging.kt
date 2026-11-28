@@ -18,7 +18,7 @@ internal class AndroidOutputStaging(private val directory: File, private val tok
             return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.WriteProtocol,
                 "Android creation requires a single private JPEG"))
         return storage(Stage.WriteProtocol) {
-            val file = File.createTempFile("livephoto-output-", ".stage", directory)
+            val file = AndroidPrivateCache.newOutput(directory)
             try {
                 PrivateFile(file, RandomAccessFile(file, "rw"), SourceId("android-output:$token:${id.value}"))
                     .also { staged = it }

@@ -30,8 +30,8 @@ function Test-Reports([string]$Directory, [int]$Expected) {
     return $count
 }
 $coreHostTests = Test-Reports 'shared/build/test-results/testAndroidHostTest' 818
-$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 59
-$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 59
+$hostTests = Test-Reports 'android/build/test-results/testDebugUnitTest' 60
+$releaseHostTests = Test-Reports 'android/build/test-results/testReleaseUnitTest' 60
 $deviceTests = Test-Reports 'android/build/outputs/androidTest-results/connected' 43
 $compile = Get-Content 'ci-output/android-build.log' -Raw
 $device = Get-Content 'ci-output/android-device.log' -Raw
@@ -106,6 +106,9 @@ if ($install.commit -ne $env:GITHUB_SHA -or "$($install.run)" -ne $env:GITHUB_RU
     @($install.installs | Where-Object { -not $_.upgradedWithoutUninstall -or -not $_.launched }).Count -ne 0) {
     throw 'Both same-signature package upgrade/launch proofs are required.'
 }
+if ($install.privateCacheRecoveredAfterRestart -ne $true) {
+    throw 'Private cache recovery after application restart is not proven.'
+}
 $summary = [ordered]@{
     commit = $env:GITHUB_SHA
     run = $env:GITHUB_RUN_ID
@@ -117,6 +120,7 @@ $summary = [ordered]@{
     hostTests = $hostTests
     releaseHostTests = $releaseHostTests
     deviceTests = $deviceTests
+    privateCacheRecoveredAfterRestart = $install.privateCacheRecoveredAfterRestart
     skipped = 0
     failures = 0
     errors = 0

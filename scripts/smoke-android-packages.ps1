@@ -41,5 +41,22 @@ foreach ($variant in @('release', 'debug')) {
     & $adb shell rm $remote
     if ($LASTEXITCODE -ne 0) { throw 'Cannot remove test-owned emulator screenshot.' }
 }
+# Seed test-only files in the debuggable application's private cache, then
+# restart the same install. Force-stop leaves private files in place.
+function Invoke-PrivateCacheCheck([string]$Command, [string]$Failure) {
+    & $adb shell "run-as $package sh -c '$Command'"
+    if ($LASTEXITCODE -ne 0) { throw $Failure }
+}
+$snapshot = 'cache/livephoto-input-370b7f8b-d796-45fe-9642-114bc23169be.snapshot'
+$stage = 'cache/livephoto-output-7205162290387421361.stage'
+$control = 'cache/livephoto-restart-test-control'
+Invoke-PrivateCacheCheck "mkdir -p cache && echo snapshot > $snapshot && echo stage > $stage && echo keep > $control" 'Cannot seed private recovery fixtures.'
+& $adb shell am force-stop $package
+if ($LASTEXITCODE -ne 0) { throw 'Cannot stop LivePhoto for private cache recovery.' }
+Invoke-PrivateCacheCheck "test -s $snapshot && test -s $stage && test -s $control" 'Recovery fixtures did not survive force-stop.'
+$restart = (& $adb shell am start -W -n "$package/livephoto.android.MainActivity" 2>&1) -join "`n"
+if ($LASTEXITCODE -ne 0 -or $restart -notmatch '(?m)^Status: ok\s*$') { throw 'LivePhoto restart failed.' }
+Invoke-PrivateCacheCheck "test ! -e $snapshot && test ! -e $stage && grep -qx keep $control && rm $control" 'Cold start did not reclaim only the owned recovery fixtures.'
+$evidence.privateCacheRecoveredAfterRestart = $true
 $evidence | ConvertTo-Json -Depth 5 | Set-Content 'ci-output/android-install-evidence.json' -Encoding utf8
 Write-Host 'ANDROID_INSTALL_EVIDENCE=SUCCESS debug-to-release-to-debug'

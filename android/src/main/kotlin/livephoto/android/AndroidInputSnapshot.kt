@@ -102,7 +102,7 @@ internal class AndroidInputSnapshot private constructor(
             currentCoroutineContext().ensureActive()
             val digest = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(minOf(BLOCK_BYTES, limit.coerceAtLeast(1)))
-            val file = File.createTempFile("livephoto-input-", ".snapshot", directory)
+            val file = AndroidPrivateCache.newInput(directory)
             var total = 0
             var transferred = false
             try {
