@@ -182,11 +182,14 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
             }
         }
     } }
-    private suspend fun save(bytes: Bytes, digest: Digest, name: String, context: Context): Boolean {
+    private suspend fun save(bytes: Bytes, digest: Digest, name: String, context: Context): Boolean =
+        saveTo(bytes, digest, name, context) != null
+
+    private suspend fun saveTo(bytes: Bytes, digest: Digest, name: String, context: Context): Path? {
         if (context.cancellation?.isCancelled() == true) throw DesktopCoreFailure(CoreError(IssueCode("CANCELLED"), Stage.Publish, "Save cancelled"))
-        val target = selectFile(name) ?: return false
+        val target = selectFile(name) ?: return null
         publishFile(target, bytes, digest) { context.cancellation?.isCancelled() == true }
-        return true
+        return target
     }
     private fun <T> saveCancelled(): CoreResult<T> = failed("CANCELLED", Stage.Publish, "Save cancelled; no output file was created")
     override suspend fun create(image: String, video: String, target: ProtocolSelector): CoreResult<CreatedPhoto> = sources(listOf(image, video)) { core, input, context ->
@@ -201,7 +204,9 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
                 is CoreResult.Success -> {
                     operation = result.value
                     val asset = result.value.output.assets.single()
-                    if (!save(output.committedAssets().getValue(asset.id), asset.digest, motionPhotoJpegFileName("LivePhoto-${target.protocol.value}", target.protocol), context)) saveCancelled()
+                    val saved = saveTo(output.committedAssets().getValue(asset.id), asset.digest,
+                        motionPhotoJpegFileName("LivePhoto-${target.protocol.value}", target.protocol), context)
+                    if (saved == null) saveCancelled()
                     else {
                         val created = output.committedAssets().getValue(asset.id)
                         val carrier = livephoto.core.memory.MemoryBinarySource(created, SourceId("desktop-result"))
@@ -220,7 +225,9 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
                             // Saving succeeded; an optional preview must never turn that into a failed save.
                             lastResult?.let { release(it.first); release(it.second) }; lastResult = null
                         } finally { carrier.close() }
-                        CoreResult.Success(CreatedPhoto(result.value))
+                        val descriptor = result.value.output
+                        CoreResult.Success(CreatedPhoto(result.value.copy(output = MediaOutput(
+                            listOf(asset.copy(recommendedName = saved.fileName.toString())), descriptor.receipt))))
                     }
                 }
             }

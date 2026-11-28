@@ -35,6 +35,7 @@ private data class InputSnapshot(val image: String?, val video: String?, val pro
 private data class CreationReport(val input: InputSnapshot, val text: String, val failed: Boolean,
     val outputName: String? = null, val cancelled: Boolean = false)
 private val ProfileNames = listOf("OPPO / OnePlus", "Google Motion Photo V2", "Google MicroVideo V1")
+private val GalleryNames = listOf("OPPO / OnePlus 相册", "Google 相册", "支持旧版格式的接收相册")
 
 @Composable
 public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = false, onToggleTheme: (() -> Unit)? = null,
@@ -253,11 +254,15 @@ public fun LivePhotoScreen(platform: LivePhotoUiPlatform, darkTheme: Boolean = f
                 result?.let { report ->
                     val stale = report.input != InputSnapshot(image, video, profile)
                     SectionCard(if (stale) "上次结果 · 输入已变化" else "本次结果", Modifier.bringIntoViewRequester(resultFocus).testTag("result-card")) {
-                        Text(if (report.cancelled) "生成已取消" else if (report.failed) "生成失败" else "已生成", color = if (report.cancelled) MaterialTheme.colorScheme.onSurfaceVariant else if (report.failed) MaterialTheme.colorScheme.error
+                        val created = !report.failed && !report.cancelled
+                        Text(if (report.cancelled) "生成已取消" else if (report.failed) "生成失败" else platform.creationResultStatus,
+                            Modifier.testTag("result-publication"), color = if (report.cancelled) MaterialTheme.colorScheme.onSurfaceVariant else if (report.failed) MaterialTheme.colorScheme.error
                             else if (darkTheme) Color(0xff4ade80) else Color(0xff15803d))
-                        report.outputName?.let { Text(it, Modifier.testTag("result-file-name")) }
+                        if (created) report.outputName?.let { Text(it, Modifier.testTag("result-file-name")) }
                         Text("图片：${report.input.image?.let { if (it == image) imageInfo?.displayName else null } ?: "本次操作所选图片"}；目标：${ProfileNames[report.input.profile]}", style = MaterialTheme.typography.bodySmall)
-                        if (!report.failed && !report.cancelled && platform.hasResultPreview) {
+                        if (created) Text("用${GalleryNames[report.input.profile]}打开${platform.creationResultFileSource}试播。",
+                            Modifier.testTag("result-gallery-next"), style = MaterialTheme.typography.bodySmall)
+                        if (created && platform.hasResultPreview) {
                             platform.ResultPreview(Modifier.fillMaxWidth().height(180.dp), scrolling)
                             Text("按住预览，松开回封面；空格或回车同样可用。仅应用内模拟，不代表手机相册兼容。", style = MaterialTheme.typography.bodySmall)
                         }

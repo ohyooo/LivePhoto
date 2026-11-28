@@ -30,7 +30,8 @@ class DesktopStorageTest {
                 "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-write_btrt", "0", video.toString())
             DesktopPlatform { _, name -> offered.add(name); selected.removeFirst() }.use { host ->
                 val target = ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("jpeg"))
-                assertIs<CoreResult.Success<*>>(host.create(host.register(image), host.register(video), target))
+                val created = assertIs<CoreResult.Success<livephoto.ui.CreatedPhoto>>(host.create(host.register(image), host.register(video), target))
+                assertEquals(customPhoto.fileName.toString(), created.value.operation.output.assets.single().recommendedName)
                 assertTrue(Files.size(customPhoto) > Files.size(video))
                 assertIs<CoreResult.Success<*>>(host.convertPhoto(host.register(customPhoto), target))
                 assertEquals(listOf<String?>("LivePhoto-google.motionphoto.v2_MP.jpg", "LivePhoto-converted_MP.jpg"), offered.toList())

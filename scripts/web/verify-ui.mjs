@@ -175,7 +175,9 @@ try {
       await click('生成动态照片');await runtimeSeen;
       await click('取消处理');await text(/已取消处理/).waitFor({state:'attached'});
       const report=await driver.report(page.locator('#status'));
-      if(downloads!==beforeLoading||!report.includes('CANCELLED'))throw Error('Runtime loading cancellation published output or lost its report');
+      if(downloads!==beforeLoading||!report.includes('CANCELLED')||
+        await page.locator('#result-gallery-next').count()!==0||await page.locator('#result-file-name').count()!==0)
+        throw Error('Runtime loading cancellation published output, offered a success handoff or lost its report');
     } finally {releaseRuntime();}
     for(const [target,name] of [['oplus.olive',/OPPO \/ OnePlus/],['google.motionphoto.v2',/Google Motion Photo V2/],['google.microvideo.v1',/Google MicroVideo V1/]]) {
       await driver.selectProtocol(name.source.includes('OPPO')?'OPPO / OnePlus':name.source.includes('V2')?'Google Motion Photo V2':'Google MicroVideo V1');
@@ -198,6 +200,11 @@ try {
       const expectedName = `LivePhoto-${target}${target==='google.motionphoto.v2'?'_MP':''}.jpg`;
       await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
       await page.locator('#result-file-name').filter({hasText:expectedName}).waitFor({state:'attached'});
+      const gallery = {'oplus.olive':'OPPO / OnePlus 相册','google.motionphoto.v2':'Google 相册',
+        'google.microvideo.v1':'支持旧版格式的接收相册'}[target];
+      if(await page.locator('#result-publication').textContent()!=='下载已发起'||
+        await page.locator('#result-gallery-next').textContent()!==`用${gallery}打开下载记录中的原文件试播。`)
+        throw Error('Result did not distinguish starting the download from verifying playback in the correct gallery');
       check(label+':'+target+'-download-valid-exact-video',audit.valid&&audit.digest===videoHash&&download.suggestedFilename()===expectedName&&
         await page.locator('#result-file-name').textContent()===expectedName&&
         io.slices>0&&io.maxSlice<=64*1024&&io.fullReads===0);
@@ -206,6 +213,12 @@ try {
       await page.waitForTimeout(500);
     }
     await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
+    await driver.selectProtocol('OPPO / OnePlus');
+    await text('上次结果 · 输入已变化').waitFor({state:'attached'});
+    if(!(await page.locator('#result-gallery-next').textContent()).includes('支持旧版格式的接收相册')||
+      await page.locator('#result-file-name').textContent()!=='LivePhoto-google.microvideo.v1.jpg')
+      throw Error('An old download was relabeled after selecting another target');
+    await driver.selectProtocol('Google MicroVideo V1');
     const notCopied=await page.evaluate(()=>navigator.clipboard.readText())==='not-automatically-copied';
     await driver.click('复制报告');await text('已复制').waitFor({state:'attached'});
     const copied=await page.evaluate(()=>navigator.clipboard.readText());
@@ -227,7 +240,8 @@ try {
     await choose('重新选择视频',{name:'broken.mp4',mimeType:'video/mp4',buffer:Buffer.from([0,1,2,3])});
     await click('生成动态照片');
     await text(/错误码：/).waitFor({state:'visible'});
-    const malformedVisible=await text(/生成失败/).count()>0;
+    const malformedVisible=await text(/生成失败/).count()>0&&
+      await page.locator('#result-gallery-next').count()===0&&await page.locator('#result-file-name').count()===0;
     let ioFailuresNoOutput=true;
     for(const kind of ['image','video']) {
       await choose('重新选择图片',kind==='image'?{name:'unreadable.jpg',mimeType:'image/jpeg',buffer:await readFile(imagePath)}:imagePath);

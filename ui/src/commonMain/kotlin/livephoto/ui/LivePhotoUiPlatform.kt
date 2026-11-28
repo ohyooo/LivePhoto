@@ -28,6 +28,8 @@ public data class CreatedPhoto(val operation: OperationResult)
 public interface LivePhotoUiPlatform {
     public val outputDescription: String
     public val successMessage: String get() = "已保存到 $outputDescription。"
+    public val creationResultStatus: String get() = "已保存"
+    public val creationResultFileSource: String get() = "保存的原文件"
     public val supportsVideoEditing: Boolean get() = false
     public val supportsAnalysis: Boolean get() = false
     /** Presentation only; the host must enforce its own read-only limit. */

@@ -102,6 +102,8 @@ private class BrowserPlatform : LivePhotoUiPlatform {
     override val videoExportSuccessMessage = "已提取并发起视频下载，请检查下载记录。"
     override val hasResultPreview: Boolean get() = lastResult != null
     override val successMessage = "已生成并发起浏览器下载，请检查下载记录。"
+    override val creationResultStatus = "下载已发起"
+    override val creationResultFileSource = "下载记录中的原文件"
     override val supportsClipboard: Boolean get() = browserClipboardAvailable()
     override suspend fun copyText(text: String): Boolean { browserCopyText(text).await(); return true }
     override fun release(reference: String) {
