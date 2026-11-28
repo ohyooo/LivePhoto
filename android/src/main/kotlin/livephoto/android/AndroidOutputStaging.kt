@@ -3,6 +3,7 @@ package livephoto.android
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import livephoto.core.*
+import livephoto.ui.UiOutput
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
@@ -16,7 +17,7 @@ internal class AndroidOutputStaging(private val directory: File, private val tok
         currentCoroutineContext().ensureActive()
         if (staged != null || spec.mime != "image/jpeg")
             return CoreResult.Failure(CoreError(IssueCode("INVALID_ARGUMENT"), Stage.WriteProtocol,
-                "Android creation requires a single private JPEG"))
+                "Android staging requires a single private JPEG"))
         return storage(Stage.WriteProtocol) {
             val file = AndroidPrivateCache.newOutput(directory)
             try {
@@ -28,6 +29,28 @@ internal class AndroidOutputStaging(private val directory: File, private val tok
             }
         }
     }
+
+    internal class CommittedJpeg(
+        private val transaction: StagedOutputTransaction,
+        private val staging: AndroidOutputStaging,
+    ) : UiOutput<AssetId>, OutputTransaction by transaction {
+        override fun asset(id: AssetId): AssetId {
+            check(transaction.isCommitted(id)) { "Private output was not committed" }
+            return id
+        }
+
+        suspend fun openAsset(id: AssetId): CoreResult<BinarySource> {
+            currentCoroutineContext().ensureActive()
+            val file = staging.staged
+            if (!transaction.isCommitted(id) || file == null) return CoreResult.Failure(
+                CoreError(IssueCode("IO_READ_FAILED"), Stage.Publish, "Committed private JPEG is unavailable"),
+            )
+            return file.openSource()
+        }
+    }
+
+    fun uiOutput(context: Context, operation: String): CommittedJpeg =
+        CommittedJpeg(StagedOutputTransaction(context, operation, this), this)
 
     override fun close() { staged?.close(); staged = null }
 

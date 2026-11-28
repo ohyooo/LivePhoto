@@ -277,6 +277,10 @@ class AndroidIntegrationTest {
         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), arrayOf(MediaStore.MediaColumns._ID),
         "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?", arrayOf("LivePhoto-converted-%"), null)!!.use { it.count }
 
+    private fun privateOutputStages(): Set<String> = app.cacheDir.listFiles()!!.filter {
+        it.name.startsWith("livephoto-output-") && it.name.endsWith(".stage")
+    }.map { it.name }.toSet()
+
     @Test fun controllerConvertsLimitedMatrixWithExactCopiesAndSafeRefusals() = runBlocking {
         val imageBytes = conversionImage()
         val videoBytes = fractionalAudioVideo() // Synthetic protocol/timing, not a decoder/playability claim.
@@ -294,7 +298,9 @@ class AndroidIntegrationTest {
                     file.writeBytes(original)
                     for (target in livephoto.ui.ConversionTarget.entries) {
                         val before = countConvertedPhotos()
+                        val stagesBefore = privateOutputStages()
                         val converted = controller.convertPhoto(Uri.fromFile(file), target.selector)
+                        assertEquals(stagesBefore, privateOutputStages())
                         assertContentEquals(original, file.readBytes())
                         // V1 fits the existing XMP slot without moving EXIF; V2 still cannot.
                         if (sourceTarget == livephoto.ui.ConversionTarget.Oplus && target == livephoto.ui.ConversionTarget.GoogleV2) {
@@ -337,7 +343,9 @@ class AndroidIntegrationTest {
             for (bytes in listOf(conversionImage(), byteArrayOf(0, 1, 2, 3), byteArrayOf(-1, -40, -1, -31, 0, 16, 0, 0))) {
                 file.writeBytes(bytes)
                 val before = countConvertedPhotos()
+                val stagesBefore = privateOutputStages()
                 assertIs<CoreResult.Failure>(AndroidCreateController(app, app.core).convertPhoto(Uri.fromFile(file), livephoto.ui.ConversionTarget.GoogleV2.selector))
+                assertEquals(stagesBefore, privateOutputStages())
                 assertEquals(before, countConvertedPhotos()); assertContentEquals(bytes, file.readBytes())
             }
         } finally { file.delete() }

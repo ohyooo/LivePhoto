@@ -48,13 +48,28 @@ class AndroidCreateController(private val android: AndroidContext, private val c
     }
 
     suspend fun convertPhoto(input: Uri, target: ProtocolSelector): CoreResult<Converted> = withPhotoInput(input) { source, cancellation ->
-        when (val result = livephoto.ui.prepareConvertedPhoto(core, source, target, cancellation)) {
-            is CoreResult.Failure -> result
-            is CoreResult.Success -> {
-                currentCoroutineContext().ensureActive()
-                val prepared = result.value
-                val uri = AndroidPhotoExporter(android.contentResolver).publish(prepared.bytes, motionPhotoJpegFileName("LivePhoto-converted-${UUID.randomUUID()}", prepared.report.target.protocol))
-                CoreResult.Success(Converted(uri, prepared.report))
+        val token = UUID.randomUUID().toString()
+        AndroidOutputStaging(android.cacheDir, token).use { staging ->
+            // The shared helper closes its verification readers; the transaction
+            // retains the frozen file for a separate publication reader.
+            var output: AndroidOutputStaging.CommittedJpeg? = null
+            when (val result = livephoto.ui.prepareConvertedPhoto(core, source, target, cancellation) { context, operation ->
+                staging.uiOutput(context, operation).also { output = it }
+            }) {
+                is CoreResult.Failure -> result
+                is CoreResult.Success -> {
+                    val prepared = result.value
+                    when (val asset = checkNotNull(output).openAsset(prepared.bytes)) {
+                        is CoreResult.Failure -> asset
+                        is CoreResult.Success -> {
+                            val name = motionPhotoJpegFileName("LivePhoto-converted-$token", prepared.report.target.protocol)
+                            try {
+                                val uri = AndroidPhotoExporter(android.contentResolver).publish(asset.value, prepared.report.byteLength, name)
+                                CoreResult.Success(Converted(uri, prepared.report))
+                            } finally { asset.value.close() }
+                        }
+                    }
+                }
             }
         }
     }
