@@ -9,12 +9,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import livephoto.core.*
 import livephoto.core.memory.MemoryOutputTransaction
-import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.UUID
 
-// Provider exceptions can include the complete private URI. Do not show that in the report.
-internal class SelectedDocumentUnavailableException : IOException("已选文件无法读取。请检查文件是否已移动或授权是否失效，并重新选择。")
+private class SnapshotStorageUnavailableException : IOException("无法在应用缓存中准备输入文件，请检查剩余存储空间后重试。")
 
 /** App orchestration only. Protocol policy and serialization remain in the shared Core. */
 class AndroidCreateController(private val android: AndroidContext, private val core: LivePhotoCore) {
@@ -156,8 +154,8 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         AndroidInputSnapshot.copyFrom(android.cacheDir, remaining, SourceId("android-input:${UUID.randomUUID()}")) {
             android.contentResolver.openInputStream(uri) ?: throw SelectedDocumentUnavailableException()
         }
-    } catch (_: SecurityException) { throw SelectedDocumentUnavailableException() }
-    catch (_: FileNotFoundException) { throw SelectedDocumentUnavailableException() }
+    } catch (failure: SelectedDocumentUnavailableException) { throw failure }
+    catch (_: IOException) { throw SnapshotStorageUnavailableException() }
 
     private suspend fun <T> withPhotoInput(
         uri: Uri, limit: Int = MAX_INPUT_BYTES, action: suspend (BinarySource, Cancellation) -> CoreResult<T>,
@@ -170,6 +168,9 @@ class AndroidCreateController(private val android: AndroidContext, private val c
         }
         catch (unavailable: SelectedDocumentUnavailableException) {
             return@withContext CoreResult.Failure(CoreError(IssueCode("INPUT_UNAVAILABLE"), Stage.Read, unavailable.message.orEmpty()))
+        }
+        catch (unavailable: SnapshotStorageUnavailableException) {
+            return@withContext CoreResult.Failure(CoreError(IssueCode("IO_READ_FAILED"), Stage.Read, unavailable.message.orEmpty()))
         }
         try { action(source, Cancellation { job?.isActive == false }) }
         finally { source.close() }

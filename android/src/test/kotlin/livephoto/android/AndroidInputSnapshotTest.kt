@@ -18,6 +18,8 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -97,7 +99,7 @@ class AndroidInputSnapshotTest {
 
     @Test fun noProgressAndProviderOpenFailureLeaveNoSnapshot() = runBlocking {
         withDirectory { directory ->
-            assertFailsWith<IOException> {
+            assertFailsWith<SelectedDocumentUnavailableException> {
                 AndroidInputSnapshot.copyFrom(directory, 16, SourceId("stalled")) {
                     object : InputStream() {
                         override fun read(): Int = error("Only buffered reads expected")
@@ -105,10 +107,45 @@ class AndroidInputSnapshotTest {
                     }
                 }
             }
-            assertFailsWith<IOException> {
+            assertFailsWith<SelectedDocumentUnavailableException> {
                 AndroidInputSnapshot.copyFrom(directory, 16, SourceId("unavailable")) { throw IOException("Cannot open") }
             }
             assertTrue(directory.listFiles()!!.isEmpty())
+        }
+    }
+
+    @Test fun interruptedProviderReadOrCloseIsSanitizedAndDeletesPartialSnapshot() = runBlocking {
+        withDirectory { directory ->
+            val privateUri = "content://fixture/private/full-document-path"
+            for (failOnClose in listOf(false, true)) {
+                var reads = 0
+                var closed = false
+                val failure = assertFailsWith<SelectedDocumentUnavailableException> {
+                    AndroidInputSnapshot.copyFrom(directory, 8, SourceId("provider-interrupted")) {
+                        object : InputStream() {
+                            override fun read(): Int = error("Only buffered reads expected")
+                            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                                when (++reads) {
+                                    1 -> { b[off] = 1; 1 }
+                                    else -> {
+                                        assertEquals(1L, directory.listFiles()!!.single().length())
+                                        if (failOnClose) -1 else throw IOException(privateUri)
+                                    }
+                                }
+                            override fun close() {
+                                closed = true
+                                if (failOnClose) throw IOException(privateUri)
+                            }
+                        }
+                    }
+                }
+                assertTrue(closed)
+                assertEquals(2, reads)
+                assertNull(failure.cause)
+                assertFalse(privateUri in failure.toString())
+                assertTrue("重新选择" in failure.message.orEmpty())
+                assertTrue(directory.listFiles()!!.isEmpty())
+            }
         }
     }
 

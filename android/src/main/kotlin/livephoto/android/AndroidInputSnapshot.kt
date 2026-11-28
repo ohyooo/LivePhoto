@@ -1,5 +1,6 @@
 package livephoto.android
 
+import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -19,6 +20,24 @@ import livephoto.core.SourceId
 import livephoto.core.Stage
 
 internal class InputBudgetExceededException : IllegalArgumentException("Input byte budget exceeded")
+
+// A provider may include its private URI or server path in the exception text.
+internal class SelectedDocumentUnavailableException : IOException(
+    "已选文件无法读取。请检查文件是否已移动或授权是否失效，并重新选择。",
+)
+
+private inline fun <T> providerAccess(operation: () -> T): T = try { operation() }
+catch (_: IOException) { throw SelectedDocumentUnavailableException() }
+catch (_: SecurityException) { throw SelectedDocumentUnavailableException() }
+
+private class SnapshotProviderInput(private val input: InputStream) : Closeable {
+    fun read(buffer: ByteArray, request: Int): Int = providerAccess {
+        val count = input.read(buffer, 0, request)
+        if (count != -1 && count !in 1..request) throw SelectedDocumentUnavailableException()
+        count
+    }
+    override fun close() = providerAccess { input.close() }
+}
 
 /**
  * The picker may return a provider pipe or a file that changes after selection. Copy at the
@@ -87,16 +106,15 @@ internal class AndroidInputSnapshot private constructor(
             var total = 0
             var transferred = false
             try {
-                openInput().use { input ->
+                SnapshotProviderInput(providerAccess(openInput)).use { input ->
                     file.outputStream().use { output ->
                         while (true) {
                             currentCoroutineContext().ensureActive()
                             // One look-ahead byte distinguishes exact-limit EOF from overflow.
                             val request = minOf(buffer.size.toLong(), limit.toLong() - total + 1).toInt()
-                            val count = input.read(buffer, 0, request)
+                            val count = input.read(buffer, request)
                             currentCoroutineContext().ensureActive()
                             if (count == -1) break
-                            if (count !in 1..request) throw IOException("Selected input stream made no progress")
                             if (count > limit - total) throw InputBudgetExceededException()
                             output.write(buffer, 0, count)
                             digest.update(buffer, 0, count)
@@ -113,6 +131,10 @@ internal class AndroidInputSnapshot private constructor(
                 val snapshot = AndroidInputSnapshot(file, RandomAccessFile(file, "r"), identity, total)
                 transferred = true
                 return snapshot
+            } catch (failure: IOException) {
+                // Cancellation still wins if the provider failed while this copy was being cancelled.
+                currentCoroutineContext().ensureActive()
+                throw failure
             } finally {
                 if (!transferred) file.delete()
             }
