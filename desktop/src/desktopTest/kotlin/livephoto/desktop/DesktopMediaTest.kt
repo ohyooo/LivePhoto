@@ -32,7 +32,7 @@ class DesktopMediaTest {
             try { assertTrue(process.waitFor(30, TimeUnit.SECONDS)); assertEquals(0, process.exitValue()) }
             finally { if (process.isAlive) process.destroyForcibly() }
         }
-        fun generateVideo(path: Path, prefixFilter: String = "") = execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", "2", "-vf", "${prefixFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", path.toString())
+        fun generateVideo(path: Path, seconds: Int = 2, prefixFilter: String = "") = execute("-f", "lavfi", "-i", "color=c=red:size=320x180:rate=25", "-t", seconds.toString(), "-vf", "${prefixFilter}setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709", "-c:v", "libx264", "-g", "1", "-bf", "0", "-pix_fmt", "yuv420p", "-color_range", "tv", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-map_metadata", "-1", "-metadata:s:v", "encoder=", "-fflags", "+bitexact", "-flags:v", "+bitexact", path.toString())
         var platform: DesktopPlatform? = null
         var editor: DesktopVideoEditor? = null
         var window: JFrame? = null
@@ -67,7 +67,9 @@ class DesktopMediaTest {
             Files.delete(video)
             // OpenJFX's macOS backend seeks in whole seconds. The same fixture on
             // every host must show a green frame around exactly one second.
-            generateVideo(playbackVideo, "drawbox=color=lime:t=fill:enable='between(t,0.75,1.25)',")
+            // Keep playback alive throughout the first screenshot window, even on a slow runner.
+            val playbackSeconds = 12
+            generateVideo(playbackVideo, playbackSeconds, "drawbox=color=lime:t=fill:enable='between(t,0.75,1.25)',")
             val playbackDigest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(playbackVideo))
             println("Synthetic H.264 playback SHA-256: ${HexFormat.of().formatHex(playbackDigest)}")
             configureDesktopRendering()
@@ -80,11 +82,10 @@ class DesktopMediaTest {
                 }
             }
             val playback = editor!!
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-            while (!playback.playback.value.ready && playback.playback.value.error == null && System.nanoTime() < deadline) Thread.sleep(50)
+            val readyDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+            while (!playback.playback.value.ready && playback.playback.value.error == null && System.nanoTime() < readyDeadline) Thread.sleep(50)
             assertNull(playback.playback.value.error)
             assertTrue(playback.playback.value.ready, "JavaFX did not load the synthetic H.264 video")
-            playback.setMuted(true); playback.togglePlayback()
             val robot = Robot()
             val bounds = Rectangle(60, 60, 640, 420)
             val report = Path.of("build/reports/desktop-smoke")
@@ -109,7 +110,10 @@ class DesktopMediaTest {
                 } while (true)
                 fail("Did not render $name with a settled playback clock: $matching matching pixels; ${playback.playback.value}")
             }
-            awaitPicture("video-window.png", deadline, { rgb ->
+            playback.setMuted(true)
+            playback.togglePlayback()
+            val renderDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            awaitPicture("video-window.png", renderDeadline, { rgb ->
                 (rgb shr 16 and 255) > 160 && (rgb shr 8 and 255) < 80 && (rgb and 255) < 80
             }) { !playback.playback.value.paused }
             assertNull(playback.playback.value.error)
@@ -122,7 +126,7 @@ class DesktopMediaTest {
                 val state = playback.playback.value
                 state.ready && state.paused && !state.seeking && kotlin.math.abs(state.current - 1.0) <= 0.1
             }
-            assertTrue(playback.playback.value.duration in 1.9..2.1)
+            assertTrue(playback.playback.value.duration in (playbackSeconds - 0.1)..(playbackSeconds + 0.1))
             // Close the app host while the real player is still mounted. The editor's
             // Compose disposal must not be required to release native playback.
             assertTrue(playback.canFullscreen)
