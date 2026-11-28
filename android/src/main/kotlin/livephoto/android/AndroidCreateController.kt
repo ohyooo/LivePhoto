@@ -9,6 +9,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import livephoto.core.*
 import livephoto.core.memory.MemoryOutputTransaction
+import livephoto.ui.motionPhotoJpegFileName
 import java.io.IOException
 import java.util.UUID
 
@@ -53,7 +54,7 @@ class AndroidCreateController(private val android: AndroidContext, private val c
             is CoreResult.Success -> {
                 currentCoroutineContext().ensureActive()
                 val prepared = result.value
-                val uri = AndroidPhotoExporter(android.contentResolver).publish(prepared.bytes, "LivePhoto-converted-${UUID.randomUUID()}.jpg")
+                val uri = AndroidPhotoExporter(android.contentResolver).publish(prepared.bytes, motionPhotoJpegFileName("LivePhoto-converted-${UUID.randomUUID()}", prepared.report.target.protocol))
                 CoreResult.Success(Converted(uri, prepared.report))
             }
         }
@@ -131,15 +132,16 @@ class AndroidCreateController(private val android: AndroidContext, private val c
                             check(it.mime == "image/jpeg") { "This initial Android exporter supports one JPEG asset only" }
                         }
                     }
+                    val name = motionPhotoJpegFileName("LivePhoto-$token", target.protocol)
                     val uri = androidOperation("save-output", "output") {
                         currentCoroutineContext().ensureActive()
                         val bytes = output.committedAssets().getValue(asset.id)
-                        AndroidPhotoExporter(android.contentResolver).publish(bytes, "LivePhoto-$token.jpg")
+                        AndroidPhotoExporter(android.contentResolver).publish(bytes, name)
                     }
                     // Return the published URI, not a memory handle closed by this session.
                     // Preserve the original conservative/volatile durability report.
                     val published = result.value.copy(output = MediaOutput(
-                        listOf(asset.copy(readableSource = null, accessReference = uri.toString())),
+                        listOf(asset.copy(recommendedName = name, readableSource = null, accessReference = uri.toString())),
                         result.value.output.receipt,
                     ))
                     CoreResult.Success(Created(uri, published))

@@ -319,8 +319,10 @@ class AndroidIntegrationTest {
                                 assertContentEquals(videoBytes, output.committedAssets().getValue(extraction.output.assets.single().id).toByteArray())
                             } finally { extraction?.output?.assets?.forEach { it.readableSource?.close() }; source.close() }
                             app.contentResolver.query(saved.uri, arrayOf(MediaStore.MediaColumns.IS_PENDING, MediaStore.MediaColumns.RELATIVE_PATH,
-                                MediaStore.MediaColumns.MIME_TYPE), null, null, null)!!.use {
+                                MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)!!.use {
                                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Pictures/LivePhoto/", it.getString(1)); assertEquals("image/jpeg", it.getString(2))
+                                assertTrue(it.getString(3).startsWith("LivePhoto-converted-"))
+                                assertEquals(target == livephoto.ui.ConversionTarget.GoogleV2, it.getString(3).endsWith("_MP.jpg"))
                             }
                         } finally { app.contentResolver.delete(saved.uri, null, null) }
                     }
@@ -717,6 +719,8 @@ class AndroidIntegrationTest {
             val selectedInfo = readSelectedMediaInfo(app.contentResolver, result.uri)
             assertEquals(saved.size.toLong(), selectedInfo.sizeBytes)
             assertTrue(assertNotNull(selectedInfo.displayName).endsWith(".jpg"))
+            assertTrue(!selectedInfo.displayName.orEmpty().endsWith("_MP.jpg"))
+            assertEquals(selectedInfo.displayName, result.operation.output.assets.single().recommendedName)
             assertEquals(result.operation.output.assets.single().digest.value, sha(saved))
             val source = MemoryBinarySource(Bytes(saved), SourceId("android-gallery-readback"))
             try {
@@ -725,6 +729,15 @@ class AndroidIntegrationTest {
             app.contentResolver.query(result.uri, arrayOf(MediaStore.Images.Media.IS_PENDING), null, null, null)!!.use {
                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
             }
+            val v2 = success(AndroidCreateController(app, app.core).create(Uri.fromFile(imageFile), Uri.fromFile(videoFile),
+                ProtocolSelector(ProtocolIds.GoogleV2, ProfileId("jpeg"))))
+            try {
+                val name = assertNotNull(readSelectedMediaInfo(app.contentResolver, v2.uri).displayName)
+                assertTrue(Regex("LivePhoto-[0-9a-f-]+_MP[.]jpg").matches(name))
+                assertEquals(name, v2.operation.output.assets.single().recommendedName)
+                val carrier = app.contentResolver.openInputStream(v2.uri)!!.use { readBounded(it, AndroidCreateController.MAX_OUTPUT_BYTES) {} }
+                assertEquals(v2.operation.output.assets.single().digest.value, sha(carrier))
+            } finally { app.contentResolver.delete(v2.uri, null, null) }
             assertContentEquals(imageBytes, imageFile.readBytes())
             assertContentEquals(videoBytes, videoFile.readBytes())
         } finally {

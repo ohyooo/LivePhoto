@@ -327,6 +327,7 @@ private fun OutputSettings(profile: Int, onSelect: (Int) -> Unit, enabled: Boole
         }
         Disclosure("格式说明", "JPEG 输出 · 不自动转码", formats, { formats = !formats }) {
             Text("OPPO / OnePlus 选对应格式；Google 相册先试 Motion Photo V2。MicroVideo V1 用于明确要求旧格式的场景。请在实际接收设备上试播。")
+            Text("Google Motion Photo V2 的文件名会以 _MP.jpg 结尾；重命名时建议保留这个后缀。")
             Text("媒体编辑：原视频可超过 32 MiB，预处理上限 512 MiB / 60 秒，输出 48 MiB；生成前图片与处理后视频合计须小于 32 MiB。符合条件的 AAC 音频始终 copy，保留声道数；目标动态照片协议仍有独立的音频限制。HDR、ICC 和 metadata 的保留以报告为准。")
         }
         Disclosure("更多能力", "规划占位，不会启动任务", planned, { planned = !planned }) {

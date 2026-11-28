@@ -201,7 +201,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
                 is CoreResult.Success -> {
                     operation = result.value
                     val asset = result.value.output.assets.single()
-                    if (!save(output.committedAssets().getValue(asset.id), asset.digest, "LivePhoto-${target.protocol.value}.jpg", context)) saveCancelled()
+                    if (!save(output.committedAssets().getValue(asset.id), asset.digest, motionPhotoJpegFileName("LivePhoto-${target.protocol.value}", target.protocol), context)) saveCancelled()
                     else {
                         val created = output.committedAssets().getValue(asset.id)
                         val carrier = livephoto.core.memory.MemoryBinarySource(created, SourceId("desktop-result"))
@@ -243,7 +243,7 @@ internal class DesktopPlatform(private val picker: suspend (Frame?, String?) -> 
     override suspend fun convertPhoto(reference: String, target: ProtocolSelector): CoreResult<ConvertedPhoto> = sources(listOf(reference)) { core, input, context ->
         when (val result = prepareConvertedPhoto(core, input.single(), target, context.cancellation)) {
             is CoreResult.Failure -> result
-            is CoreResult.Success -> if (save(result.value.bytes, result.value.report.digest, "LivePhoto-converted.jpg", context)) CoreResult.Success(result.value.report) else saveCancelled()
+            is CoreResult.Success -> if (save(result.value.bytes, result.value.report.digest, motionPhotoJpegFileName("LivePhoto-converted", result.value.report.target.protocol), context)) CoreResult.Success(result.value.report) else saveCancelled()
         }
     }
     override suspend fun setPhotoKey(reference: String, requested: Time): CoreResult<PhotoKeyReport> = sources(listOf(reference)) { core, input, context ->

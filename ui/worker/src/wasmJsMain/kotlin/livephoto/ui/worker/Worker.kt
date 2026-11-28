@@ -144,7 +144,7 @@ private suspend fun execute(request: Request, disk: DiskSession): Reply {
             "Convert" -> when (val result = prepareConvertedPhoto(core, input, target, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)
                 is CoreResult.Success -> reply(formatConvertedPhoto(result.value.report, options.publication),
-                    bytes = result.value.bytes, mime = "image/jpeg", name = "LivePhoto-converted-${target.protocol.value}.jpg")
+                    bytes = result.value.bytes, mime = "image/jpeg", name = motionPhotoJpegFileName("LivePhoto-converted-${target.protocol.value}", result.value.report.target.protocol))
             }
             "Key" -> when (val result = preparePhotoKey(core, input, time, outputFactory = disk::output)) {
                 is CoreResult.Failure -> failed(result.error)
@@ -178,7 +178,7 @@ private suspend fun execute(request: Request, disk: DiskSession): Reply {
                         is CoreResult.Success -> {
                             operation = result.value
                             val asset = result.value.output.assets.single()
-                            val name = "LivePhoto-${target.protocol.value}.jpg"
+                            val name = motionPhotoJpegFileName("LivePhoto-${target.protocol.value}", target.protocol)
                             val displayed = result.value.copy(output = MediaOutput(listOf(asset.copy(recommendedName = name)), result.value.output.receipt))
                             reply(formatCreatedPhoto(displayed, options.publication), bytes = output.asset(asset.id), mime = asset.mime, name = name)
                         }

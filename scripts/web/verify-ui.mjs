@@ -195,11 +195,14 @@ try {
         return {valid:detected.protocol===target&&validation.success&&validation.verdict!=='Invalid'&&validation.coverage==='Complete',digest};
       },{data:Array.from(output),target});
       const io=await page.evaluate(()=>globalThis.analysisIo);
-      check(label+':'+target+'-download-valid-exact-video',audit.valid&&audit.digest===videoHash&&download.suggestedFilename().endsWith('.jpg')&&
+      const expectedName = `LivePhoto-${target}${target==='google.motionphoto.v2'?'_MP':''}.jpg`;
+      await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
+      await page.locator('#result-file-name').filter({hasText:expectedName}).waitFor({state:'attached'});
+      check(label+':'+target+'-download-valid-exact-video',audit.valid&&audit.digest===videoHash&&download.suggestedFilename()===expectedName&&
+        await page.locator('#result-file-name').textContent()===expectedName&&
         io.slices>0&&io.maxSlice<=64*1024&&io.fullReads===0);
       // The shared screen animates back to the result card after generation. Do not
       // chase moving canvas targets while that intentional scroll animation is active.
-      await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
       await page.waitForTimeout(500);
     }
     await text(/已生成并发起浏览器下载/).waitFor({state:'visible'});
@@ -525,7 +528,7 @@ try {
           },{data:Array.from(bytes),original:Array.from(output),target});
           check(label+':convert-'+sourceTarget+'-to-'+target,audit.valid&&audit.key&&audit.digest===videoHash&&
             report.includes(createHash('sha256').update(bytes).digest('hex'))&&report.includes('目标：'+target)&&
-            download.suggestedFilename()===`LivePhoto-converted-${target}.jpg`&&downloads===prior+1&&
+            download.suggestedFilename()===`LivePhoto-converted-${target}${target==='google.motionphoto.v2'?'_MP':''}.jpg`&&downloads===prior+1&&
             (sourceTarget===target?bytes.equals(output)&&report.includes('整个载体字节一致'):report.includes('不宣称整个文件字节一致')));
           if(sourceTarget==='google.motionphoto.v2'&&target==='oplus.olive') {
             await page.mouse.move((viewport.width-Math.min(viewport.width,840))/2+8,viewport.height/2);

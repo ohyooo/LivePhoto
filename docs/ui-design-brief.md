@@ -162,7 +162,7 @@ repairLivePhoto(input, { dryRun?, allowedIssueCodes? })
 - 音频永远不编码。裁剪、重封装不编码；H.264 视频编码必须显式操作，不默认转码、不后台自动“修复格式”。
 - 抽帧和视频编码不承诺 HDR、ICC、所有 metadata 的完整保真，报告与拒绝逻辑必须保留。
 - OPPO→Google 的部分 EXIF 布局改写会安全拒绝；OPPO 模糊修复布局会拒绝。不能在 UI 中增加“忽略错误”绕过。
-- 生成成功不代表任何手机相册都能识别，浏览器结果预览也不提供此保证。
+- 生成成功不代表任何手机相册都能识别，浏览器结果预览也不提供此保证。新建或转换为 Google Motion Photo V2 时，自动命名或另存建议默认保留 `_MP.jpg`，符合 [Google 的文件名建议](https://developer.android.com/media/platform/motion-photo-format#filename-pattern)。不改变照片内容、其他目标的默认文件名或用户自选保存路径。
 
 ## 产品优先级：先帮助用户完成一次
 
